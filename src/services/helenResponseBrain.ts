@@ -3,16 +3,17 @@ export type UserMood = 'neutral' | 'frustrated' | 'excited' | 'confused' | 'urge
 export type ResponseIntent = 'answer' | 'clarify' | 'follow-up' | 'acknowledge' | 'suggest'
 
 export interface MemorySnippet {
-  content: string
+  text: string
   timestamp?: Date
   relevance?: number
 }
 
 export interface ResponseContext {
-  userInput: string
+  userMessage: string
   mood: UserMood
   intent: ResponseIntent
   memories?: MemorySnippet[]
+  wantsShortAnswer?: boolean
 }
 
 const MOOD_PATTERNS: Array<{ mood: UserMood; pattern: RegExp }> = [
@@ -92,9 +93,9 @@ function memoryPhrase(memories: MemorySnippet[] = []): string {
   if (memories.length === 0) return ''
   const ranked = [...memories].sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
   const chosen = ranked[0]
-  const excerpt = chosen.content.trim().slice(0, 90)
+  const excerpt = chosen.text.trim().slice(0, 90)
   if (!excerpt) return ''
-  return `You mentioned earlier: "${excerpt}${chosen.content.length > 90 ? '…' : ''}". `
+  return `You mentioned earlier: "${excerpt}${chosen.text.length > 90 ? '…' : ''}". `
 }
 
 function scoreCandidate(candidate: string, context: ResponseContext): number {
@@ -112,12 +113,12 @@ function scoreCandidate(candidate: string, context: ResponseContext): number {
   return score
 }
 
-export function generateHumanLikeResponse(context: ResponseContext): string {
+export function generateHumanLikeResponse(baseResponse: string, context: ResponseContext): string {
   const openerPool = MOOD_OPENERS[context.mood]
   const corePool = INTENT_CORE[context.intent]
   const closerPool = CLOSERS[context.mood]
   const memory = memoryPhrase(context.memories)
-  const prompt = context.userInput.trim().slice(0, 120)
+  const prompt = (baseResponse.length > 0 ? baseResponse : context.userMessage).trim().slice(0, 120)
 
   const openers = openerPool.slice(0, 2)
   const cores = corePool.slice(0, 2)
