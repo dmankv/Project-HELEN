@@ -4,7 +4,7 @@ import {
   detectIntent,
   generateHumanLikeResponse,
 } from '../services/helenResponseBrain'
-import type { MemorySnippet } from '../services/helenResponseBrain'
+import type { MemorySnippet, ResponseIntent } from '../services/helenResponseBrain'
 import learningSystem from '../services/helen_learning_integration'
 import '../styles/HelenInterface.css'
 
@@ -99,6 +99,7 @@ export default function HelenInterface() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
+  const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -134,7 +135,7 @@ export default function HelenInterface() {
     setTimeout(() => {
       const memories = loadMemories()
       const mood = detectMood(text)
-      const intent = detectIntent(text)
+      const intent = detectIntent(text, lastIntent)
       const wantsShortAnswer = text.trim().split(/\s+/).length <= 5
 
       const response = generateHumanLikeResponse(text, {
@@ -143,7 +144,10 @@ export default function HelenInterface() {
         intent,
         memories: memories.length > 0 ? memories : undefined,
         wantsShortAnswer,
+        lastIntent,
       })
+
+      setLastIntent(intent)
 
       // Record the interaction in the learning system
       learningSystem.recordInteraction(text, response, {
@@ -198,6 +202,7 @@ export default function HelenInterface() {
   const handleClear = () => {
     setMessages([])
     setActiveConvId(null)
+    setLastIntent(undefined)
     localStorage.removeItem(MESSAGES_KEY)
     localStorage.removeItem(MEMORIES_KEY)
     learningSystem.clearHistory()
