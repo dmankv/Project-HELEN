@@ -35,9 +35,9 @@ const INTENT_PATTERNS: Array<{ intent: ResponseIntent; pattern: RegExp }> = [
   { intent: 'coding', pattern: /\b(write|code|function|script|program|snippet|debug|fix|implement|class|method|algorithm|loop|array|object|variable|import|export|compile|run|test)\b/i },
   { intent: 'smalltalk', pattern: /\b(how are you|how('s| is) it going|what's new|hows your day|how was your day|feeling today)\b/i },
   { intent: 'clarify', pattern: /\b(what do you mean|clarify|can you explain|not sure|confused|which one)\b/i },
-  { intent: 'follow-up', pattern: /\b(follow up|earlier|before|that one|as mentioned|continue|next)\b/i },
   { intent: 'acknowledge', pattern: /\b(thanks|thank you|got it|makes sense|understood|okay|ok)\b/i },
-  { intent: 'suggest', pattern: /\b(should i|recommend|suggest|best way|what should|options|idea)\b/i }
+  { intent: 'suggest', pattern: /\b(should i|recommend|suggest|best way|what should|options|idea)\b/i },
+  { intent: 'follow-up', pattern: /\b(follow up|earlier|before|that one|as mentioned|continue)\b/i }
 ]
 
 // ---------------------------------------------------------------------------
@@ -68,32 +68,40 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "On it — what language and what should the code do? The more detail you give me, the better I can help.",
   ],
   answer: [
-    "Here's what I know: ",
-    "Good question — ",
-    "Let me take a shot at that: ",
-    "Here's my take: ",
+    "Here's the direct answer: ",
+    'A practical way to approach this is: ',
+    "What matters most is this: ",
+    "To put it simply: ",
+    "The short version is: "
   ],
   clarify: [
-    "Just to make sure I give you the right answer — could you clarify what you mean?",
-    "I want to get this right. Could you give me a little more detail on what you're asking?",
-    "Happy to help, but I want to make sure I'm understanding correctly — can you expand on that a bit?",
+    'Can I ask — what specifically are you trying to understand?',
+    "Just to make sure I'm on the right track — could you clarify what you mean?",
+    "Before I answer fully, could you tell me a bit more about what you're referring to?",
+    "I want to make sure I help with the right thing — what part is unclear?",
+    "Could you give me a little more context so I can answer accurately?"
   ],
   'follow-up': [
-    "Picking up where we left off — ",
-    "Building on that — ",
-    "Right, continuing from earlier: ",
+    'Building on what you said earlier, ',
+    'Following that thread, ',
+    'From your earlier point, ',
+    "Picking up where we left off, ",
+    "On that same note, "
   ],
   acknowledge: [
-    "Glad that helped! Let me know if there's anything else.",
-    "You're welcome! Happy to help anytime.",
-    "Of course — feel free to ask if anything else comes up.",
-    "Anytime! What else can I do for you?",
+    'That makes sense.',
+    'Thanks for sharing that.',
+    "I understand where you're coming from.",
+    "Glad that's clear.",
+    "Got it — good to know."
   ],
   suggest: [
-    "Here's what I'd suggest: ",
-    "My recommendation would be: ",
-    "A solid approach here is: ",
-  ],
+    'A good next step would be to ',
+    'I recommend you ',
+    'One option you can try is to ',
+    "My suggestion would be to ",
+    "You might want to "
+  ]
 }
 
 // ---------------------------------------------------------------------------
@@ -101,21 +109,21 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
 // ---------------------------------------------------------------------------
 
 const MOOD_OPENERS: Record<UserMood, string[]> = {
-  neutral: ['Sure.', 'Absolutely.', 'Okay.', 'Of course.'],
-  frustrated: ["I hear you.", "That sounds frustrating.", "Let's make this easier.", "I get it — let's sort this out."],
+  neutral: ['Sure.', 'Absolutely.', 'Okay.', 'Of course.', 'Happy to help.'],
+  frustrated: ["I hear you.", "That sounds frustrating.", "Let's make this easier.", "Let's fix that.", "I get it — that's annoying."],
   sad: ["I'm sorry to hear that.", "That sounds really hard.", "I'm here if you want to talk.", "That's tough — I'm listening."],
-  excited: ['Love that energy.', "That's exciting!", 'Nice, congrats!', "Awesome — let's go!"],
-  confused: ['No worries.', "Let's break it down.", "You're not alone in that.", "That makes sense to be confused about."],
-  urgent: ["Got it — let's move fast.", "Understood. Here's the quick answer:", "On it."]
+  excited: ['Love that energy.', "That's exciting.", 'Nice momentum.', "Great — let's dive in.", "Awesome, let's go!"],
+  confused: ['No worries.', "Let's break it down.", "You're not alone in that.", "That's a fair thing to wonder about.", "Let me clarify."],
+  urgent: ["Got it — moving fast.", "On it.", "Let's handle this now.", "Right away.", "Quick answer coming."]
 }
 
 const CLOSERS: Record<UserMood, string[]> = {
-  neutral: ['Want me to go deeper?', 'I can expand if you want.', 'Happy to refine this with you.', 'Let me know if you have follow-ups.'],
-  frustrated: ["If you want, I'll keep this step-by-step.", 'We can troubleshoot this together.', "I'll stay with you through it."],
+  neutral: ['Want me to go deeper?', 'I can expand if you want.', 'Happy to refine this with you.', 'Let me know if you need more.', 'Anything else I can help with?'],
+  frustrated: ["If you want, I'll keep this step-by-step.", 'We can troubleshoot this together.', "I'll stay with you through it.", "Take your time — I'm here.", "Let's work through it."],
   sad: ["I'm here whenever you need.", "Take your time — no rush.", "Feel free to talk about anything."],
-  excited: ['Want to push it further?', "Tell me where you'd like to take it next.", "Let's keep going!"],
-  confused: ['If helpful, I can simplify this more.', 'I can give a concrete example.', 'Want me to rephrase this?'],
-  urgent: ['Let me know if you need the next step.', 'I can keep this brief and actionable.', "Just say the word and I'll keep going."]
+  excited: ['Want to push it further?', "We can level this up from here.", "Tell me where you'd like to take it next.", "Let's keep the momentum going!", "What's the next step?"],
+  confused: ['If helpful, I can simplify this more.', 'I can give a concrete example next.', 'Want me to rephrase this in simpler terms?', "Ask away if anything is still unclear.", "We can go step by step if that helps."],
+  urgent: ['If needed, I can give a fastest-path checklist.', 'I can keep this brief and actionable.', "Say the word and I'll prioritize the next step.", "What else do you need right now?", "I'm ready for the next task."]
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +184,7 @@ function pick<T>(arr: T[]): T {
 }
 
 // ---------------------------------------------------------------------------
-// Main response generator (Rec 1, 2, 4)
+// Main response generator
 // ---------------------------------------------------------------------------
 
 export function generateHumanLikeResponse(baseResponse: string, context: ResponseContext): string {
@@ -187,7 +195,6 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   const moodFull = MOOD_FULL_RESPONSES[mood]
   if (moodFull && (intent === 'answer' || intent === 'clarify')) {
     const opener = pick(moodFull)
-    // Rec 4: short requests → no closer; longer ones get a gentle follow-up
     if (wantsShortAnswer) return opener
     return `${opener} ${pick(CLOSERS[mood])}`
   }
@@ -195,9 +202,7 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   // 2. For well-defined intents that have complete canned answers, use them.
   const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify']
   if (standAloneIntents.includes(intent)) {
-    const response = pick(CANNED_ANSWERS[intent])
-    // Acknowledge and clarify are already complete — return as-is
-    return response
+    return pick(CANNED_ANSWERS[intent])
   }
 
   // 3. For coding intent: use canned opener only (asks user for clarification
@@ -206,24 +211,68 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
     return pick(CANNED_ANSWERS.coding)
   }
 
-  // 4. For answer / suggest / follow-up: build a composed response with the
-  //    content coming from the canned prefix + the actual user message
-  //    (best-effort until a real knowledge backend exists), plus mood coloring.
+  // 4. Guard against empty content
+  const rawContent = baseResponse.trim() || context.userMessage.trim()
+  const openerPool = MOOD_OPENERS[mood]
+  const closerPool = CLOSERS[mood]
   const memory = memoryPhrase(memories)
-  const moodOpener = pick(MOOD_OPENERS[mood])
-  const corePrefix = pick(CANNED_ANSWERS[intent] ?? CANNED_ANSWERS.answer)
 
-  // Truncate echo only for answer/suggest/follow-up where we still need user
-  // content as a reference point.
-  const echo = baseResponse.trim() || context.userMessage.trim()
-
-  // Rec 4: for short requests, skip closer; for longer ones, add it.
-  if (wantsShortAnswer) {
-    const parts = [moodOpener, memory + corePrefix + echo].filter(Boolean)
-    return parts.join(' ').replace(/\s+/g, ' ').trim()
+  if (!rawContent) {
+    return `${pick(openerPool)} ${pick(closerPool)}`.replace(/\s+/g, ' ').trim()
   }
 
-  const closer = pick(CLOSERS[mood])
-  const parts = [moodOpener, memory + corePrefix + echo + '.', closer].filter(Boolean)
-  return parts.join(' ').replace(/\s+/g, ' ').trim()
+  // 5. For answer / suggest / follow-up: build a composed response using a
+  //    topic phrase derived from the message (not a verbatim quote), with mood coloring.
+  const topic = buildTopicPhrase(rawContent, context)
+
+  // Shuffle pools so different entries are selected on every call
+  const shuffled = <T,>(arr: T[]): T[] => [...arr].sort(() => Math.random() - 0.5)
+  const candidates: string[] = []
+  const openers = shuffled(openerPool).slice(0, 3)
+  const cores = shuffled(CANNED_ANSWERS[intent] ?? CANNED_ANSWERS.answer).slice(0, 3)
+  const closers = shuffled(closerPool).slice(0, 3)
+
+  for (const opener of openers) {
+    for (const core of cores) {
+      for (const closer of closers) {
+        const candidate = `${opener} ${memory}${core}${topic}. ${closer}`
+          .replace(/\s+/g, ' ')
+          .trim()
+        candidates.push(candidate)
+      }
+    }
+  }
+
+  if (wantsShortAnswer && candidates.length > 0) {
+    return `${pick(openers)} ${memory}${pick(cores)}${topic}.`.replace(/\s+/g, ' ').trim()
+  }
+
+  return candidates[Math.floor(Math.random() * candidates.length)] ?? rawContent
+}
+
+/**
+ * Builds a short, readable topic phrase from the user message instead of
+ * quoting it verbatim. Extracts key nouns/verbs from the message.
+ */
+function buildTopicPhrase(message: string, _context: ResponseContext): string {
+  const words = message.trim().split(/\s+/)
+
+  // Short message (≤6 words): rephrase naturally
+  if (words.length <= 6) {
+    return message.trim()
+  }
+
+  // Longer message: extract a meaningful short phrase, skipping filler words
+  const FILLER = /^(i|can|could|please|write|tell|show|help|me|you|a|an|the|this|that|it|is|are|was|be|do|does|did|my|your)$/i
+  const meaningful = words.filter(w => !FILLER.test(w))
+  const phrase = meaningful.slice(0, 8).join(' ')
+
+  // Trim to a clean phrase without trailing punctuation
+  const trimmed = phrase.replace(/[.,!?;:]+$/, '').trim()
+
+  // If still very long, cut at 60 chars
+  if (trimmed.length > 60) {
+    return trimmed.slice(0, 57) + '…'
+  }
+  return trimmed || message.trim().slice(0, 60)
 }
