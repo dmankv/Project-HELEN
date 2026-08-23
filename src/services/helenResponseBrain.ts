@@ -1,7 +1,7 @@
 export type UserMood = 'neutral' | 'frustrated' | 'excited' | 'confused' | 'urgent' | 'sad'
 
 export type ResponseIntent = 'answer' | 'clarify' | 'follow-up' | 'acknowledge' | 'suggest'
-  | 'greeting' | 'identity' | 'coding' | 'smalltalk'
+  | 'greeting' | 'identity' | 'coding' | 'coding-followup' | 'smalltalk' | 'humor' | 'refusal'
 
 export interface MemorySnippet {
   text: string
@@ -15,6 +15,7 @@ export interface ResponseContext {
   intent: ResponseIntent
   memories?: MemorySnippet[]
   wantsShortAnswer?: boolean
+  lastIntent?: ResponseIntent
 }
 
 // ---------------------------------------------------------------------------
@@ -23,15 +24,22 @@ export interface ResponseContext {
 
 const MOOD_PATTERNS: Array<{ mood: UserMood; pattern: RegExp }> = [
   { mood: 'urgent', pattern: /\b(urgent|asap|immediately|right now|quickly|deadline|emergency)\b/i },
-  { mood: 'frustrated', pattern: /\b(frustrated|annoyed|upset|angry|stuck|hate|broken|not working)\b/i },
-  { mood: 'sad', pattern: /\b(sad|unhappy|down|depressed|lonely|heartbroken|crying|miserable|grief)\b/i },
-  { mood: 'confused', pattern: /\b(confused|unsure|not sure|don't understand|dont understand|lost|unclear)\b/i },
-  { mood: 'excited', pattern: /\b(excited|awesome|great|amazing|love|fantastic|yay)\b/i }
+  {
+    mood: 'frustrated',
+    pattern: /\b(frustrated|annoyed|upset|angry|stuck|hate|broken|not working|nothing works|doesn'?t work|so dumb|losing my mind|can'?t take it|drives? me (crazy|nuts|mad)|why (won'?t|doesn'?t|isn'?t)|ugh|argh|wtf)\b/i
+  },
+  {
+    mood: 'sad',
+    pattern: /\b(sad|unhappy|down|depressed|lonely|heartbroken|crying|miserable|grief|feel(ing)? (low|bad|awful|terrible|horrible|empty|hopeless)|not okay|not ok|struggling|rough day|hard day|hard time|hurts?|in pain)\b/i
+  },
+  { mood: 'confused', pattern: /\b(confused|unsure|not sure|don'?t understand|dont understand|lost|unclear|what does that mean|makes no sense)\b/i },
+  { mood: 'excited', pattern: /\b(excited|awesome|great|amazing|love|fantastic|yay|can'?t wait|so good|so cool|thrilled|pumped|stoked)\b/i }
 ]
 
 const INTENT_PATTERNS: Array<{ intent: ResponseIntent; pattern: RegExp }> = [
   { intent: 'greeting', pattern: /^(hey|hi|hello|howdy|yo|sup|hiya|good morning|good afternoon|good evening|what's up|whats up)\b/i },
   { intent: 'identity', pattern: /\b(who are you|what are you|are you (a |an )?(ai|bot|robot|human|person)|tell me about yourself|introduce yourself)\b/i },
+  { intent: 'humor', pattern: /\b(joke|funny|make me (laugh|smile)|tell me something (funny|hilarious)|lol|haha|hehe|rofl|lmao|😂|😄|tease|banter|witty|pun)\b/i },
   { intent: 'coding', pattern: /\b(write|code|function|script|program|snippet|debug|fix|implement|class|method|algorithm|loop|array|object|variable|import|export|compile|run|test)\b/i },
   { intent: 'smalltalk', pattern: /\b(how are you|how('s| is) it going|what's new|hows your day|how was your day|feeling today)\b/i },
   { intent: 'clarify', pattern: /\b(what do you mean|clarify|can you explain|not sure|confused|which one)\b/i },
@@ -62,17 +70,36 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "Not bad at all! I'm here and ready to help. How are you doing?",
     "Pretty good, thanks for asking! What about you?",
   ],
+  humor: [
+    "Why don't scientists trust atoms? Because they make up everything. 😄 What else can I do for you?",
+    "I told a joke about UDP once… I'm not sure if you got it. 😏",
+    "Two fish swim into a wall. One says: 'Dam.' 🐟 What's on your mind?",
+    "Why do programmers prefer dark mode? Because light attracts bugs. 🐛",
+    "I'd tell you a construction joke, but I'm still working on it. What do you need?",
+    "Parallel lines have so much in common — it's a shame they'll never meet. Anyway, what can I help with?",
+  ],
   coding: [
     "Sure, I can help with that. Could you give me a bit more detail — what language, and what should it do exactly?",
     "Happy to help with code. What language are you working in, and what's the goal?",
     "On it — what language and what should the code do? The more detail you give me, the better I can help.",
   ],
+  'coding-followup': [
+    "Got it! Here's a starting point based on what you described — let me know if you want me to adjust anything.",
+    "Perfect, that gives me what I need. Let's tackle this step by step — what's the first piece you want to work on?",
+    "Great, I have the context now. Walk me through the specific part that's giving you trouble and we'll work through it together.",
+  ],
   answer: [
-    "Here's the direct answer: ",
-    'A practical way to approach this is: ',
-    "What matters most is this: ",
-    "To put it simply: ",
-    "The short version is: "
+    "That's a good question — can you tell me a bit more about what you're looking for so I can give you a useful answer?",
+    "I want to make sure I actually help here. Could you give me a little more context?",
+    "Happy to dig into that — what specifically do you want to know?",
+    "Interesting! I'd love to give you a solid answer — what angle are you coming from?",
+    "Let me help with that — what's the most important part you need answered first?",
+  ],
+  refusal: [
+    "Honestly, I'm not sure about that one — I don't want to guess and give you something wrong. Could you rephrase or ask a different way?",
+    "That's outside what I can help with confidently right now, but I don't want to make something up. Is there another angle I can try?",
+    "I want to be upfront — I'm not confident I have a good answer for that. Is there a related question I can actually help with?",
+    "Good question, but I'd be doing you a disservice if I just made something up here. Want to narrow it down or try a different question?",
   ],
   clarify: [
     'Can I ask — what specifically are you trying to understand?',
@@ -154,10 +181,29 @@ export function detectMood(input: string): UserMood {
   return 'neutral'
 }
 
-export function detectIntent(input: string): ResponseIntent {
+// Detect whether a coding follow-up message provides the language/goal info
+// that the prior coding clarification requested.
+const CODING_LANG_PATTERN = /\b(python|javascript|typescript|js|ts|java|c\+\+|cpp|c#|csharp|ruby|go|rust|php|swift|kotlin|bash|shell|sql|html|css|react|node)\b/i
+const CODING_GOAL_PATTERN = /\b(sort|filter|fetch|parse|read|write|create|delete|update|loop|iterate|list|map|reduce|find|search|generate|validate|format|convert|connect|call|return|print|display|render|calculate|count|sum|merge|split|join)\b/i
+
+export function detectIntent(input: string, lastIntent?: ResponseIntent): ResponseIntent {
+  // If we just asked a coding clarification, check whether this message supplies
+  // language or goal info — if so, move forward instead of looping.
+  if (lastIntent === 'coding' || lastIntent === 'coding-followup') {
+    if (CODING_LANG_PATTERN.test(input) || CODING_GOAL_PATTERN.test(input)) {
+      return 'coding-followup'
+    }
+  }
+
   for (const rule of INTENT_PATTERNS) {
     if (rule.pattern.test(input)) return rule.intent
   }
+
+  // Heuristic: if no intent matched and the message is short/vague, lean toward
+  // refusal rather than producing a topic-phrase non-answer.
+  const words = input.trim().split(/\s+/)
+  if (words.length <= 3 && /\?/.test(input)) return 'refusal'
+
   if (/\?$/.test(input.trim())) return 'answer'
   return 'answer'
 }
@@ -166,13 +212,27 @@ export function detectIntent(input: string): ResponseIntent {
 // Memory helpers
 // ---------------------------------------------------------------------------
 
+// Natural reference phrases for memory callbacks — avoids robotic verbatim quoting
+const MEMORY_OPENERS = [
+  "Picking up on what you mentioned earlier",
+  "Building on what you shared before",
+  "Connecting back to what you said",
+  "Given what you brought up earlier",
+  "Following on from what you mentioned",
+]
+
 function memoryPhrase(memories: MemorySnippet[] = []): string {
   if (memories.length === 0) return ''
   const ranked = [...memories].sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
   const chosen = ranked[0]
-  const excerpt = chosen.text.trim().slice(0, 90)
+  const excerpt = chosen.text.trim()
   if (!excerpt) return ''
-  return `You mentioned earlier: "${excerpt}${chosen.text.length > 90 ? '…' : ''}". `
+  // Extract a short keyword phrase from the memory rather than quoting verbatim
+  const FILLER = /^(i|can|could|please|write|tell|show|help|me|you|a|an|the|this|that|it|is|are|was|be|do|does|did|my|your|to|and|or|but|so|just|really|very)$/i
+  const keywords = excerpt.split(/\s+/).filter(w => !FILLER.test(w)).slice(0, 5).join(' ')
+  const ref = keywords || excerpt.slice(0, 40)
+  const opener = pick(MEMORY_OPENERS)
+  return `${opener} about ${ref} — `
 }
 
 // ---------------------------------------------------------------------------
@@ -199,19 +259,31 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
     return `${opener} ${pick(CLOSERS[mood])}`
   }
 
-  // 2. For well-defined intents that have complete canned answers, use them.
+  // 2. Humor — return a standalone joke/banter response.
+  if (intent === 'humor') {
+    return pick(CANNED_ANSWERS.humor)
+  }
+
+  // 3. Refusal/uncertainty — honest fallback.
+  if (intent === 'refusal') {
+    return pick(CANNED_ANSWERS.refusal)
+  }
+
+  // 4. For well-defined intents that have complete canned answers, use them.
   const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify']
   if (standAloneIntents.includes(intent)) {
     return pick(CANNED_ANSWERS[intent])
   }
 
-  // 3. For coding intent: use canned opener only (asks user for clarification
-  //    since we have no execution engine).
+  // 5. Coding clarification: first ask for details; on follow-up, acknowledge and proceed.
   if (intent === 'coding') {
     return pick(CANNED_ANSWERS.coding)
   }
+  if (intent === 'coding-followup') {
+    return pick(CANNED_ANSWERS['coding-followup'])
+  }
 
-  // 4. Guard against empty content
+  // 6. Guard against empty content
   const rawContent = baseResponse.trim() || context.userMessage.trim()
   const openerPool = MOOD_OPENERS[mood]
   const closerPool = CLOSERS[mood]
@@ -221,7 +293,7 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
     return `${pick(openerPool)} ${pick(closerPool)}`.replace(/\s+/g, ' ').trim()
   }
 
-  // 5. For answer / suggest / follow-up: build a composed response using a
+  // 7. For answer / suggest / follow-up: build a composed response using a
   //    topic phrase derived from the message (not a verbatim quote), with mood coloring.
   const topic = buildTopicPhrase(rawContent, context)
 

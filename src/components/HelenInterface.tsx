@@ -66,6 +66,7 @@ export default function HelenInterface() {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
+  const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -101,7 +102,7 @@ export default function HelenInterface() {
     setTimeout(() => {
       const memories = loadMemories()
       const mood = detectMood(text)
-      const intent = detectIntent(text)
+      const intent = detectIntent(text, lastIntent)
       const wantsShortAnswer = text.trim().split(/\s+/).length <= 5
 
       const response = generateHumanLikeResponse(text, {
@@ -110,7 +111,10 @@ export default function HelenInterface() {
         intent,
         memories: memories.length > 0 ? memories : undefined,
         wantsShortAnswer,
+        lastIntent,
       })
+
+      setLastIntent(intent)
 
       // Record the interaction in the learning system
       learningSystem.recordInteraction(text, response, {
@@ -151,6 +155,7 @@ export default function HelenInterface() {
 
   const handleClear = () => {
     setMessages([])
+    setLastIntent(undefined)
     localStorage.removeItem(MESSAGES_KEY)
     localStorage.removeItem(MEMORIES_KEY)
     learningSystem.clearHistory()
