@@ -5,7 +5,7 @@
 # For format details, see: https://gh.io/customagents/config
 
 name: DAVE
-description: 
+description: Security Boi 
 ---
 
 # My Agent
