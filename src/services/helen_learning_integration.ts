@@ -3,8 +3,6 @@
  * Bridges TypeScript implementation with Python learning algorithm
  */
 
-import { Message } from '../components/HelenInterface'
-
 export interface LearningMetadata {
   intent: string
   confidence: number
@@ -90,20 +88,12 @@ export class HelenLearningSystem {
     if (!interaction.feedback) return
 
     const { rating } = interaction.feedback
-    const { confidence, intent, planComplexity } = interaction.metadata
+    const { confidence } = interaction.metadata
 
     // Update success metrics
     if (rating === 'helpful') {
       this.agentStats.successfulResponses++
     }
-
-    // Calculate effectiveness score
-    const effectivenessMap = {
-      'helpful': 1.0,
-      'neutral': 0.5,
-      'unhelpful': 0.0
-    }
-    const effectiveness = effectivenessMap[rating]
 
     // Adjust confidence threshold if needed
     if (rating === 'unhelpful' && confidence > 0.6) {
