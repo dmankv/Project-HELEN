@@ -21,16 +21,19 @@ interface Conversation {
   createdAt: Date
 }
 
+let _idCounter = 0
+const nextId = () => `helen-${Date.now()}-${++_idCounter}`
+
 export default function HelenInterface() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [insights, setInsights] = useState(() => helenLearning.getLearningInsights())
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const activeConv = conversations.find(c => c.id === activeConvId) ?? null
   const messages = activeConv?.messages ?? []
-  const insights = helenLearning.getLearningInsights()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -97,7 +100,7 @@ export default function HelenInterface() {
       const responses = [
         `I understand you're asking about "${input.slice(0, 60)}". Based on my current knowledge and our ${memoryUsed}-message context, I can help explore this further. What aspect interests you most?`,
         `That's a thoughtful question. I'm processing it with ${(confidence * 100).toFixed(0)}% confidence. Could you share more details so I can give you a more precise answer?`,
-        `Interesting! I've noted your message and will incorporate it into my learning model. My current policy (v${insights.policyVersion}) suggests a ${planComplexity} approach here.`,
+        `Interesting! I've noted your message and will incorporate it into my learning model. My current policy suggests a ${planComplexity} approach here.`,
       ]
       content = responses[Math.floor(Math.random() * responses.length)]
     }
@@ -108,7 +111,7 @@ export default function HelenInterface() {
   const handleSendMessage = async (content: string) => {
     let convId = activeConvId
     if (!convId) {
-      const id = `conv-${Date.now()}`
+      const id = nextId()
       const conv: Conversation = {
         id,
         title: content.slice(0, 30) || 'New conversation',
@@ -121,7 +124,7 @@ export default function HelenInterface() {
     }
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: nextId(),
       role: 'user',
       content,
       timestamp: new Date()
@@ -147,7 +150,7 @@ export default function HelenInterface() {
         const record = helenLearning.recordInteraction(content, responseContent, metadata)
 
         const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
+          id: nextId(),
           role: 'assistant',
           content: responseContent,
           timestamp: new Date(),
@@ -161,12 +164,14 @@ export default function HelenInterface() {
             : c
         )
       })
+      setInsights(helenLearning.getLearningInsights())
       setIsLoading(false)
     }, 600)
   }
 
   const handleFeedback = (messageId: string, interactionId: string, rating: 'helpful' | 'neutral' | 'unhelpful') => {
     helenLearning.processFeedback(interactionId, rating)
+    setInsights(helenLearning.getLearningInsights())
     setConversations(prev => prev.map(c =>
       c.id === activeConvId
         ? {
