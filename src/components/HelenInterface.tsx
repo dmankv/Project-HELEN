@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import MessageInput from './MessageInput'
 import helenLearning from '../services/helen_learning_integration'
 import type { LearningMetadata } from '../services/helen_learning_integration'
+import { detectMood, detectIntent, generateHumanLikeResponse } from '../services/helenResponseBrain'
+import type { MemorySnippet } from '../services/helenResponseBrain'
 import '../styles/HelenInterface.css'
 
 export interface Message {
@@ -183,15 +185,19 @@ function generateHelenResponse(
     const followUp = turnIndex > 0 ? pickFrom(FOLLOW_UP_STARTERS, seed) : ''
     content = `${emotionPrefix}${followUp}For "${input.slice(0, 60)}${input.length > 60 ? '…' : ''}", I'd approach this as a ${planComplexity} task. What's the end goal you're aiming for? That'll help me suggest concrete steps.`
   } else {
-    // General information / follow-up
-    const isFollowUp = turnIndex > 0 && /\b(it|that|this|those|they|them|he|she)\b/.test(lowerInput)
-    const starter = isFollowUp ? pickFrom(FOLLOW_UP_STARTERS, seed) : ''
-    const generalVariants = [
-      `${emotionPrefix}${starter}That's a good point about "${input.slice(0, 50)}${input.length > 50 ? '…' : ''}". I can dig into this — what angle matters most to you?`,
-      `${emotionPrefix}${starter}I've registered your question. My read on it (${(confidence * 100).toFixed(0)}% confidence): this touches on ${intent} territory. What would be the most useful next step for you?`,
-      `${emotionPrefix}${starter}Noted. To give you a sharper answer, could you tell me a bit more about what you're trying to achieve?`
-    ]
-    content = pickFrom(generalVariants, seed)
+    // General information / follow-up — use helenResponseBrain for human-like replies
+    const brainMood = detectMood(input)
+    const brainIntent = detectIntent(input)
+    const brainMemories: MemorySnippet[] = recentHistory
+      .filter(m => m.role === 'user')
+      .slice(-3)
+      .map(m => ({ content: m.content }))
+    content = generateHumanLikeResponse({
+      userInput: input,
+      mood: brainMood,
+      intent: brainIntent,
+      memories: brainMemories.length > 0 ? brainMemories : undefined
+    })
   }
 
   return { content, metadata }
