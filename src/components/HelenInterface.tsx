@@ -2,6 +2,12 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import MessageInput from './MessageInput'
 import helenLearning from '../services/helen_learning_integration'
 import type { LearningMetadata } from '../services/helen_learning_integration'
+import {
+  detectMood,
+  detectIntent,
+  generateHumanLikeResponse,
+  type MemorySnippet
+} from '../services/helenResponseBrain'
 import '../styles/HelenInterface.css'
 
 export interface Message {
@@ -79,39 +85,6 @@ function deriveConfidence(input: string, turnIndex: number): number {
   return Math.min(base + familiarity, 0.95)
 }
 
-// Detect emotional cues
-function detectEmotion(text: string): string | null {
-  const lower = text.toLowerCase()
-  if (/\b(frustrated|annoyed|upset|angry|mad)\b/.test(lower)) return 'frustration'
-  if (/\b(confused|lost|not sure|unsure|don'?t understand)\b/.test(lower)) return 'confusion'
-  if (/\b(excited|great|awesome|love|amazing)\b/.test(lower)) return 'excitement'
-  if (/\b(sad|unhappy|disappoint|worried|anxious)\b/.test(lower)) return 'concern'
-  return null
-}
-
-// Check if the message is ambiguous (short and non-specific)
-function isAmbiguous(text: string): boolean {
-  return text.trim().split(/\s+/).length <= 3 && !/\?/.test(text)
-}
-
-const GREETING_RESPONSES = [
-  "Hey! Good to hear from you. What's on your mind?",
-  "Hi there! I'm HELEN — ready to help. What would you like to explore?",
-  "Hello! Always glad to chat. What can I do for you today?",
-  "Hey! I'm here. What's up?"
-]
-
-const FOLLOW_UP_STARTERS = [
-  'Following up on what you said — ',
-  'Building on that — ',
-  'That connects to something you mentioned earlier: ',
-  'Picking up from before — '
-]
-
-function pickFrom<T>(arr: T[], seed: number): T {
-  return arr[seed % arr.length]
-}
-
 // Context window: last N user+assistant pairs
 const CONTEXT_WINDOW = 6
 
@@ -120,26 +93,20 @@ function generateHelenResponse(
   history: Message[]
 ): { content: string; metadata: LearningMetadata } {
   const lowerInput = input.toLowerCase()
-  // turnIndex from full history for correct complexity progression
   const turnIndex = history.filter(m => m.role === 'user').length
-  // Only recent messages for context-based responses
   const recentHistory = history.slice(-CONTEXT_WINDOW)
-
-  // Intent classification
-  let intent = 'general'
-  if (/\b(hello|hi|hey|good morning|good evening|howdy)\b/.test(lowerInput)) intent = 'greeting'
-  else if (/\b(remember|memory|recall|last time|earlier|before|you said)\b/.test(lowerInput)) intent = 'memory_query'
-  else if (/\b(stats|statistics|analytics|progress|learning|policy)\b/.test(lowerInput)) intent = 'analytics'
-  else if (/\b(plan|goal|task|todo|step|how do i|how to)\b/.test(lowerInput)) intent = 'planning'
-  else if (/\b(help|what|explain|tell me|describe|define|why|when|where|who)\b/.test(lowerInput)) intent = 'information'
-
+  const mood = detectMood(input)
+  const brainIntent = detectIntent(input)
+  const uiIntent = /\b(stats|statistics|analytics|progress|learning|policy)\b/.test(lowerInput)
+    ? 'analytics'
+    : brainIntent
   const confidence = deriveConfidence(input, turnIndex)
   const complexities: Array<'simple' | 'moderate' | 'complex'> = ['simple', 'moderate', 'complex']
   const planComplexity = complexities[Math.min(Math.floor(turnIndex / 4), 2)]
   const memoryUsed = recentHistory.length
 
   const metadata: LearningMetadata = {
-    intent,
+    intent: `${uiIntent}:${mood}`,
     confidence,
     ambiguity: parseFloat((1 - confidence).toFixed(3)),
     memoryUsed,
@@ -147,52 +114,30 @@ function generateHelenResponse(
     timestamp: new Date()
   }
 
-  const emotion = detectEmotion(input)
-  const ambiguous = isAmbiguous(input)
-  const seed = input.length + turnIndex
-
-  let content = ''
-  const emotionPrefix = emotion === 'frustration'
-    ? "I can hear that this is frustrating — let's work through it together. "
-    : emotion === 'confusion'
-    ? "No worries if things feel unclear right now — that's what I'm here for. "
-    : emotion === 'excitement'
-    ? "That's great energy! "
-    : emotion === 'concern'
-    ? "I hear you, and I want to help make this easier. "
-    : ''
-
-  if (ambiguous && intent === 'general') {
-    content = `${emotionPrefix}I want to make sure I understand what you mean by "${input.trim()}". Could you give me a bit more context?`
-  } else if (intent === 'greeting') {
-    content = pickFrom(GREETING_RESPONSES, seed)
-    if (turnIndex > 0) content += ` We've exchanged ${turnIndex} message${turnIndex > 1 ? 's' : ''} so far.`
-  } else if (intent === 'memory_query') {
-    if (recentHistory.length === 0) {
-      content = "This is the start of our session — I haven't stored anything yet. Tell me something and I'll keep it in context!"
-    } else {
-      const userMsgs = recentHistory.filter(m => m.role === 'user').slice(-3)
-      const snippets = userMsgs.map(m => `"${m.content.slice(0, 50)}${m.content.length > 50 ? '…' : ''}"`).join(', ')
-      content = `From what I can see in our recent exchange, you've brought up: ${snippets}. Is there something specific from that you'd like to come back to?`
-    }
-  } else if (intent === 'analytics') {
+  if (uiIntent === 'analytics') {
     const ins = helenLearning.getLearningInsights()
     const ratedCount = ins.learningCycles
-    content = `Here's where my learning stands:\n• Interactions recorded: ${ins.totalInteractions}\n• Feedback cycles: ${ratedCount}\n• Helpful rate: ${ins.successRate > 0 ? (ins.successRate * 100).toFixed(0) + '%' : 'no ratings yet'}\n• Avg confidence: ${(ins.averageConfidence * 100).toFixed(0)}%\n• Policy version: v${ins.policyVersion}\n\nYou can rate any of my responses below to help me improve.`
-  } else if (intent === 'planning') {
-    const followUp = turnIndex > 0 ? pickFrom(FOLLOW_UP_STARTERS, seed) : ''
-    content = `${emotionPrefix}${followUp}For "${input.slice(0, 60)}${input.length > 60 ? '…' : ''}", I'd approach this as a ${planComplexity} task. What's the end goal you're aiming for? That'll help me suggest concrete steps.`
-  } else {
-    // General information / follow-up
-    const isFollowUp = turnIndex > 0 && /\b(it|that|this|those|they|them|he|she)\b/.test(lowerInput)
-    const starter = isFollowUp ? pickFrom(FOLLOW_UP_STARTERS, seed) : ''
-    const generalVariants = [
-      `${emotionPrefix}${starter}That's a good point about "${input.slice(0, 50)}${input.length > 50 ? '…' : ''}". I can dig into this — what angle matters most to you?`,
-      `${emotionPrefix}${starter}I've registered your question. My read on it (${(confidence * 100).toFixed(0)}% confidence): this touches on ${intent} territory. What would be the most useful next step for you?`,
-      `${emotionPrefix}${starter}Noted. To give you a sharper answer, could you tell me a bit more about what you're trying to achieve?`
-    ]
-    content = pickFrom(generalVariants, seed)
+    return {
+      content: `Here's where my learning stands:\n• Interactions recorded: ${ins.totalInteractions}\n• Feedback cycles: ${ratedCount}\n• Helpful rate: ${ins.successRate > 0 ? (ins.successRate * 100).toFixed(0) + '%' : 'no ratings yet'}\n• Avg confidence: ${(ins.averageConfidence * 100).toFixed(0)}%\n• Policy version: v${ins.policyVersion}\n\nYou can rate any of my responses below to help me improve.`,
+      metadata
+    }
   }
+
+  const memories: MemorySnippet[] = recentHistory
+    .filter((m): m is Message & { role: 'user' } => m.role === 'user')
+    .slice(-3)
+    .map((m, index, arr) => ({
+      content: m.content,
+      timestamp: m.timestamp,
+      relevance: arr.length - index
+    }))
+
+  const content = generateHumanLikeResponse({
+    userInput: input,
+    mood,
+    intent: brainIntent,
+    memories
+  })
 
   return { content, metadata }
 }
