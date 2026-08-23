@@ -24,7 +24,7 @@ export interface ResponseContext {
 const MOOD_PATTERNS: Array<{ mood: UserMood; pattern: RegExp }> = [
   { mood: 'urgent', pattern: /\b(urgent|asap|immediately|right now|quickly|deadline|emergency)\b/i },
   { mood: 'frustrated', pattern: /\b(frustrated|annoyed|upset|angry|stuck|hate|broken|not working)\b/i },
-  { mood: 'sad', pattern: /\b(sad|unhappy|down|depressed|lonely|heartbroken|crying|miserable|grief|lost)\b/i },
+  { mood: 'sad', pattern: /\b(sad|unhappy|down|depressed|lonely|heartbroken|crying|miserable|grief)\b/i },
   { mood: 'confused', pattern: /\b(confused|unsure|not sure|don't understand|dont understand|lost|unclear)\b/i },
   { mood: 'excited', pattern: /\b(excited|awesome|great|amazing|love|fantastic|yay)\b/i }
 ]
@@ -187,9 +187,9 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   const moodFull = MOOD_FULL_RESPONSES[mood]
   if (moodFull && (intent === 'answer' || intent === 'clarify')) {
     const opener = pick(moodFull)
-    // Rec 4: short requests → no closer
+    // Rec 4: short requests → no closer; longer ones get a gentle follow-up
     if (wantsShortAnswer) return opener
-    return opener
+    return `${opener} ${pick(CLOSERS[mood])}`
   }
 
   // 2. For well-defined intents that have complete canned answers, use them.
