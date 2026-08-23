@@ -120,7 +120,9 @@ function generateHelenResponse(
   history: Message[]
 ): { content: string; metadata: LearningMetadata } {
   const lowerInput = input.toLowerCase()
+  // turnIndex from full history for correct complexity progression
   const turnIndex = history.filter(m => m.role === 'user').length
+  // Only recent messages for context-based responses
   const recentHistory = history.slice(-CONTEXT_WINDOW)
 
   // Intent classification
@@ -197,9 +199,12 @@ function generateHelenResponse(
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+// Load once at module init so the two useState initialisers share the same parse
+const _initialState = loadConversations()
+
 export default function HelenInterface() {
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations().convs)
-  const [activeConvId, setActiveConvId] = useState<string | null>(() => loadConversations().activeId)
+  const [conversations, setConversations] = useState<Conversation[]>(_initialState.convs)
+  const [activeConvId, setActiveConvId] = useState<string | null>(_initialState.activeId)
   const [isLoading, setIsLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [insights, setInsights] = useState(() => helenLearning.getLearningInsights())
@@ -249,8 +254,8 @@ export default function HelenInterface() {
       setConversations(prev => {
         const conv = prev.find(c => c.id === convId)
         if (!conv) return prev
-        // Use bounded context window for efficiency
-        const { content: responseContent, metadata } = generateHelenResponse(content, conv.messages.slice(-CONTEXT_WINDOW))
+        // Pass full message history so turnIndex reflects true conversation length
+        const { content: responseContent, metadata } = generateHelenResponse(content, conv.messages)
         const record = helenLearning.recordInteraction(content, responseContent, metadata)
 
         const aiMessage: Message = {
@@ -312,7 +317,7 @@ export default function HelenInterface() {
                   key={conv.id}
                   className={`conversation-item ${conv.id === activeConvId ? 'active' : ''}`}
                   onClick={() => setActiveConvId(conv.id)}
-                  aria-current={conv.id === activeConvId ? 'true' : undefined}
+                  aria-current={conv.id === activeConvId ? 'page' : undefined}
                 >
                   <span className="conv-icon">💬</span>
                   <span className="conv-title">{conv.title || 'Untitled'}</span>
