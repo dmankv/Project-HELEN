@@ -203,8 +203,10 @@ export default function HelenInterface() {
     setMessages([])
     setActiveConvId(null)
     setLastIntent(undefined)
+    setConversations([])
     localStorage.removeItem(MESSAGES_KEY)
     localStorage.removeItem(MEMORIES_KEY)
+    localStorage.removeItem(CONVERSATIONS_KEY)
     learningSystem.clearHistory()
   }
 

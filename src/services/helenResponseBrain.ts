@@ -38,7 +38,7 @@ const MOOD_PATTERNS: Array<{ mood: UserMood; pattern: RegExp }> = [
 
 const INTENT_PATTERNS: Array<{ intent: ResponseIntent; pattern: RegExp }> = [
   { intent: 'greeting', pattern: /^(hey|hi|hello|howdy|yo|sup|hiya|good morning|good afternoon|good evening|what's up|whats up)\b/i },
-  { intent: 'identity', pattern: /\b(who are you|what are you|are you (a |an )?(ai|bot|robot|human|person)|tell me about yourself|introduce yourself)\b/i },
+  { intent: 'identity', pattern: /\b(who are you|what are you|are you (a |an )?(real |actual )?(ai|bot|robot|human|person)|tell me about yourself|introduce yourself)\b/i },
   { intent: 'humor', pattern: /\b(joke|funny|make me (laugh|smile)|tell me something (funny|hilarious)|lol|haha|hehe|rofl|lmao|😂|😄|tease|banter|witty|pun)\b/i },
   { intent: 'coding', pattern: /\b(write|code|function|script|program|snippet|debug|fix|implement|class|method|algorithm|loop|array|object|variable|import|export|compile|run|test)\b/i },
   { intent: 'smalltalk', pattern: /\b(how are you|how('s| is) it going|what's new|hows your day|how was your day|feeling today)\b/i },
@@ -59,6 +59,10 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "Hi there! What's on your mind?",
     "Hello! I'm HELEN — happy to chat or help out. What do you need?",
     "Hey! What's up? Anything I can do for you?",
+    "Hey, good to see you! What are we getting into today?",
+    "Hi! Hope your day's going well. What can I do for you?",
+    "Hello! Always good to have you here. What's on your mind?",
+    "Hey there! Ready when you are — what do you need?",
   ],
   identity: [
     "I'm HELEN — an adaptive AI assistant built to have real conversations and actually help you get things done. What would you like to do?",
@@ -109,18 +113,21 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "Could you give me a little more context so I can answer accurately?"
   ],
   'follow-up': [
-    'Building on what you said earlier, ',
-    'Following that thread, ',
-    'From your earlier point, ',
-    "Picking up where we left off, ",
-    "On that same note, "
+    "Picking up where we left off — happy to dig in further. What specifically do you want to explore?",
+    "Sure, let's continue from where we were. What part would you like to revisit?",
+    "Good call — let's keep that thread going. What do you want to focus on next?",
+    "On that same note — let's keep going. What would be most useful to cover?",
+    "Following that thread, I'm happy to go deeper. What do you need next?",
   ],
   acknowledge: [
-    'That makes sense.',
-    'Thanks for sharing that.',
-    "I understand where you're coming from.",
-    "Glad that's clear.",
-    "Got it — good to know."
+    "Glad I could help!",
+    "Anytime — happy to help.",
+    "Great to hear it worked out!",
+    "Happy to be useful!",
+    "Awesome, glad that landed well.",
+    "Of course — always here if you need more.",
+    "Great! Feel free to come back anytime.",
+    "Happy to — let me know if anything else comes up.",
   ],
   suggest: [
     'A good next step would be to ',
@@ -168,6 +175,24 @@ const MOOD_FULL_RESPONSES: Partial<Record<UserMood, string[]>> = {
     "I get it, that kind of thing is genuinely annoying. Can you tell me more about what's going wrong so we can fix it?",
     "That sounds maddening. Let's slow down and work through it step by step. What are you seeing?",
   ],
+  excited: [
+    "That's amazing — seriously, congrats! Tell me more, I want to hear all about it.",
+    "Love that energy! That's genuinely exciting news. What happened?",
+    "Yes! That's awesome. I'm pumped for you — what's next?",
+    "Okay, that's really cool. I'm here for it — fill me in!",
+  ],
+  urgent: [
+    "On it — let's move. What exactly do you need right now?",
+    "Got it, moving fast. Tell me the most critical piece and we'll tackle that first.",
+    "Right away. What's the single most important thing we need to solve right now?",
+    "No time to waste — I'm ready. What's the situation?",
+  ],
+  confused: [
+    "Totally fair — let's untangle this together. What part is throwing you off?",
+    "No worries at all, this stuff can be confusing. Walk me through what's unclear and we'll break it down.",
+    "You're not alone in that. Let me help clarify — what's the part that doesn't quite make sense?",
+    "Let's slow down and make sure this clicks. What specifically is confusing you?",
+  ],
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +219,12 @@ export function detectIntent(input: string, lastIntent?: ResponseIntent): Respon
       return 'coding-followup'
     }
   }
+
+  // When a message contains substantive coding content alongside a greeting,
+  // prefer the coding intent so the request is not silently dropped.
+  const hasCoding = INTENT_PATTERNS.find(r => r.intent === 'coding')?.pattern.test(input)
+  const hasGreeting = INTENT_PATTERNS.find(r => r.intent === 'greeting')?.pattern.test(input)
+  if (hasCoding && hasGreeting) return 'coding'
 
   for (const rule of INTENT_PATTERNS) {
     if (rule.pattern.test(input)) return rule.intent
@@ -255,8 +286,11 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
 
   // 1. For emotionally charged moods that warrant a full bespoke reply, use
   //    the mood-specific response pool directly (no echo).
+  //    Apply to all non-greeting, non-humor, non-identity intents so mood
+  //    always takes priority over generic answer/clarify/suggest flows.
   const moodFull = MOOD_FULL_RESPONSES[mood]
-  if (moodFull && (intent === 'answer' || intent === 'clarify')) {
+  const moodOverrideIntents: ResponseIntent[] = ['answer', 'clarify', 'suggest', 'follow-up', 'acknowledge']
+  if (moodFull && moodOverrideIntents.includes(intent)) {
     const opener = pick(moodFull)
     if (wantsShortAnswer) return opener
     return `${opener} ${pick(CLOSERS[mood])}`
@@ -275,7 +309,8 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   // 4. For well-defined intents that have complete canned answers, use them.
   //    'answer' is included here so its context-asking responses are returned
   //    standalone rather than being embedded in the composition pipeline.
-  const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify', 'answer']
+  //    'follow-up' is included so its complete-sentence pool is used directly.
+  const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify', 'answer', 'follow-up']
   if (standAloneIntents.includes(intent)) {
     return pick(CANNED_ANSWERS[intent])
   }
