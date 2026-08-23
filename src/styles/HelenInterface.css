@@ -1,7 +1,8 @@
-/* HELEN ChatGPT-style interface */
+/* HELEN interface */
 
 .helen-app {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100%;
   background-color: var(--color-background);
@@ -493,5 +494,81 @@
 
   .helen-sidebar.closed {
     width: 0;
+  }
+}
+
+/* ── Input Area ──────────────────────────────────────── */
+.input-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  flex-shrink: 0;
+}
+
+.helen-input {
+  flex: 1;
+  background-color: var(--color-surface-light);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.85rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--color-text);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.helen-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.helen-input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.send-btn {
+  padding: 0.65rem 1.25rem;
+  background-color: var(--color-primary);
+  color: #fff;
+  font-weight: 500;
+  font-size: 0.95rem;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.send-btn:hover:not(:disabled) {
+  background-color: var(--color-secondary);
+}
+
+/* ── Clear Button ────────────────────────────────────── */
+.clear-btn {
+  padding: 0.35rem 0.75rem;
+  background: none;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+}
+
+.clear-btn:hover:not(:disabled) {
+  color: var(--color-text);
+  background-color: var(--color-surface-light);
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── Responsive: mobile input ────────────────────────── */
+@media (max-width: 640px) {
+  .input-area {
+    padding: 0.5rem 0.75rem 0.75rem;
+  }
+
+  .helen-input {
+    font-size: 0.95rem;
   }
 }
