@@ -84,7 +84,6 @@ export function detectIntent(input: string): ResponseIntent {
   for (const rule of INTENT_PATTERNS) {
     if (rule.pattern.test(input)) return rule.intent
   }
-  if (/\?$/.test(input.trim())) return 'answer'
   return 'answer'
 }
 
@@ -92,9 +91,10 @@ function memoryPhrase(memories: MemorySnippet[] = []): string {
   if (memories.length === 0) return ''
   const ranked = [...memories].sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
   const chosen = ranked[0]
-  const excerpt = chosen.content.trim().slice(0, 90)
+  const trimmedContent = chosen.content.trim()
+  const excerpt = trimmedContent.slice(0, 90)
   if (!excerpt) return ''
-  return `You mentioned earlier: "${excerpt}${chosen.content.length > 90 ? '…' : ''}". `
+  return `You mentioned earlier: "${excerpt}${trimmedContent.length > 90 ? '…' : ''}". `
 }
 
 function scoreCandidate(candidate: string, context: ResponseContext): number {
@@ -117,7 +117,8 @@ export function generateHumanLikeResponse(context: ResponseContext): string {
   const corePool = INTENT_CORE[context.intent]
   const closerPool = CLOSERS[context.mood]
   const memory = memoryPhrase(context.memories)
-  const prompt = context.userInput.trim().slice(0, 120)
+  const rawPrompt = context.userInput.trim()
+  const prompt = rawPrompt.slice(0, 120)
 
   const openers = openerPool.slice(0, 2)
   const cores = corePool.slice(0, 2)
@@ -127,7 +128,10 @@ export function generateHumanLikeResponse(context: ResponseContext): string {
   for (const opener of openers) {
     for (const core of cores) {
       for (const closer of closers) {
-        const candidate = `${opener} ${memory}${core}"${prompt}${prompt.length >= 120 ? '…' : ''}". ${closer}`
+        const promptPhrase = context.intent === 'acknowledge'
+          ? ''
+          : `"${prompt}${rawPrompt.length > 120 ? '…' : ''}". `
+        const candidate = `${opener} ${memory}${core} ${promptPhrase}${closer}`
           .replace(/\s+/g, ' ')
           .trim()
         candidates.push(candidate)

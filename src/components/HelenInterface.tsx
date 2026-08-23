@@ -87,6 +87,16 @@ function deriveConfidence(input: string, turnIndex: number): number {
 
 // Context window: last N user+assistant pairs
 const CONTEXT_WINDOW = 6
+const GREETING_RESPONSES = [
+  "Hey! Good to hear from you. What's on your mind?",
+  "Hi there! I'm HELEN — ready to help. What would you like to explore?",
+  "Hello! Always glad to chat. What can I do for you today?",
+  "Hey! I'm here. What's up?"
+]
+
+function pickFrom<T>(arr: T[], seed: number): T {
+  return arr[seed % arr.length]
+}
 
 function generateHelenResponse(
   input: string,
@@ -95,18 +105,22 @@ function generateHelenResponse(
   const lowerInput = input.toLowerCase()
   const turnIndex = history.filter(m => m.role === 'user').length
   const recentHistory = history.slice(-CONTEXT_WINDOW)
+  const seed = input.length + turnIndex
   const mood = detectMood(input)
   const brainIntent = detectIntent(input)
-  const uiIntent = /\b(stats|statistics|analytics|progress|learning|policy)\b/.test(lowerInput)
-    ? 'analytics'
-    : brainIntent
+  let metadataIntent = 'general'
+  if (/\b(hello|hi|hey|good morning|good evening|howdy)\b/.test(lowerInput)) metadataIntent = 'greeting'
+  else if (/\b(remember|memory|recall|last time|earlier|before|you said)\b/.test(lowerInput)) metadataIntent = 'memory_query'
+  else if (/\b(stats|statistics|analytics|progress|learning|policy)\b/.test(lowerInput)) metadataIntent = 'analytics'
+  else if (/\b(plan|goal|task|todo|step|how do i|how to)\b/.test(lowerInput)) metadataIntent = 'planning'
+  else if (/\b(help|what|explain|tell me|describe|define|why|when|where|who)\b/.test(lowerInput)) metadataIntent = 'information'
   const confidence = deriveConfidence(input, turnIndex)
   const complexities: Array<'simple' | 'moderate' | 'complex'> = ['simple', 'moderate', 'complex']
   const planComplexity = complexities[Math.min(Math.floor(turnIndex / 4), 2)]
   const memoryUsed = recentHistory.length
 
   const metadata: LearningMetadata = {
-    intent: `${uiIntent}:${mood}`,
+    intent: metadataIntent,
     confidence,
     ambiguity: parseFloat((1 - confidence).toFixed(3)),
     memoryUsed,
@@ -114,11 +128,44 @@ function generateHelenResponse(
     timestamp: new Date()
   }
 
-  if (uiIntent === 'analytics') {
+  if (metadataIntent === 'analytics') {
     const ins = helenLearning.getLearningInsights()
     const ratedCount = ins.learningCycles
     return {
       content: `Here's where my learning stands:\n• Interactions recorded: ${ins.totalInteractions}\n• Feedback cycles: ${ratedCount}\n• Helpful rate: ${ins.successRate > 0 ? (ins.successRate * 100).toFixed(0) + '%' : 'no ratings yet'}\n• Avg confidence: ${(ins.averageConfidence * 100).toFixed(0)}%\n• Policy version: v${ins.policyVersion}\n\nYou can rate any of my responses below to help me improve.`,
+      metadata
+    }
+  }
+
+  if (metadataIntent === 'greeting') {
+    let content = pickFrom(GREETING_RESPONSES, seed)
+    if (turnIndex > 0) content += ` We've exchanged ${turnIndex} message${turnIndex > 1 ? 's' : ''} so far.`
+    return { content, metadata }
+  }
+
+  if (metadataIntent === 'memory_query') {
+    if (recentHistory.length === 0) {
+      return {
+        content: "This is the start of our session — I haven't stored anything yet. Tell me something and I'll keep it in context!",
+        metadata
+      }
+    }
+
+    const userMsgs = recentHistory
+      .filter((m): m is Message & { role: 'user' } => m.role === 'user')
+      .slice(-3)
+    const snippets = userMsgs
+      .map(m => `"${m.content.slice(0, 50)}${m.content.length > 50 ? '…' : ''}"`)
+      .join(', ')
+    return {
+      content: `From what I can see in our recent exchange, you've brought up: ${snippets}. Is there something specific from that you'd like to come back to?`,
+      metadata
+    }
+  }
+
+  if (metadataIntent === 'planning') {
+    return {
+      content: `For "${input.slice(0, 60)}${input.length > 60 ? '…' : ''}", I'd approach this as a ${planComplexity} task. What's the end goal you're aiming for? That'll help me suggest concrete steps.`,
       metadata
     }
   }
