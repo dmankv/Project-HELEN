@@ -24,14 +24,63 @@ export interface InteractionRecord {
   }
 }
 
+// Stored shape for localStorage (timestamps as ISO strings)
+interface StoredRecord {
+  id: string
+  input: string
+  response: string
+  metadata: Omit<LearningMetadata, 'timestamp'> & { timestamp: string }
+  feedback?: {
+    rating: 'helpful' | 'neutral' | 'unhelpful'
+    comment?: string
+    timestamp: string
+  }
+}
+
+interface StoredStats {
+  totalInteractions: number
+  successfulResponses: number
+  learningCycles: number
+  policyVersion: number
+}
+
+const STORAGE_KEY = 'helen_learning_data'
+const MAX_HISTORY = 200 // bound history to keep UI responsive
+
+function loadFromStorage(): { history: InteractionRecord[]; stats: StoredStats } {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return { history: [], stats: { totalInteractions: 0, successfulResponses: 0, learningCycles: 0, policyVersion: 1 } }
+    const parsed = JSON.parse(raw) as { history: StoredRecord[]; stats: StoredStats }
+    const history: InteractionRecord[] = (parsed.history || []).map(r => ({
+      ...r,
+      metadata: { ...r.metadata, timestamp: new Date(r.metadata.timestamp) },
+      feedback: r.feedback ? { ...r.feedback, timestamp: new Date(r.feedback.timestamp) } : undefined
+    }))
+    return { history, stats: parsed.stats || { totalInteractions: 0, successfulResponses: 0, learningCycles: 0, policyVersion: 1 } }
+  } catch {
+    return { history: [], stats: { totalInteractions: 0, successfulResponses: 0, learningCycles: 0, policyVersion: 1 } }
+  }
+}
+
 export class HelenLearningSystem {
-  private interactionHistory: InteractionRecord[] = []
-  private learningQueue: InteractionRecord[] = []
-  private agentStats = {
-    totalInteractions: 0,
-    successfulResponses: 0,
-    learningCycles: 0,
-    policyVersion: 1
+  private interactionHistory: InteractionRecord[]
+  private agentStats: StoredStats
+
+  constructor() {
+    const loaded = loadFromStorage()
+    this.interactionHistory = loaded.history
+    this.agentStats = loaded.stats
+  }
+
+  private persist(): void {
+    try {
+      const trimmed = this.interactionHistory.slice(-MAX_HISTORY)
+      this.interactionHistory = trimmed
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ history: trimmed, stats: this.agentStats }))
+    } catch {
+      // localStorage may be unavailable (e.g. private browsing quota exceeded)
+    }
   }
 
   /**
@@ -46,19 +95,18 @@ export class HelenLearningSystem {
       id: this.generateInteractionId(),
       input,
       response,
-      metadata,
-      timestamp: new Date()
-    } as InteractionRecord
+      metadata
+    }
 
     this.interactionHistory.push(record)
-    this.learningQueue.push(record)
     this.agentStats.totalInteractions++
+    this.persist()
 
     return record
   }
 
   /**
-   * Process feedback and trigger learning
+   * Process feedback and immediately update interaction + success metrics
    */
   processFeedback(
     interactionId: string,
@@ -68,67 +116,49 @@ export class HelenLearningSystem {
     const interaction = this.interactionHistory.find(i => i.id === interactionId)
     if (!interaction) return
 
+    // Remove any existing feedback contribution before re-applying
+    if (interaction.feedback?.rating === 'helpful') {
+      this.agentStats.successfulResponses = Math.max(0, this.agentStats.successfulResponses - 1)
+    }
+
     interaction.feedback = {
       rating,
       comment,
       timestamp: new Date()
     }
 
-    // Trigger learning update
-    this.updatePolicy(interaction)
-
-    // Mark as processed
-    this.learningQueue = this.learningQueue.filter(i => i.id !== interactionId)
-  }
-
-  /**
-   * Update policy based on feedback outcome
-   */
-  private updatePolicy(interaction: InteractionRecord): void {
-    if (!interaction.feedback) return
-
-    const { rating } = interaction.feedback
-    const { confidence } = interaction.metadata
-
-    // Update success metrics
     if (rating === 'helpful') {
       this.agentStats.successfulResponses++
     }
 
-    // Adjust confidence threshold if needed
-    if (rating === 'unhelpful' && confidence > 0.6) {
-      // Increase threshold to be more conservative
-    } else if (rating === 'helpful' && confidence < 0.8) {
-      // Decrease threshold to accept more responses
-    }
-
     this.agentStats.learningCycles++
     this.agentStats.policyVersion++
+    this.persist()
   }
 
   /**
-   * Get learning insights from interaction history
+   * Get learning insights — deterministic values derived from stored data
    */
   getLearningInsights() {
-    const insights = {
+    const rated = this.interactionHistory.filter(i => i.feedback)
+    const helpfulCount = rated.filter(i => i.feedback?.rating === 'helpful').length
+    return {
       totalInteractions: this.interactionHistory.length,
-      successRate: this.agentStats.totalInteractions > 0
-        ? this.agentStats.successfulResponses / this.agentStats.totalInteractions
-        : 0,
+      // Success rate based only on rated interactions; 0 until feedback exists
+      successRate: rated.length > 0 ? helpfulCount / rated.length : 0,
       averageConfidence: this.calculateAverageConfidence(),
       commonIntents: this.getCommonIntents(),
       complexityDistribution: this.getComplexityDistribution(),
       learningCycles: this.agentStats.learningCycles,
       policyVersion: this.agentStats.policyVersion
     }
-    return insights
   }
 
   /**
    * Get pending interactions awaiting feedback
    */
   getPendingLearning(): InteractionRecord[] {
-    return this.learningQueue
+    return this.interactionHistory.filter(i => !i.feedback)
   }
 
   /**
@@ -158,11 +188,7 @@ export class HelenLearningSystem {
    * Get distribution of task complexity
    */
   private getComplexityDistribution(): Record<string, number> {
-    const complexity: Record<string, number> = {
-      simple: 0,
-      moderate: 0,
-      complex: 0
-    }
+    const complexity: Record<string, number> = { simple: 0, moderate: 0, complex: 0 }
     this.interactionHistory.forEach(i => {
       complexity[i.metadata.planComplexity]++
     })
@@ -175,18 +201,18 @@ export class HelenLearningSystem {
   exportLearningData(): string {
     return JSON.stringify({
       interactions: this.interactionHistory,
-      learningQueue: this.learningQueue,
       stats: this.agentStats,
       insights: this.getLearningInsights()
     }, null, 2)
   }
 
   /**
-   * Clear learning data (for testing)
+   * Clear learning data
    */
   clearHistory(): void {
     this.interactionHistory = []
-    this.learningQueue = []
+    this.agentStats = { totalInteractions: 0, successfulResponses: 0, learningCycles: 0, policyVersion: 1 }
+    try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
   }
 
   private generateInteractionId(): string {
