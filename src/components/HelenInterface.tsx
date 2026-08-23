@@ -16,7 +16,17 @@ interface Message {
 
 const MESSAGES_KEY = 'helen_messages'
 const MEMORIES_KEY = 'helen_memories'
-const THINKING_DELAY = 900
+const MIN_THINKING_DELAY = 600
+const MAX_THINKING_DELAY = 1800
+
+function thinkingDelay(text: string): number {
+  // Scale delay with message length: short messages ~600ms, long ones up to 1800ms
+  const words = text.trim().split(/\s+/).length
+  const scaled = Math.min(MIN_THINKING_DELAY + words * 40, MAX_THINKING_DELAY)
+  // Add up to ±150ms of jitter so responses never feel robotic/clockwork
+  const jitter = Math.floor(Math.random() * 300) - 150
+  return Math.max(MIN_THINKING_DELAY, scaled + jitter)
+}
 
 function loadMessages(): Message[] {
   try {
@@ -56,10 +66,19 @@ export default function HelenInterface() {
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
+
+  // Auto-grow textarea height to fit content, up to the CSS max-height
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [input])
 
   const handleSend = () => {
     const text = input.trim()
@@ -109,7 +128,7 @@ export default function HelenInterface() {
       saveMemories(updatedMemories)
 
       setIsThinking(false)
-    }, THINKING_DELAY)
+    }, thinkingDelay(text))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -132,7 +151,7 @@ export default function HelenInterface() {
           <span className="helen-logo-sm">🧠</span>
           <span>HELEN</span>
         </div>
-        <button className="clear-btn" onClick={handleClear} title="Clear conversation">
+        <button type="button" className="clear-btn" onClick={handleClear} title="Clear conversation">
           Clear
         </button>
       </header>
@@ -196,6 +215,7 @@ export default function HelenInterface() {
 
         <div className="input-area">
           <textarea
+            ref={textareaRef}
             className="helen-input"
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -205,9 +225,11 @@ export default function HelenInterface() {
             rows={1}
           />
           <button
+            type="button"
             className="send-btn"
             onClick={handleSend}
             disabled={isThinking || !input.trim()}
+            aria-label="Send message"
           >
             Send
           </button>
