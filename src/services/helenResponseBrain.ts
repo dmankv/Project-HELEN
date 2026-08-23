@@ -118,7 +118,7 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   const corePool = INTENT_CORE[context.intent]
   const closerPool = CLOSERS[context.mood]
   const memory = memoryPhrase(context.memories)
-  const prompt = (baseResponse || context.userMessage).trim().slice(0, 120)
+  const prompt = (baseResponse.length > 0 ? baseResponse : context.userMessage).trim().slice(0, 120)
 
   const openers = openerPool.slice(0, 2)
   const cores = corePool.slice(0, 2)

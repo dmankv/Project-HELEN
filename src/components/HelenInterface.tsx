@@ -103,8 +103,8 @@ export default function HelenInterface() {
       setMessages(updated)
       saveMessages(updated)
 
-      // Store user message as memory snippet
-      const newMemory: MemorySnippet = { text, relevance: 1 }
+      // Store user message as memory snippet (recency-weighted relevance)
+      const newMemory: MemorySnippet = { text, relevance: Date.now() }
       const updatedMemories = [...memories, newMemory].slice(-20)
       saveMemories(updatedMemories)
 
@@ -138,7 +138,12 @@ export default function HelenInterface() {
       </header>
 
       <div className="chat-area">
-        <div className="messages-container">
+        <div
+          className="messages-container"
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation"
+        >
           {messages.length === 0 && !isThinking && (
             <div className="welcome-screen">
               <div className="welcome-content">
