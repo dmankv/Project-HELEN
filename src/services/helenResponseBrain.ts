@@ -199,10 +199,11 @@ export function detectIntent(input: string, lastIntent?: ResponseIntent): Respon
     if (rule.pattern.test(input)) return rule.intent
   }
 
-  // Heuristic: if no intent matched and the message is short/vague, lean toward
-  // refusal rather than producing a topic-phrase non-answer.
+  // Heuristic: only fire refusal for extremely vague fragments (≤2 meaningful words,
+  // ends with ?, and contains no word longer than 3 chars — e.g. "why?" or "huh?").
+  // Short but substantive questions ("What is AI?", "How?") are left to reach 'answer'.
   const words = input.trim().split(/\s+/)
-  if (words.length <= 3 && /\?/.test(input)) return 'refusal'
+  if (words.length <= 2 && /\?/.test(input) && !words.some(w => /[a-z]{4,}/i.test(w))) return 'refusal'
 
   if (/\?$/.test(input.trim())) return 'answer'
   return 'answer'
@@ -229,10 +230,12 @@ function memoryPhrase(memories: MemorySnippet[] = []): string {
   if (!excerpt) return ''
   // Extract a short keyword phrase from the memory rather than quoting verbatim
   const FILLER = /^(i|can|could|please|write|tell|show|help|me|you|a|an|the|this|that|it|is|are|was|be|do|does|did|my|your|to|and|or|but|so|just|really|very)$/i
-  const keywords = excerpt.split(/\s+/).filter(w => !FILLER.test(w)).slice(0, 5).join(' ')
-  const ref = keywords || excerpt.slice(0, 40)
+  const keywords = excerpt.split(/\s+/).filter(w => !FILLER.test(w) && w.length >= 3).slice(0, 5).join(' ')
+  // If no meaningful keywords were found, skip the memory reference entirely
+  // rather than emitting a grammatically awkward phrase.
+  if (!keywords) return ''
   const opener = pick(MEMORY_OPENERS)
-  return `${opener} about ${ref} — `
+  return `${opener} about ${keywords} — `
 }
 
 // ---------------------------------------------------------------------------
@@ -270,7 +273,9 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   }
 
   // 4. For well-defined intents that have complete canned answers, use them.
-  const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify']
+  //    'answer' is included here so its context-asking responses are returned
+  //    standalone rather than being embedded in the composition pipeline.
+  const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify', 'answer']
   if (standAloneIntents.includes(intent)) {
     return pick(CANNED_ANSWERS[intent])
   }
