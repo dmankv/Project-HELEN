@@ -5,6 +5,7 @@ import {
   generateHumanLikeResponse,
 } from '../services/helenResponseBrain'
 import type { MemorySnippet } from '../services/helenResponseBrain'
+import learningSystem from '../services/helen_learning_integration'
 import '../styles/HelenInterface.css'
 
 interface Message {
@@ -92,6 +93,16 @@ export default function HelenInterface() {
         wantsShortAnswer,
       })
 
+      // Record the interaction in the learning system
+      learningSystem.recordInteraction(text, response, {
+        intent,
+        confidence: 0.8,
+        ambiguity: intent === 'clarify' ? 0.6 : 0.2,
+        memoryUsed: memories.length,
+        planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
+        timestamp: new Date(),
+      })
+
       const aiMsg: Message = {
         id: nextId(),
         role: 'assistant',
@@ -123,6 +134,7 @@ export default function HelenInterface() {
     setMessages([])
     localStorage.removeItem(MESSAGES_KEY)
     localStorage.removeItem(MEMORIES_KEY)
+    learningSystem.clearHistory()
   }
 
   return (
