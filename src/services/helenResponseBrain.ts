@@ -130,11 +130,11 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "Happy to — let me know if anything else comes up.",
   ],
   suggest: [
-    'A good next step would be to ',
-    'I recommend you ',
-    'One option you can try is to ',
-    "My suggestion would be to ",
-    "You might want to "
+    "A good next step would be to start small and iterate from there.",
+    "I'd recommend keeping it simple at first, then building up from a solid base.",
+    "One solid option is to break the problem into smaller pieces and tackle each one.",
+    "My suggestion: map out what you need first, then pick the approach that fits best.",
+    "You might want to try a few approaches and see which feels most natural for your use case.",
   ]
 }
 
@@ -309,8 +309,9 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   // 4. For well-defined intents that have complete canned answers, use them.
   //    'answer' is included here so its context-asking responses are returned
   //    standalone rather than being embedded in the composition pipeline.
-  //    'follow-up' is included so its complete-sentence pool is used directly.
-  const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify', 'answer', 'follow-up']
+  //    'follow-up' and 'suggest' are included so their complete-sentence pools
+  //    are used directly rather than being fed through the fragment composition path.
+  const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify', 'answer', 'follow-up', 'suggest']
   if (standAloneIntents.includes(intent)) {
     return pick(CANNED_ANSWERS[intent])
   }
