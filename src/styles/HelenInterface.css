@@ -588,3 +588,36 @@
     font-size: 0.95rem;
   }
 }
+
+/* ── Cancel Button ───────────────────────────────────── */
+.cancel-btn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  margin-top: 0.35rem;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  color: var(--color-text);
+  background-color: var(--color-surface-light);
+}
+
+/* ── Backend badge ───────────────────────────────────── */
+.backend-badge {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  margin-top: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+/* ── Welcome hint ────────────────────────────────────── */
+.welcome-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin-top: 0.75rem;
+  line-height: 1.7;
+}

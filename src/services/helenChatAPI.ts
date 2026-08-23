@@ -1,0 +1,73 @@
+/**
+ * HELEN Chat API Client
+ *
+ * Calls the configured backend when VITE_HELEN_API_URL is set.
+ * Falls back to null (caller uses local brain) when not configured or on error.
+ *
+ * Environment variable (frontend):
+ *   VITE_HELEN_API_URL   e.g. https://api.example.com
+ *                        Leave unset to always use the local brain.
+ */
+
+export interface APIMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface APIResponse {
+  message: string
+}
+
+const BASE_URL: string = (import.meta as { env?: Record<string, string> }).env?.VITE_HELEN_API_URL ?? ''
+
+const API_TIMEOUT_MS = 30_000
+
+/**
+ * Call the backend /api/chat endpoint.
+ * Returns null if the backend is not configured or the request fails.
+ */
+export async function callChatAPI(
+  messages: APIMessage[],
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (!BASE_URL) return null
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+  // Forward external cancellation into our internal controller
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!res.ok) {
+      console.warn(`[helen-api] Request failed: ${res.status}`)
+      return null
+    }
+
+    const data = (await res.json()) as APIResponse
+    return data.message ?? null
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if ((err as Error).name === 'AbortError') {
+      console.warn('[helen-api] Request aborted')
+    } else {
+      console.warn('[helen-api] Request error:', (err as Error).message)
+    }
+    return null
+  }
+}
+
+/** True when a backend URL is configured. */
+export function hasBackend(): boolean {
+  return BASE_URL.length > 0
+}
