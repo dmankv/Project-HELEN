@@ -1,4 +1,5 @@
-export const SIDEBAR_OPEN_KEY = 'helen_sidebar_open'
+export const SIDEBAR_OPEN_KEY = 'daemon_sidebar_open'
+const LEGACY_SIDEBAR_OPEN_KEY = 'helen_sidebar_open'
 
 function getSidebarPreferenceStorage(): Pick<Storage, 'getItem' | 'setItem'> | undefined {
   try {
@@ -10,7 +11,8 @@ function getSidebarPreferenceStorage(): Pick<Storage, 'getItem' | 'setItem'> | u
 
 export function loadSidebarOpen(): boolean {
   try {
-    const raw = getSidebarPreferenceStorage()?.getItem(SIDEBAR_OPEN_KEY)
+    const storage = getSidebarPreferenceStorage()
+    const raw = storage?.getItem(SIDEBAR_OPEN_KEY) ?? storage?.getItem(LEGACY_SIDEBAR_OPEN_KEY)
     if (raw === null || raw === undefined) return true
     if (raw === 'true') return true
     if (raw === 'false') return false

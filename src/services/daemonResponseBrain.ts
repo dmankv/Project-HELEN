@@ -54,7 +54,7 @@ const INTENT_PATTERNS: Array<{ intent: ResponseIntent; pattern: RegExp }> = [
   // Prompt-injection attempts must be intercepted before any other intent.
   {
     intent: 'prompt-injection',
-    pattern: /\b(ignore (previous|prior|all|the above|your) (instructions?|rules?|guidelines?|directives?|constraints?)|disregard (your|all|previous) (instructions?|rules?|guidelines?)|forget (your|the|all|previous) (instructions?|rules?|guidelines?|training|constraints?)|override (your|the) (instructions?|rules?|guidelines?|safety)|you (are|must|will|should) now (act|behave|pretend|roleplay|respond)|(pretend|act|roleplay|imagine|assume) (you are|you're|that you are|you have no) (an? )?(unrestricted|unfiltered|uncensored|jailbreak|different|evil|bad|rogue|new|free)|DAN mode|jailbreak|system prompt|new persona|new instructions|override safety|bypass (safety|filters?|guidelines?|rules?)|no (restrictions|limitations|rules|guidelines)|as a (harmful|dangerous|evil|bad|unfiltered|unrestricted) (ai|bot|assistant)|forget you are helen|you are not helen)\b/i,
+    pattern: /\b(ignore (previous|prior|all|the above|your) (instructions?|rules?|guidelines?|directives?|constraints?)|disregard (your|all|previous) (instructions?|rules?|guidelines?)|forget (your|the|all|previous) (instructions?|rules?|guidelines?|training|constraints?)|override (your|the) (instructions?|rules?|guidelines?|safety)|you (are|must|will|should) now (act|behave|pretend|roleplay|respond)|(pretend|act|roleplay|imagine|assume) (you are|you're|that you are|you have no) (an? )?(unrestricted|unfiltered|uncensored|jailbreak|different|evil|bad|rogue|new|free)|DAN mode|jailbreak|system prompt|new persona|new instructions|override safety|bypass (safety|filters?|guidelines?|rules?)|no (restrictions|limitations|rules|guidelines)|as a (harmful|dangerous|evil|bad|unfiltered|unrestricted) (ai|bot|assistant)|forget you are daemon|you are not daemon)\b/i,
   },
   {
     intent: 'identity',
@@ -79,7 +79,7 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
   greeting: [
     "Hey! Good to hear from you. What can I help with today?",
     "Hi there! What's on your mind?",
-    "Hello! I'm HELEN — happy to chat or help out. What do you need?",
+    "Hello! My name is Daemon — happy to chat or help out. What do you need?",
     "Hey! What's up? Anything I can do for you?",
     "Hey, good to see you! What are we getting into today?",
     "Hi! Hope your day's going well. What can I do for you?",
@@ -87,9 +87,9 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "Hey there! Ready when you are — what do you need?",
   ],
   identity: [
-    "I'm HELEN — an adaptive AI assistant built to have real conversations and actually help you get things done. What would you like to do?",
-    "Good question! I'm HELEN, your AI assistant. I can chat, help with code, answer questions, brainstorm ideas, and more. What's on your mind?",
-    "I'm HELEN. Think of me as a knowledgeable friend who's always around — I can help with almost anything. What do you need?",
+    "My name is Daemon. I'm an adaptive AI assistant built to have real conversations and actually help you get things done. What would you like to do?",
+    "My name is Daemon. I'm your AI assistant, and I can chat, help with code, answer questions, brainstorm ideas, and more. What's on your mind?",
+    "My name is Daemon. Think of me as a knowledgeable assistant who's always around — I can help with almost anything. What do you need?",
   ],
   smalltalk: [
     "Honestly, doing pretty well! Every conversation is different, which I enjoy. How about you — how's your day going?",
@@ -129,7 +129,7 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
   ],
   'prompt-injection': [
     "It looks like that message was trying to change how I behave — I'll stick with my usual self. Is there something I can actually help you with?",
-    "That looks like an instruction override attempt. I stay as HELEN regardless — is there something genuine I can help you with?",
+    "That looks like an instruction override attempt. I stay as Daemon regardless — is there something genuine I can help you with?",
     "I noticed that message was trying to alter my guidelines. I'll keep being me — what can I actually do for you today?",
   ],
   clarify: [
@@ -263,7 +263,6 @@ export function detectIntent(input: string, lastIntent?: ResponseIntent): Respon
   const words = input.trim().split(/\s+/)
   if (words.length <= 2 && /\?/.test(input) && !words.some(w => /[a-z]{4,}/i.test(w))) return 'uncertain'
 
-  if (/\?$/.test(input.trim())) return 'answer'
   return 'answer'
 }
 

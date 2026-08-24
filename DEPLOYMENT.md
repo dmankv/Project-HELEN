@@ -1,8 +1,8 @@
-# HELEN – System Architecture & Deployment
+# Daemon – System Architecture & Deployment
 
 ## Overview
 
-HELEN is a React/TypeScript chat interface deployed as a **static site on GitHub Pages**.
+Daemon is a React/TypeScript chat interface deployed as a **static site on GitHub Pages**.
 The frontend includes a built-in rule/template-based response engine that works with no backend.
 An optional Node.js API proxy (`server/`) can be separately hosted to route requests to an LLM
 provider (OpenAI or Anthropic) without exposing API keys in the browser.
@@ -15,16 +15,16 @@ provider (OpenAI or Anthropic) without exposing API keys in the browser.
 index.html
   └─ src/main.tsx          (React root mount)
        └─ src/App.tsx       (top-level component shell)
-            └─ src/components/HelenInterface.tsx   (chat UI)
-                 └─ src/services/helenResponseBrain.ts  (local rule engine)
-                 └─ src/services/helenChatAPI.ts        (optional cloud API)
+            └─ src/components/DaemonInterface.tsx   (chat UI)
+                 └─ src/services/daemonResponseBrain.ts  (local rule engine)
+                 └─ src/services/daemonChatAPI.ts        (optional cloud API)
 ```
 
 ### Local mode (default)
-`helenResponseBrain.ts` produces responses entirely in the browser – no network call is made.
+`daemonResponseBrain.ts` produces responses entirely in the browser – no network call is made.
 
 ### Cloud API mode (optional)
-When the environment variable `VITE_HELEN_API_URL` is set at build time, `helenChatAPI.ts` sends
+When the environment variable `VITE_DAEMON_API_URL` is set at build time, `daemonChatAPI.ts` sends
 requests to that URL. The server at that URL must be the separately hosted `server/` gateway.
 
 ---
@@ -35,10 +35,10 @@ requests to that URL. The server at that URL must be the separately hosted `serv
 |------|---------|
 | `src/main.tsx` | React root (`ReactDOM.createRoot`) |
 | `src/App.tsx` | App shell |
-| `src/components/HelenInterface.tsx` | Chat UI, message list, input |
-| `src/services/helenResponseBrain.ts` | Rule/template-based local response engine |
-| `src/services/helenChatAPI.ts` | HTTP client for optional cloud API |
-| `src/services/helenMemory.ts` | In-browser durable memory persisted in localStorage until cleared |
+| `src/components/DaemonInterface.tsx` | Chat UI, message list, input |
+| `src/services/daemonResponseBrain.ts` | Rule/template-based local response engine |
+| `src/services/daemonChatAPI.ts` | HTTP client for optional cloud API |
+| `src/services/daemonMemory.ts` | In-browser durable memory persisted in localStorage until cleared |
 
 ---
 
@@ -49,22 +49,22 @@ It proxies `POST /api/chat` to OpenAI or Anthropic using server-side credentials
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HELEN_PROVIDER` | No | `openai` | `openai` or `anthropic` |
+| `DAEMON_PROVIDER` | No | `openai` | `openai` or `anthropic` |
 | `OPENAI_API_KEY` | When provider=openai | – | OpenAI secret key |
 | `ANTHROPIC_API_KEY` | When provider=anthropic | – | Anthropic secret key |
-| `HELEN_MODEL` | No | provider default | Override model name |
-| `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | Comma-separated allowed CORS origins |
+| `DAEMON_MODEL` | No | provider default | Override model name |
+| `DAEMON_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | Comma-separated allowed CORS origins |
 | `PORT` | No | `3001` | Listening port |
-| `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
-| `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` when deployed behind a reverse proxy (Vercel, Fly.io, nginx, etc.) so the rate limiter reads the real client IP from `X-Forwarded-For` instead of the proxy's socket address. **Leave unset when the server faces the internet directly** to prevent IP-spoofing. |
+| `DAEMON_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `DAEMON_TRUST_PROXY` | No | _(unset)_ | Set to `1` when deployed behind a reverse proxy (Vercel, Fly.io, nginx, etc.) so the rate limiter reads the real client IP from `X-Forwarded-For` instead of the proxy's socket address. **Leave unset when the server faces the internet directly** to prevent IP-spoofing. |
 
 Frontend variable (set at Vite build time):
 
 | Variable | Description |
 |----------|-------------|
-| `VITE_HELEN_API_URL` | Full URL to server (e.g. `https://your-server.example.com`). Omit to use local mode. |
+| `VITE_DAEMON_API_URL` | Full URL to server (e.g. `https://your-server.example.com`). Omit to use local mode. |
 
-> **CSP note:** When `VITE_HELEN_API_URL` is set, `vite.config.ts` automatically adds that
+> **CSP note:** When `VITE_DAEMON_API_URL` is set, `vite.config.ts` automatically adds that
 > server's origin to the `connect-src` directive of the built HTML's Content-Security-Policy,
 > allowing the browser to reach the backend.  If you patch or replace `dist/index.html` after
 > the build, ensure `connect-src` includes your server's origin — otherwise every API call
@@ -143,7 +143,7 @@ Vite is configured with `base: '/Project-HELEN/'` to match this URL.
 ## GitHub Pages limitations
 
 - **Static files only.** No server-side code or API keys.
-- The HELEN cloud API must be hosted elsewhere if desired.
+- The Daemon cloud API must be hosted elsewhere if desired.
 - All data (conversation history) is stored in the user's browser (`localStorage`).
 - No analytics dashboard, no server-side memory – these are not deployed.
 - `src/services/defself_l.py` is an experimental standalone prototype and is not used by Pages.
@@ -153,6 +153,6 @@ Vite is configured with `base: '/Project-HELEN/'` to match this URL.
 ## CORS policy
 
 The optional server (`server/index.ts`) allows cross-origin requests **only** from origins
-listed in `HELEN_ALLOWED_ORIGINS`. Requests from unknown origins receive no
+listed in `DAEMON_ALLOWED_ORIGINS`. Requests from unknown origins receive no
 `Access-Control-Allow-Origin` header. The server never echoes back an untrusted origin.
 Allowed CORS preflight requests return `204`; disallowed preflight requests return `403`.

@@ -1,6 +1,6 @@
 #!/bin/bash
-# HELEN CLI Runner Script
-# Runs HELEN from any working directory by resolving the repo root from the
+# Daemon CLI Runner Script
+# Runs Daemon from any working directory by resolving the repo root from the
 # script location rather than the caller's current directory.
 
 set -euo pipefail
@@ -23,4 +23,4 @@ fi
 # Execute the TypeScript CLI, forwarding all arguments.
 # Use 'exec' so the child process replaces the shell and its exit code is
 # returned directly to the caller (interactive and scripted use both work).
-exec npx --prefix "$REPO_ROOT" tsx "$REPO_ROOT/src/cli/helen-cli.ts" "$@"
+exec npx --prefix "$REPO_ROOT" tsx "$REPO_ROOT/src/cli/daemon-cli.ts" "$@"

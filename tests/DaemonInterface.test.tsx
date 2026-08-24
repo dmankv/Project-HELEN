@@ -1,5 +1,5 @@
 /**
- * HelenInterface component smoke tests.
+ * DaemonInterface component smoke tests.
  *
  * Exercises the main user-facing interaction paths without a real browser or
  * backend.  All services that touch localStorage are mocked to keep tests
@@ -14,18 +14,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // can hoist them.
 // ---------------------------------------------------------------------------
 
-vi.mock('../src/services/helenResponseBrain', () => ({
+vi.mock('../src/services/daemonResponseBrain', () => ({
   detectMood: vi.fn(() => 'neutral'),
   detectIntent: vi.fn(() => 'answer'),
   generateHumanLikeResponse: vi.fn(() => 'Test response from local brain.'),
 }))
 
-vi.mock('../src/services/helenChatAPI', () => ({
+vi.mock('../src/services/daemonChatAPI', () => ({
   callChatAPI: vi.fn(() => Promise.resolve(null)),
   hasBackend: vi.fn(() => false),
 }))
 
-vi.mock('../src/services/helenMemory', () => ({
+vi.mock('../src/services/daemonMemory', () => ({
   saveMemory: vi.fn((text: string) => ({ id: 'mem-1', text, createdAt: new Date().toISOString() })),
   listMemories: vi.fn(() => []),
   forgetLast: vi.fn(() => null),
@@ -35,7 +35,7 @@ vi.mock('../src/services/helenMemory', () => ({
   formatMemoriesForContext: vi.fn(() => ''),
 }))
 
-vi.mock('../src/services/helen_learning_integration', () => ({
+vi.mock('../src/services/daemon_learning_integration', () => ({
   default: {
     recordInteraction: vi.fn(() => ({ id: 'interaction-1', input: '', response: '', metadata: {} })),
     processFeedback: vi.fn(),
@@ -55,8 +55,8 @@ vi.mock('../src/services/helen_learning_integration', () => ({
 }))
 
 // Import the component after mocks are registered.
-import HelenInterface from '../src/components/HelenInterface'
-import { saveMemory, listMemories, forgetAll } from '../src/services/helenMemory'
+import DaemonInterface from '../src/components/DaemonInterface'
+import { saveMemory, listMemories, forgetAll } from '../src/services/daemonMemory'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,28 +73,28 @@ beforeEach(() => {
 
 const WAIT_OPTS = { timeout: 5000 }
 
-describe('HelenInterface', () => {
+describe('DaemonInterface', () => {
   // ── Render ────────────────────────────────────────────────────────────────
 
   it('renders the welcome screen when there are no messages', () => {
-    render(<HelenInterface />)
-    expect(screen.getByText(/Hello, I'm HELEN/i)).toBeInTheDocument()
+    render(<DaemonInterface />)
+    expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
   })
 
   it('renders the message input and Send button', () => {
-    render(<HelenInterface />)
-    expect(screen.getByPlaceholderText(/Message HELEN/i)).toBeInTheDocument()
+    render(<DaemonInterface />)
+    expect(screen.getByPlaceholderText(/Message Daemon/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Send message/i })).toBeInTheDocument()
   })
 
   it('Send button is disabled when input is empty', () => {
-    render(<HelenInterface />)
+    render(<DaemonInterface />)
     expect(screen.getByRole('button', { name: /Send message/i })).toBeDisabled()
   })
 
   it('Send button becomes enabled when the user types', () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'Hello' } })
     expect(screen.getByRole('button', { name: /Send message/i })).not.toBeDisabled()
   })
@@ -102,8 +102,8 @@ describe('HelenInterface', () => {
   // ── Sending a message ─────────────────────────────────────────────────────
 
   it('displays the user message immediately after sending', async () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'What is your name?' } })
     fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
 
@@ -118,8 +118,8 @@ describe('HelenInterface', () => {
   }, 8000)
 
   it('clears the input field after sending', async () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i) as HTMLTextAreaElement
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i) as HTMLTextAreaElement
     fireEvent.change(input, { target: { value: 'hello' } })
     fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
     expect(input.value).toBe('')
@@ -128,8 +128,8 @@ describe('HelenInterface', () => {
   // ── Memory commands ───────────────────────────────────────────────────────
 
   it('remember command calls saveMemory and echoes confirmation', async () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'remember this: I prefer Python' } })
     fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
 
@@ -138,16 +138,16 @@ describe('HelenInterface', () => {
   }, 8000)
 
   it('recall command calls listMemories', async () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'what do you remember?' } })
     fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
     await waitFor(() => expect(listMemories).toHaveBeenCalled(), WAIT_OPTS)
   }, 8000)
 
   it('forget all command calls forgetAll', async () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'forget all memories' } })
     fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
     await waitFor(() => expect(forgetAll).toHaveBeenCalled(), WAIT_OPTS)
@@ -156,8 +156,8 @@ describe('HelenInterface', () => {
   // ── Clear All button ──────────────────────────────────────────────────────
 
   it('"Clear All" button removes all messages from view', async () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'hello' } })
     fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
 
@@ -167,22 +167,22 @@ describe('HelenInterface', () => {
     fireEvent.click(screen.getByRole('button', { name: /Clear all conversations/i }))
 
     expect(screen.queryByText('hello')).not.toBeInTheDocument()
-    expect(screen.getByText(/Hello, I'm HELEN/i)).toBeInTheDocument()
+    expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
   }, 8000)
 
   // ── Enter key ─────────────────────────────────────────────────────────────
 
   it('pressing Enter submits the message', () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'test Enter key' } })
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: false })
     expect(screen.getByText('test Enter key')).toBeInTheDocument()
   })
 
   it('pressing Shift+Enter does NOT submit the message', () => {
-    render(<HelenInterface />)
-    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'no submit' } })
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
     const messageRows = document.querySelectorAll('.message-row')
@@ -192,7 +192,7 @@ describe('HelenInterface', () => {
   // ── Sidebar ───────────────────────────────────────────────────────────────
 
   it('sidebar close and reopen buttons toggle the sidebar', () => {
-    render(<HelenInterface />)
+    render(<DaemonInterface />)
     const closeBtn = screen.getByRole('button', { name: /Close sidebar/i })
     fireEvent.click(closeBtn)
     expect(screen.queryByRole('navigation', { name: /Conversation history/i })).not.toBeInTheDocument()

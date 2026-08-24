@@ -3,9 +3,9 @@ import {
   detectMood,
   detectIntent,
   generateHumanLikeResponse,
-} from '../services/helenResponseBrain'
-import type { MemorySnippet, ResponseIntent } from '../services/helenResponseBrain'
-import learningSystem from '../services/helen_learning_integration'
+} from '../services/daemonResponseBrain'
+import type { MemorySnippet, ResponseIntent } from '../services/daemonResponseBrain'
+import learningSystem from '../services/daemon_learning_integration'
 import {
   saveMemory,
   listMemories,
@@ -14,11 +14,11 @@ import {
   forgetAll,
   retrieveRelevant,
   formatMemoriesForContext,
-} from '../services/helenMemory'
-import { callChatAPI, hasBackend } from '../services/helenChatAPI'
-import type { APIMessage } from '../services/helenChatAPI'
+} from '../services/daemonMemory'
+import { callChatAPI, hasBackend } from '../services/daemonChatAPI'
+import type { APIMessage } from '../services/daemonChatAPI'
 import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
-import '../styles/HelenInterface.css'
+import '../styles/DaemonInterface.css'
 
 interface Message {
   id: string
@@ -34,8 +34,8 @@ interface Conversation {
   createdAt: string
 }
 
-const MESSAGES_KEY = 'helen_messages'
-const CONVERSATIONS_KEY = 'helen_conversations'
+const MESSAGES_KEY = 'daemon_messages'
+const CONVERSATIONS_KEY = 'daemon_conversations'
 const MIN_THINKING_DELAY = 600
 const MAX_THINKING_DELAY = 1800
 
@@ -85,7 +85,7 @@ function conversationTitle(messages: Message[]): string {
 }
 
 let _idCounter = 0
-const nextId = () => 'helen-' + Date.now() + '-' + (++_idCounter)
+const nextId = () => 'daemon-' + Date.now() + '-' + (++_idCounter)
 
 // ---------------------------------------------------------------------------
 // Memory command parser
@@ -157,11 +157,11 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 // Component
 // ---------------------------------------------------------------------------
 
-interface HelenInterfaceProps {
+interface DaemonInterfaceProps {
   onLoginClick?: () => void
 }
 
-export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {}) {
+export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps = {}) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -371,7 +371,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
       abortRef.current = null
     } catch (err) {
       // Ensure the UI is never permanently frozen if an unexpected error occurs
-      console.error('[helen] Unexpected error in handleSend:', (err as Error).message)
+      console.error('[daemon] Unexpected error in handleSend:', (err as Error).message)
       setIsThinking(false)
       abortRef.current = null
     }
@@ -427,13 +427,13 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
   const insights = learningSystem.getLearningInsights()
 
   return (
-    <div className="helen-app">
+    <div className="daemon-app">
       {sidebarOpen && (
-        <nav className="helen-sidebar" aria-label="Conversation history">
+        <nav className="daemon-sidebar" aria-label="Conversation history">
           <div className="sidebar-header">
-            <div className="helen-brand">
-              <span className="helen-logo" aria-hidden="true">🧠</span>
-              <span>HELEN</span>
+            <div className="daemon-brand">
+              <span className="daemon-logo" aria-hidden="true">🧠</span>
+              <span>Daemon</span>
             </div>
             <button
               type="button"
@@ -517,7 +517,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
         </nav>
       )}
 
-      <main className="helen-main">
+      <main className="daemon-main">
         {!sidebarOpen && (
           <button
             type="button"
@@ -529,10 +529,10 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
             ▶
           </button>
         )}
-        <header className="helen-header">
+        <header className="daemon-header">
           <div className="header-title">
-            <span className="helen-logo-sm" aria-hidden="true">🧠</span>
-            <span>HELEN</span>
+            <span className="daemon-logo-sm" aria-hidden="true">🧠</span>
+            <span>Daemon</span>
           </div>
           <div className="header-actions">
             <button
@@ -570,7 +570,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
               <div className="welcome-screen">
                 <div className="welcome-content">
                   <div className="welcome-icon" aria-hidden="true">🧠</div>
-                  <h1>Hello, I'm HELEN</h1>
+                  <h1>Hello, I'm Daemon</h1>
                   <p>Your adaptive AI assistant. Say something to begin.</p>
                   <p className="welcome-hint">
                     Try: <em>"remember this: I prefer concise answers"</em><br />
@@ -635,7 +635,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
                 <div className="message-avatar" aria-hidden="true">🧠</div>
                 <div className="message-body">
                   <div className="bubble assistant-bubble">
-                    <div className="typing-indicator" aria-label="HELEN is typing">
+                    <div className="typing-indicator" aria-label="Daemon is typing">
                       <span></span>
                       <span></span>
                       <span></span>
@@ -659,11 +659,11 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
           <div className="input-area">
             <textarea
               ref={textareaRef}
-              className="helen-input"
+              className="daemon-input"
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message HELEN…"
+              placeholder="Message Daemon…"
               aria-label="Message input"
               disabled={isThinking}
               rows={1}

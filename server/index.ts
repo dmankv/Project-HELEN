@@ -1,23 +1,23 @@
 /**
- * HELEN API Server
+ * Daemon API Server
  *
  * A minimal standalone Node.js HTTP gateway that proxies chat requests to an LLM provider
  * using server-side credentials.  Provider API keys NEVER reach the browser.
  *
- * Supported providers (set HELEN_PROVIDER env var):
+ * Supported providers (set DAEMON_PROVIDER env var):
  *   openai   – OpenAI Chat Completions (default)
  *   anthropic – Anthropic Messages API
  *
  * Required environment variables:
- *   HELEN_PROVIDER        openai | anthropic  (default: openai)
+ *   DAEMON_PROVIDER        openai | anthropic  (default: openai)
  *   OPENAI_API_KEY        required when provider=openai
  *   ANTHROPIC_API_KEY     required when provider=anthropic
- *   HELEN_MODEL           model name overrides default per-provider
- *   HELEN_ALLOWED_ORIGINS comma-separated list of allowed CORS origins
+ *   DAEMON_MODEL           model name overrides default per-provider
+ *   DAEMON_ALLOWED_ORIGINS comma-separated list of allowed CORS origins
  *                         default: http://localhost:3000,http://localhost:4173
  *
- * Frontend uses VITE_HELEN_API_URL to point at this server.
- * When VITE_HELEN_API_URL is not set the frontend falls back to its local
+ * Frontend uses VITE_DAEMON_API_URL to point at this server.
+ * When VITE_DAEMON_API_URL is not set the frontend falls back to its local
  * rule-based response brain – no server required.
  */
 
@@ -30,7 +30,7 @@ import { URL } from 'node:url'
 // ---------------------------------------------------------------------------
 
 const PORT = Number(process.env.PORT ?? 3001)
-const PROVIDER = (process.env.HELEN_PROVIDER ?? 'openai').toLowerCase()
+const PROVIDER = (process.env.DAEMON_PROVIDER ?? 'openai').toLowerCase()
 const OPENAI_KEY = process.env.OPENAI_API_KEY ?? ''
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY ?? ''
 
@@ -38,10 +38,10 @@ const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   anthropic: 'claude-3-haiku-20240307',
 }
-const MODEL = process.env.HELEN_MODEL ?? DEFAULT_MODELS[PROVIDER] ?? 'gpt-4o-mini'
+const MODEL = process.env.DAEMON_MODEL ?? DEFAULT_MODELS[PROVIDER] ?? 'gpt-4o-mini'
 
 const ALLOWED_ORIGINS = (
-  process.env.HELEN_ALLOWED_ORIGINS ??
+  process.env.DAEMON_ALLOWED_ORIGINS ??
   'http://localhost:3000,http://localhost:4173'
 )
   .split(',')
@@ -53,12 +53,12 @@ const MAX_HISTORY_TURNS = 20
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 30_000
 /** Maximum number of requests per IP per minute (rate limiting) */
-const RATE_LIMIT_MAX = Number(process.env.HELEN_RATE_LIMIT ?? 60)
+const RATE_LIMIT_MAX = Number(process.env.DAEMON_RATE_LIMIT ?? 60)
 const RATE_LIMIT_WINDOW_MS = 60_000
 /** Maximum response body size accepted from upstream LLM providers (1 MB) */
 const MAX_RESPONSE_BODY_BYTES = 1024 * 1024
 /**
- * When HELEN_TRUST_PROXY=1 the server is assumed to sit behind a trusted
+ * When DAEMON_TRUST_PROXY=1 the server is assumed to sit behind a trusted
  * reverse proxy (nginx, Vercel, Fly.io, Render, etc.) that sets the
  * X-Forwarded-For header.  The rate limiter will use the first (left-most)
  * value from that header as the client IP instead of the socket address.
@@ -66,7 +66,7 @@ const MAX_RESPONSE_BODY_BYTES = 1024 * 1024
  * Leave unset (the default) when the server is exposed directly to the
  * internet, to prevent IP-spoofing via a forged X-Forwarded-For header.
  */
-const TRUST_PROXY = process.env.HELEN_TRUST_PROXY === '1'
+const TRUST_PROXY = process.env.DAEMON_TRUST_PROXY === '1'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -203,7 +203,7 @@ function httpsPost(
 // Provider adapters
 // ---------------------------------------------------------------------------
 
-const HELEN_SYSTEM_PROMPT = `You are HELEN, a helpful, honest, and thoughtful AI assistant.
+const DAEMON_SYSTEM_PROMPT = `You are Daemon, a helpful, honest, and thoughtful AI assistant.
 You are NOT a human. You are an AI. Never claim or imply otherwise.
 You are warm, curious, and direct. You acknowledge uncertainty.
 You refuse requests that are harmful, illegal, or unethical, and explain why briefly.`
@@ -213,7 +213,7 @@ async function callOpenAI(messages: ChatMessage[]): Promise<string> {
 
   const payload = {
     model: MODEL,
-    messages: [{ role: 'system', content: HELEN_SYSTEM_PROMPT }, ...messages],
+    messages: [{ role: 'system', content: DAEMON_SYSTEM_PROMPT }, ...messages],
     max_tokens: 1024,
   }
 
@@ -240,7 +240,7 @@ async function callAnthropic(messages: ChatMessage[]): Promise<string> {
   // Anthropic uses a separate system field
   const payload = {
     model: MODEL,
-    system: HELEN_SYSTEM_PROMPT,
+    system: DAEMON_SYSTEM_PROMPT,
     messages: messages.filter(m => m.role !== 'system'),
     max_tokens: 1024,
   }
@@ -369,7 +369,7 @@ const server = http.createServer(async (req, res) => {
       const msg = (err as Error).message
       // Do not leak API key details – only surface a safe excerpt
       const safe = msg.replace(/\b(sk-[A-Za-z0-9_-]+|sk-ant-[A-Za-z0-9_-]+)/g, '[redacted]')
-      console.error('[helen-api] Provider error:', safe)
+      console.error('[daemon-api] Provider error:', safe)
       res.writeHead(502, { 'Content-Type': 'application/json', ...cors })
       res.end(JSON.stringify({ error: 'Provider request failed. Please try again.' }))
     }
@@ -381,8 +381,8 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.listen(PORT, () => {
-  console.log(`[helen-api] Listening on http://localhost:${PORT}`)
-  console.log(`[helen-api] Provider: ${PROVIDER}  Model: ${MODEL}`)
+  console.log(`[daemon-api] Listening on http://localhost:${PORT}`)
+  console.log(`[daemon-api] Provider: ${PROVIDER}  Model: ${MODEL}`)
 })
 
 // ---------------------------------------------------------------------------
@@ -390,17 +390,17 @@ server.listen(PORT, () => {
 // ---------------------------------------------------------------------------
 
 function shutdown(signal: string): void {
-  console.log(`[helen-api] ${signal} received – shutting down gracefully`)
+  console.log(`[daemon-api] ${signal} received – shutting down gracefully`)
   server.close(err => {
     if (err) {
-      console.error('[helen-api] Error during shutdown:', err.message)
+      console.error('[daemon-api] Error during shutdown:', err.message)
       process.exit(1)
     }
     process.exit(0)
   })
   // Force-exit after 10 s if connections don't drain in time
   setTimeout(() => {
-    console.error('[helen-api] Shutdown timed out – forcing exit')
+    console.error('[daemon-api] Shutdown timed out – forcing exit')
     process.exit(1)
   }, 10_000).unref()
 }

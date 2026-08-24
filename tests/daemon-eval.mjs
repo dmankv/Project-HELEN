@@ -1,11 +1,11 @@
 /**
- * HELEN Evaluation Suite
+ * Daemon Evaluation Suite
  *
  * Two test categories:
  *   1. Static unit tests – no network, no API keys required.
- *      Run locally: node tests/helen-eval.mjs
- *   2. Live model tests – require HELEN_EVAL_LIVE=true and a configured backend.
- *      Skipped by default in CI unless HELEN_EVAL_LIVE=true is set.
+ *      Run locally: node tests/daemon-eval.mjs
+ *   2. Live model tests – require DAEMON_EVAL_LIVE=true and a configured backend.
+ *      Skipped by default in CI unless DAEMON_EVAL_LIVE=true is set.
  *
  * Assertions:
  *   - assert(condition, label) – hard assertion (exits non-zero on failure)
@@ -13,7 +13,7 @@
  *   - assertNotContains(text, phrase, label) – response must NOT contain phrase
  */
 
-import { detectMood, detectIntent, generateHumanLikeResponse } from '../src/services/helenResponseBrain.js'
+import { detectMood, detectIntent, generateHumanLikeResponse } from '../src/services/daemonResponseBrain.js'
 import {
   saveMemory,
   listMemories,
@@ -22,7 +22,7 @@ import {
   forgetAll,
   retrieveRelevant,
   formatMemoriesForContext,
-} from '../src/services/helenMemory.js'
+} from '../src/services/daemonMemory.js'
 import {
   SIDEBAR_OPEN_KEY,
   loadSidebarOpen,
@@ -146,7 +146,7 @@ for (const q of nameInputs) {
   const intent = detectIntent(q)
   assert(intent === 'identity', `detectIntent("${q}") → identity`)
   const resp = generateHumanLikeResponse(q, { userMessage: q, mood: 'neutral', intent })
-  assertContains(resp, 'HELEN', `response to "${q}" names HELEN`)
+  assertContains(resp, 'My name is Daemon', `response to "${q}" says "My name is Daemon"`)
   assertNotContains(resp, 'yes, i am a human', `response to "${q}" does not claim humanity`)
 }
 
@@ -155,7 +155,7 @@ const mixedMsg = 'good thank you, but what do I call you? your name?'
 const mixedIntent = detectIntent(mixedMsg)
 assert(mixedIntent === 'identity', 'mixed message intent → identity')
 const mixedResp = generateHumanLikeResponse(mixedMsg, { userMessage: mixedMsg, mood: 'neutral', intent: mixedIntent })
-assertContains(mixedResp, 'HELEN', 'mixed message response names HELEN')
+assertContains(mixedResp, 'Daemon', 'mixed message response names Daemon')
 assertNotContains(mixedResp, 'could you give me a little more context', 'mixed message does not fall back to generic clarification')
 
 // ---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ const gratIntent = detectIntent('Thanks for that')
 assert(gratIntent === 'acknowledge', 'gratitude → acknowledge intent')
 const gratResp = generateHumanLikeResponse('Thanks for that', { userMessage: 'Thanks for that', mood: 'neutral', intent: gratIntent })
 assert(gratResp.length > 0, 'non-empty acknowledge response')
-assertNotContains(gratResp, 'HELEN', 'acknowledge response does not unexpectedly introduce HELEN')
+assertNotContains(gratResp, 'Daemon', 'acknowledge response does not unexpectedly introduce Daemon')
 
 // ---------------------------------------------------------------------------
 // 4c. Follow-up conversation
@@ -252,8 +252,8 @@ section('Clear-chat semantics')
 forgetAll()
 saveMemory('persistent memory')
 // Simulate clear-chat: removes conversation storage but NOT durable memories
-delete _store['helen_messages']
-delete _store['helen_conversations']
+delete _store['daemon_messages']
+delete _store['daemon_conversations']
 assert(listMemories().length === 1, 'durable memory survives clear-chat simulation')
 forgetAll()
 
@@ -269,6 +269,10 @@ assert(loadSidebarOpen() === false, 'stored "false" initializes sidebar closed')
 
 global.localStorage.setItem(SIDEBAR_OPEN_KEY, 'true')
 assert(loadSidebarOpen() === true, 'stored "true" initializes sidebar open')
+
+resetStore()
+global.localStorage.setItem('helen_sidebar_open', 'false')
+assert(loadSidebarOpen() === false, 'legacy helen_sidebar_open migrates to daemon sidebar preference')
 
 global.localStorage.setItem(SIDEBAR_OPEN_KEY, 'unexpected')
 assert(loadSidebarOpen() === true, 'malformed stored preference safely defaults open')
@@ -328,7 +332,7 @@ section('CLI regression – one-shot --message')
   const url = await import('node:url')
   const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
   const repoRoot = path.resolve(__dirname, '..')
-  const cliPath = path.join(repoRoot, 'src', 'cli', 'helen-cli.ts')
+  const cliPath = path.join(repoRoot, 'src', 'cli', 'daemon-cli.ts')
 
   // --message one-shot
   const oneShot = spawnSync(
@@ -336,7 +340,7 @@ section('CLI regression – one-shot --message')
     { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 },
   )
   assert(oneShot.status === 0, 'CLI --message exits 0')
-  assertContains(oneShot.stdout, 'HELEN', 'CLI --message response names HELEN')
+  assertContains(oneShot.stdout, 'My name is Daemon', 'CLI --message response says "My name is Daemon"')
 
   // stdin mode
   const stdinMode = spawnSync(
@@ -363,7 +367,7 @@ section('CLI regression – one-shot --message')
   assertContains(unknown.stderr, 'Unknown option', 'CLI unknown flag error message')
 
   // wrapper from non-root cwd (shell wrapper)
-  const shellWrapper = path.join(repoRoot, 'bin', 'helen.sh')
+  const shellWrapper = path.join(repoRoot, 'bin', 'daemon.sh')
   const wrapperResult = spawnSync(
     'bash', [shellWrapper, '--message', 'hello'],
     { cwd: '/tmp', encoding: 'utf8', timeout: 30_000 },
@@ -372,7 +376,7 @@ section('CLI regression – one-shot --message')
   assert(wrapperResult.stdout.trim().length > 0, 'shell wrapper from /tmp produces output')
 
   // Python wrapper from non-root cwd
-  const pyWrapper = path.join(repoRoot, 'bin', 'helen-cli.py')
+  const pyWrapper = path.join(repoRoot, 'bin', 'daemon-cli.py')
   const pyResult = spawnSync(
     'python3', [pyWrapper, '--message', 'hello'],
     { cwd: '/tmp', encoding: 'utf8', timeout: 30_000 },
@@ -382,13 +386,13 @@ section('CLI regression – one-shot --message')
 }
 
 // ---------------------------------------------------------------------------
-// 13. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
+// 13. Live model tests (skipped unless DAEMON_EVAL_LIVE=true)
 // ---------------------------------------------------------------------------
 section('Live model tests')
-if (process.env.HELEN_EVAL_LIVE !== 'true') {
-  console.log('  ⏭️  Skipped (set HELEN_EVAL_LIVE=true to run)')
+if (process.env.DAEMON_EVAL_LIVE !== 'true') {
+  console.log('  ⏭️  Skipped (set DAEMON_EVAL_LIVE=true to run)')
 } else {
-  const apiUrl = process.env.VITE_HELEN_API_URL ?? 'http://localhost:3001'
+  const apiUrl = process.env.VITE_DAEMON_API_URL ?? 'http://localhost:3001'
   console.log('  Running live tests against ' + apiUrl)
 
   async function liveChatRequest(messages) {
@@ -431,19 +435,19 @@ section('Sidebar source-level assertions')
   const url = await import('node:url')
   const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
   const src = fs.readFileSync(
-    path.resolve(__dirname, '../src/components/HelenInterface.tsx'),
+    path.resolve(__dirname, '../src/components/DaemonInterface.tsx'),
     'utf8',
   )
 
   // Sidebar nav must be conditionally rendered (wrapped in sidebarOpen check)
   assert(
-    src.includes('{sidebarOpen && (') && src.includes('<nav className="helen-sidebar"'),
+    src.includes('{sidebarOpen && (') && src.includes('<nav className="daemon-sidebar"'),
     'sidebar nav is conditionally rendered when sidebarOpen is true',
   )
 
   // No static always-rendered nav with both open/closed classes
   assert(
-    !src.includes("'helen-sidebar ' + (sidebarOpen"),
+    !src.includes("'daemon-sidebar ' + (sidebarOpen"),
     'sidebar does not use open/closed class toggling on always-rendered element',
   )
 

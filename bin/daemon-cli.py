@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI Wrapper for HELEN Text Interface
+CLI Wrapper for Daemon Text Interface
 Provides a simple command to run the text-based interface.
 """
 
@@ -14,7 +14,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 def main():
-    """Run HELEN CLI interface."""
+    """Run Daemon CLI interface."""
     # Validate required executables before doing anything.
     for exe in ("node", "npm", "npx"):
         if shutil.which(exe) is None:
@@ -34,13 +34,13 @@ def main():
 
         # Run TypeScript CLI via tsx; forward all caller arguments.
         proc = subprocess.run(
-            ["npx", "tsx", "src/cli/helen-cli.ts", *sys.argv[1:]],
+            ["npx", "tsx", "src/cli/daemon-cli.ts", *sys.argv[1:]],
             cwd=REPO_ROOT,
         )
         sys.exit(proc.returncode)
 
     except KeyboardInterrupt:
-        print("\n\nHELEN CLI terminated.", file=sys.stderr)
+        print("\n\nDaemon CLI terminated.", file=sys.stderr)
         sys.exit(130)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

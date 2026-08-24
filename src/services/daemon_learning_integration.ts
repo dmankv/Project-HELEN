@@ -1,5 +1,5 @@
 /**
- * HELEN Learning Integration
+ * Daemon Learning Integration
  * Bridges TypeScript implementation with Python learning algorithm
  */
 
@@ -44,7 +44,7 @@ interface StoredStats {
   policyVersion: number
 }
 
-const STORAGE_KEY = 'helen_learning_data'
+const STORAGE_KEY = 'daemon_learning_data'
 const MAX_HISTORY = 200 // bound history to keep UI responsive
 
 function loadFromStorage(): { history: InteractionRecord[]; stats: StoredStats } {
@@ -63,7 +63,7 @@ function loadFromStorage(): { history: InteractionRecord[]; stats: StoredStats }
   }
 }
 
-export class HelenLearningSystem {
+export class DaemonLearningSystem {
   private interactionHistory: InteractionRecord[]
   private agentStats: StoredStats
 
@@ -222,4 +222,4 @@ export class HelenLearningSystem {
   }
 }
 
-export default new HelenLearningSystem()
+export default new DaemonLearningSystem()

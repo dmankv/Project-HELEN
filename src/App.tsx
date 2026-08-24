@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import HelenInterface from './components/HelenInterface'
+import DaemonInterface from './components/DaemonInterface'
 import LoginView from './components/LoginView'
 
 type Route = 'chat' | 'login'
@@ -29,7 +29,7 @@ function App() {
     return <LoginView onBackToChat={goToChat} />
   }
 
-  return <HelenInterface onLoginClick={goToLogin} />
+  return <DaemonInterface onLoginClick={goToLogin} />
 }
 
 export default App

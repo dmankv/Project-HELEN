@@ -1,12 +1,12 @@
 /**
- * HELEN Memory Service
+ * Daemon Memory Service
  *
  * Provides a two-tier memory model:
  *   1. Short-term (conversation context) – cleared when the user starts a new chat.
  *   2. Durable memories – explicitly remembered by the user; persist in localStorage
  *      unless the user explicitly forgets them.
  *
- * Commands handled by the HelenInterface (not here):
+ * Commands handled by the DaemonInterface (not here):
  *   "remember this: <text>"   → saveMemory(text)
  *   "forget this"             → removeLastMemory()
  *   "forget: <text>"          → forgetByText(text)
@@ -25,7 +25,7 @@ export interface DurableMemory {
   tags?: string[]
 }
 
-const DURABLE_KEY = 'helen_durable_memories'
+const DURABLE_KEY = 'daemon_durable_memories'
 
 // ---------------------------------------------------------------------------
 // Persistence (localStorage adapter – swap for REST calls in production)
@@ -147,7 +147,7 @@ export function retrieveRelevant(query: string, limit = 5): DurableMemory[] {
     .map(({ mem }) => mem)
 }
 
-/** Format memories as a short readable list for HELEN's context. */
+/** Format memories as a short readable list for Daemon's context. */
 export function formatMemoriesForContext(memories: DurableMemory[]): string {
   if (memories.length === 0) return 'No memories stored yet.'
   return memories

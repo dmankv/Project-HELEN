@@ -18,8 +18,8 @@ export default function LoginView({ onBackToChat }: LoginViewProps) {
     <main className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <span className="helen-logo-sm" aria-hidden="true">🧠</span>
-          <span className="login-title">HELEN – Log In</span>
+          <span className="daemon-logo-sm" aria-hidden="true">🧠</span>
+          <span className="login-title">Daemon – Log In</span>
         </div>
 
         <p className="login-notice">

@@ -1,4 +1,4 @@
-# HELEN CLI Interface
+# Daemon CLI Interface
 
 ## Run CLI
 
@@ -9,8 +9,8 @@ npm run cli
 Wrapper alternatives:
 
 ```bash
-./bin/helen.sh
-python3 bin/helen-cli.py
+./bin/daemon.sh
+python3 bin/daemon-cli.py
 ```
 
 Both wrappers resolve the repository root from their own location, so they
@@ -34,7 +34,7 @@ echo "hello" | npm run cli
 
 ## Scope
 
-The CLI is a local terminal interface that uses `src/services/helenResponseBrain.ts`.
+The CLI is a local terminal interface that uses `src/services/daemonResponseBrain.ts`.
 It is separate from the deployed GitHub Pages frontend and does not use browser-only modules.
 
 ## Memory

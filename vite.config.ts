@@ -3,28 +3,28 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 /**
- * When VITE_HELEN_API_URL is set at build time the frontend makes fetch()
+ * When VITE_DAEMON_API_URL is set at build time the frontend makes fetch()
  * requests to a cross-origin server.  The inline Content-Security-Policy in
  * index.html must allow that origin in its connect-src directive; otherwise
  * every browser will block the request with a CSP violation.
  *
- * This plugin reads VITE_HELEN_API_URL at build time, extracts the origin
+ * This plugin reads VITE_DAEMON_API_URL at build time, extracts the origin
  * (e.g. https://api.example.com), and patches connect-src in the built HTML.
  * When the variable is unset, connect-src remains 'self' (local-brain mode).
  */
-function helenCspPlugin() {
-  const apiUrl = process.env.VITE_HELEN_API_URL ?? ''
+function daemonCspPlugin() {
+  const apiUrl = process.env.VITE_DAEMON_API_URL ?? ''
   let extraOrigin = ''
   if (apiUrl) {
     try {
       extraOrigin = new URL(apiUrl).origin
     } catch {
-      // malformed VITE_HELEN_API_URL — fall back to 'self' only
+      // malformed VITE_DAEMON_API_URL — fall back to 'self' only
     }
   }
 
   return {
-    name: 'helen-csp',
+    name: 'daemon-csp',
     transformIndexHtml(html: string): string {
       if (!extraOrigin) return html
       return html.replace(
@@ -36,7 +36,7 @@ function helenCspPlugin() {
 }
 
 export default defineConfig({
-  plugins: [react(), helenCspPlugin()],
+  plugins: [react(), daemonCspPlugin()],
   base: '/Project-HELEN/',
   server: {
     port: 3000,
