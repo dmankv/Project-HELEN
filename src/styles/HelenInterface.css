@@ -45,7 +45,8 @@
 /* ── Reopen pop-out button ───────────────────────────── */
 .sidebar-reopen {
   position: absolute;
-  top: 12px;
+  top: 50%;
+  transform: translateY(-50%);
   left: 0;
   z-index: 200;
   background-color: var(--color-surface);
@@ -62,13 +63,14 @@
 }
 
 @keyframes slideInReopener {
-  from { transform: translateX(-100%); opacity: 0; }
-  to   { transform: translateX(0);     opacity: 1; }
+  from { transform: translateY(-50%) translateX(-100%); opacity: 0; }
+  to   { transform: translateY(-50%) translateX(0);     opacity: 1; }
 }
 
 .sidebar-reopen:hover {
   background-color: var(--color-surface-light);
   color: var(--color-text);
+  transform: translateY(-50%);
 }
 
 .sidebar-reopen:focus-visible {
