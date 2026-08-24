@@ -35,10 +35,93 @@ requests to that URL. The server at that URL must be the separately hosted `serv
 |------|---------|
 | `src/main.tsx` | React root (`ReactDOM.createRoot`) |
 | `src/App.tsx` | App shell |
-| `src/components/DaemonInterface.tsx` | Chat UI, message list, input |
+| `src/components/DaemonInterface.tsx` | Chat UI, message list, input, sync status |
 | `src/services/daemonResponseBrain.ts` | Rule/template-based local response engine |
-| `src/services/daemonChatAPI.ts` | HTTP client for optional cloud API |
-| `src/services/daemonMemory.ts` | In-browser durable memory persisted in localStorage until cleared |
+| `src/services/daemonChatAPI.ts` | HTTP client for optional self-hosted cloud API |
+| `src/services/supabaseEdgeChat.ts` | Client for Supabase Edge Function (authenticated AI) |
+| `src/services/supabasePersistence.ts` | Authenticated Supabase persistence (conversations, memories, learning) |
+| `src/services/daemonMemory.ts` | In-browser durable memory (localStorage fallback) |
+| `src/services/supabaseAuthAPI.ts` | Supabase managed auth (login, register, session) |
+
+---
+
+## Supabase integration (recommended for GitHub Pages)
+
+### What is persisted in Supabase
+
+When `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set and the user is authenticated:
+
+| Table | Content |
+|-------|---------|
+| `conversations` | User-owned conversation metadata (title, timestamps) |
+| `messages` | Individual messages (role, content, position) |
+| `durable_memories` | User's "remember this" memories |
+| `learning_interactions` | Chat turns with metadata and feedback |
+| `edge_rate_limits` | Per-user rate limit counters (service_role only) |
+
+All tables use `auth.uid()` Row Level Security — each user can only access their own data.
+
+### RLS ownership model
+
+- Every user-data table has a `user_id` column referencing `auth.users(id)`
+- All CRUD policies use `auth.uid() = user_id`
+- Security-definer triggers block `user_id` reassignment at the database level
+- No public (unauthenticated) policies exist on any user-data table
+- `edge_rate_limits` is accessible only via service_role (used by the Edge Function)
+
+### One-time Supabase setup
+
+#### 1. Apply the database migrations
+
+In Supabase Dashboard → SQL Editor, run in order:
+
+```sql
+-- Migration 1: RBAC / profiles
+-- supabase/migrations/20260824143000_managed_auth_rbac.sql
+
+-- Migration 2: Daemon persistence tables
+-- supabase/migrations/20260824160000_daemon_persistence.sql
+```
+
+#### 2. Configure GitHub Actions variables (public, browser-safe)
+
+In GitHub → Settings → Secrets and variables → Actions → **Variables**:
+
+| Variable | Value |
+|----------|-------|
+| `VITE_SUPABASE_URL` | `https://your-project-ref.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | Your Supabase anon/public key |
+
+These are injected at build time by `deploy.yml` and are safe to embed in the browser.
+
+#### 3. Deploy the Supabase Edge Function (for authenticated AI)
+
+```bash
+supabase functions deploy daemon-chat
+```
+
+#### 4. Set Edge Function secrets (server-only — NEVER commit values)
+
+```bash
+supabase secrets set OPENAI_API_KEY=sk-...
+# or for Anthropic:
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+supabase secrets set DAEMON_PROVIDER=anthropic
+supabase secrets set DAEMON_MODEL=claude-3-5-haiku-20241022  # optional
+```
+
+These secrets are held only in Supabase and are never present in the browser bundle.
+
+### Edge Function security boundaries
+
+| Concern | Mechanism |
+|---------|-----------|
+| Auth | Supabase JWT verification (every non-preflight request) |
+| Rate limit | Per-user count in `public.edge_rate_limits` via service_role |
+| Schema | Message array, role validation, size/count limits |
+| Secrets | Provider keys in Supabase Function secrets only |
+| CORS | Only `https://dmankv.github.io` and localhost (dev) |
+| Error masking | Provider errors are logged server-side; generic message to client |
 
 ---
 

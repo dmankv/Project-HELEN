@@ -17,6 +17,17 @@ import {
 } from '../services/daemonMemory'
 import { callChatAPI, hasBackend, isAPIFailure } from '../services/daemonChatAPI'
 import type { APIMessage } from '../services/daemonChatAPI'
+import { callEdgeFunction, hasEdgeFunction } from '../services/supabaseEdgeChat'
+import {
+  isPersistenceConfigured,
+  upsertConversation,
+  insertMessage,
+  insertCloudMemory,
+  updateLearningFeedback,
+  insertLearningInteraction,
+  migrateLocalMemoriesToCloud,
+} from '../services/supabasePersistence'
+import type { SyncStatus } from '../services/supabasePersistence'
 import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem } from '../services/daemonStorageMigration'
 import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
 import '../styles/DaemonInterface.css'
@@ -147,6 +158,13 @@ function handleMemoryCommand(cmd: MemoryCommand): string {
 
 const MAX_API_TURNS = 20
 
+// Confidence/ambiguity defaults for local-brain responses recorded to Supabase.
+// These are fixed-point estimates: local mode always uses the same rule engine,
+// so we record a conservative baseline rather than a dynamically computed score.
+const LOCAL_BRAIN_DEFAULT_CONFIDENCE = 0.8
+const LOCAL_BRAIN_CLARIFY_AMBIGUITY = 0.6
+const LOCAL_BRAIN_DEFAULT_AMBIGUITY = 0.2
+
 function buildAPIHistory(messages: Message[]): APIMessage[] {
   return messages
     .slice(-MAX_API_TURNS * 2)
@@ -183,6 +201,7 @@ export default function DaemonInterface({
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const [usingBackend, setUsingBackend] = useState(false)
   const [authError, setAuthError] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('unconfigured')
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -204,6 +223,24 @@ export default function DaemonInterface({
   useEffect(() => {
     saveSidebarOpen(sidebarOpen)
   }, [sidebarOpen])
+
+  // Update sync status based on configuration and auth state
+  useEffect(() => {
+    if (!isPersistenceConfigured()) {
+      setSyncStatus('unconfigured')
+    } else if (!currentUser) {
+      setSyncStatus('offline')
+    } else {
+      setSyncStatus('idle')
+    }
+  }, [currentUser])
+
+  // One-time local-to-cloud memory migration when user first signs in
+  useEffect(() => {
+    if (!isPersistenceConfigured() || !currentUser) return
+    const localMems = listMemories()
+    void migrateLocalMemoriesToCloud(localMems)
+  }, [currentUser])
 
   const handleSend = useCallback(async () => {
     const text = input.trim()
@@ -233,6 +270,14 @@ export default function DaemonInterface({
       if (memCmd) {
         await new Promise(r => setTimeout(r, 400))
         const responseText = handleMemoryCommand(memCmd)
+        // Cloud-persist new memory if user is authenticated
+        if (memCmd.type === 'remember' && isPersistenceConfigured() && currentUser) {
+          const mems = listMemories()
+          const latest = mems[0]
+          if (latest) {
+            void insertCloudMemory({ id: latest.id, text: latest.text, tags: latest.tags, createdAt: latest.createdAt })
+          }
+        }
         const aiMsg: Message = {
           id: nextId(),
           role: 'assistant',
@@ -262,7 +307,63 @@ export default function DaemonInterface({
       const controller = new AbortController()
       abortRef.current = controller
 
-      if (hasBackend()) {
+      // 1. Supabase Edge Function (authenticated, rate-limited, no browser API keys)
+      if (hasEdgeFunction() && currentUser) {
+        const apiHistory = buildAPIHistory(nextMessages)
+        const edgeResult = await callEdgeFunction(apiHistory, controller.signal)
+        if (typeof edgeResult === 'string') {
+          setUsingBackend(true)
+          setAuthError(false)
+          setSyncStatus('syncing')
+          const aiMsg: Message = {
+            id: nextId(),
+            role: 'assistant',
+            content: edgeResult,
+            timestamp: new Date().toISOString(),
+          }
+          const updated = [...nextMessages, aiMsg]
+          setMessages(updated)
+          saveMessages(updated)
+          // Persist to Supabase
+          void (async () => {
+            try {
+              await upsertConversation({ id: convId, title: conversationTitle(updated), createdAt: new Date().toISOString() })
+              const pos = nextMessages.length
+              await insertMessage({ id: userMsg.id, conversationId: convId, role: 'user', content: userMsg.content, position: pos, createdAt: userMsg.timestamp })
+              await insertMessage({ id: aiMsg.id, conversationId: convId, role: 'assistant', content: aiMsg.content, position: pos + 1, createdAt: aiMsg.timestamp })
+              setSyncStatus('synced')
+            } catch { setSyncStatus('error') }
+          })()
+          setConversations(prev => {
+            const existing = prev.find(c => c.id === convId)
+            const updatedConv: Conversation = existing
+              ? { ...existing, messages: updated }
+              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
+            const updatedList = existing
+              ? prev.map(c => (c.id === convId ? updatedConv : c))
+              : [updatedConv, ...prev]
+            saveConversations(updatedList)
+            return updatedList
+          })
+          setIsThinking(false)
+          abortRef.current = null
+          return
+        }
+        setUsingBackend(false)
+        if (controller.signal.aborted || (isAPIFailure(edgeResult) && edgeResult.reason === 'aborted')) {
+          setIsThinking(false)
+          abortRef.current = null
+          return
+        }
+        if (isAPIFailure(edgeResult) && edgeResult.reason === 'auth') {
+          setAuthError(true)
+          authErrorThisTurn = true
+        }
+        backendFailedThisTurn = true
+      }
+
+      // 2. Legacy Node API backend (optional self-hosted)
+      if (hasBackend() && !backendFailedThisTurn) {
         const apiHistory = buildAPIHistory(nextMessages)
         const backendResult = await callChatAPI(apiHistory, controller.signal)
         if (typeof backendResult === 'string') {
@@ -332,8 +433,8 @@ export default function DaemonInterface({
 
       const interactionRecord = learningSystem.recordInteraction(text, response, {
         intent,
-        confidence: 0.8,
-        ambiguity: intent === 'clarify' ? 0.6 : 0.2,
+        confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
+        ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
         memoryUsed: legacySnippets.length,
         planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
         timestamp: new Date(),
@@ -360,6 +461,22 @@ export default function DaemonInterface({
       const updated = fallbackMsg ? [...nextMessages, fallbackMsg, aiMsg] : [...nextMessages, aiMsg]
       setMessages(updated)
       saveMessages(updated)
+
+      // Persist learning interaction to Supabase when authenticated
+      if (isPersistenceConfigured() && currentUser) {
+        void insertLearningInteraction({
+          id: interactionRecord.id,
+          input: text,
+          response,
+          intent,
+          confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
+          ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
+          memoryUsed: legacySnippets.length,
+          planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
+          createdAt: new Date().toISOString(),
+        })
+      }
+
       setConversations(prev => {
         const existing = prev.find(c => c.id === convId)
         const updatedConv: Conversation = existing
@@ -527,6 +644,51 @@ export default function DaemonInterface({
                       : 'Local'}
               </p>
             )}
+            <p
+              className="sync-badge"
+              aria-label={
+                syncStatus === 'unconfigured'
+                  ? 'Supabase not configured — data stored locally only'
+                  : syncStatus === 'offline'
+                    ? 'Sign in to sync data to your account'
+                    : syncStatus === 'syncing'
+                      ? 'Syncing data to your account…'
+                      : syncStatus === 'synced'
+                        ? 'Data synced to your account'
+                        : syncStatus === 'error'
+                          ? 'Sync error — data saved locally'
+                          : 'Ready to sync'
+              }
+              title={
+                syncStatus === 'unconfigured'
+                  ? 'Supabase not configured. All data is stored in browser only.'
+                  : syncStatus === 'offline'
+                    ? 'Sign in to enable cloud sync.'
+                    : syncStatus === 'syncing'
+                      ? 'Saving to your Supabase account…'
+                      : syncStatus === 'synced'
+                        ? 'Conversation saved to cloud.'
+                        : syncStatus === 'error'
+                          ? 'Cloud sync failed. Data saved locally.'
+                          : 'Cloud sync ready.'
+              }
+            >
+              <span aria-hidden="true">
+                {syncStatus === 'unconfigured' ? '💾' : syncStatus === 'offline' ? '🔒' : syncStatus === 'syncing' ? '⏳' : syncStatus === 'synced' ? '✅' : syncStatus === 'error' ? '⚠️' : '☁️'}
+              </span>
+              {' '}
+              {syncStatus === 'unconfigured'
+                ? 'Local only'
+                : syncStatus === 'offline'
+                  ? 'Sign in to sync'
+                  : syncStatus === 'syncing'
+                    ? 'Syncing…'
+                    : syncStatus === 'synced'
+                      ? 'Synced'
+                      : syncStatus === 'error'
+                        ? 'Sync error'
+                        : 'Sync ready'}
+            </p>
           </div>
         </nav>
       )}
@@ -647,7 +809,12 @@ export default function DaemonInterface({
                             aria-label="Helpful"
                             onClick={() => {
                               const interactionId = msgToInteractionRef.current.get(msg.id)
-                              if (interactionId) learningSystem.processFeedback(interactionId, 'helpful')
+                              if (interactionId) {
+                                learningSystem.processFeedback(interactionId, 'helpful')
+                                if (isPersistenceConfigured() && currentUser) {
+                                  void updateLearningFeedback(interactionId, 'helpful')
+                                }
+                              }
                               setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}
                           ><span aria-hidden="true">👍</span></button>
@@ -657,7 +824,12 @@ export default function DaemonInterface({
                             aria-label="Not helpful"
                             onClick={() => {
                               const interactionId = msgToInteractionRef.current.get(msg.id)
-                              if (interactionId) learningSystem.processFeedback(interactionId, 'unhelpful')
+                              if (interactionId) {
+                                learningSystem.processFeedback(interactionId, 'unhelpful')
+                                if (isPersistenceConfigured() && currentUser) {
+                                  void updateLearningFeedback(interactionId, 'unhelpful')
+                                }
+                              }
                               setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}
                           ><span aria-hidden="true">👎</span></button>
