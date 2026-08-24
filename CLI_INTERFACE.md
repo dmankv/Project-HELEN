@@ -51,6 +51,22 @@ npm run cli:smoke
 Verifies non-interactive invocations: `--message`, stdin, empty stdin, unknown flag
 rejection, and both wrappers from a non-root working directory.
 
+## Argument validation
+
+The CLI validates the entire argument list before running.  Any of the
+following produces a nonzero exit with a clear error message:
+
+| Case | Example | Error |
+|---|---|---|
+| Unknown long flag | `--bogus-flag` | `Unknown option: --bogus-flag` |
+| Unknown short flag | `-x` | `Unknown option: -x` |
+| Trailing flag after value | `--message hi --bogus` | `Unknown option: --bogus` |
+| Duplicate `--message`/`-m` | `--message a --message b` | `Duplicate option: --message` |
+| Missing value for `--message` | `--message` (no word follows) | `Missing value for --message/-m.` |
+| Unexpected positional arg | `npm run cli -- foo` | `Unexpected argument: foo` |
+
+`--help` / `-h` always exits 0 and prints usage.
+
 ## Unsupported commands
 
 `feedback`, `export`, and `analytics` are not implemented.

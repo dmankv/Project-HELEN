@@ -135,29 +135,49 @@ async function runNonInteractive(message?: string): Promise<void> {
 }
 
 function parseMessageArg(argv: string[]): string | undefined {
-  for (let i = 0; i < argv.length; i += 1) {
+  let messageValue: string | undefined
+  let i = 0
+
+  while (i < argv.length) {
     const arg = argv[i]
+
     if (arg === '--help' || arg === '-h') {
       displayHeader()
       displayHelp()
       process.exit(0)
     }
+
     if (arg === '--message' || arg === '-m') {
-      const value = argv[i + 1]
-      if (!value || value.startsWith('-')) {
-        console.error('Missing value for --message/-m.')
+      if (messageValue !== undefined) {
+        console.error(`Duplicate option: ${arg}`)
+        console.error('Run with --help for usage.')
         process.exit(1)
       }
-      return value
+      const value = argv[i + 1]
+      if (value === undefined) {
+        console.error('Missing value for --message/-m.')
+        console.error('Run with --help for usage.')
+        process.exit(1)
+      }
+      messageValue = value
+      i += 2
+      continue
     }
-    // Reject unrecognised long flags (--*).
-    if (arg.startsWith('--')) {
+
+    // Reject any unrecognised flag (long or short).
+    if (arg.startsWith('-')) {
       console.error(`Unknown option: ${arg}`)
       console.error('Run with --help for usage.')
       process.exit(1)
     }
+
+    // Reject unexpected positional arguments.
+    console.error(`Unexpected argument: ${arg}`)
+    console.error('Run with --help for usage.')
+    process.exit(1)
   }
-  return undefined
+
+  return messageValue
 }
 
 async function runInteractive(): Promise<void> {

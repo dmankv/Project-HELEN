@@ -97,10 +97,10 @@ type MemoryCommand =
 
 function parseMemoryCommand(text: string): MemoryCommand | null {
   const t = text.trim()
-  const rememberMatch = /^remember(?:\s+this)?[:\-]?\s*(.+)$/i.exec(t)
+  const rememberMatch = /^remember(?:\s+this)?[:-]?\s*(.+)$/i.exec(t)
   if (rememberMatch) return { type: 'remember', payload: rememberMatch[1].trim() }
   if (/^forget this$/i.test(t)) return { type: 'forget-last' }
-  const forgetMatch = /^forget[:\-]?\s*(.+)$/i.exec(t)
+  const forgetMatch = /^forget[:-]?\s*(.+)$/i.exec(t)
   if (forgetMatch) {
     if (/^all(?:\s+memories)?$/i.test(forgetMatch[1].trim())) return { type: 'forget-all' }
     return { type: 'forget-text', payload: forgetMatch[1].trim() }
