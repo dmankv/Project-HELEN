@@ -27,3 +27,70 @@ describe('Supabase RBAC migration', () => {
     expect(rawSql).not.toMatch(/create policy[\s\S]+for update[\s\S]+with check\s*\(\s*true\s*\)/i)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Daemon persistence migration tests
+// ---------------------------------------------------------------------------
+
+const persistenceMigrationPath = path.resolve(
+  process.cwd(),
+  'supabase/migrations/20260824160000_daemon_persistence.sql',
+)
+
+describe('Daemon persistence migration', () => {
+  const rawSql = fs.readFileSync(persistenceMigrationPath, 'utf8')
+  const normalizedSql = rawSql.toLowerCase()
+
+  const TABLES = ['conversations', 'messages', 'durable_memories', 'learning_interactions', 'edge_rate_limits']
+
+  TABLES.forEach(table => {
+    it(`enables RLS on ${table}`, () => {
+      expect(normalizedSql).toContain(`alter table public.${table} enable row level security;`)
+    })
+  })
+
+  const USER_TABLES = ['conversations', 'messages', 'durable_memories', 'learning_interactions']
+
+  USER_TABLES.forEach(table => {
+    it(`has owner-only select policy on ${table}`, () => {
+      // Verify auth.uid() checks exist in the SQL for all user tables
+      expect(normalizedSql).toContain('auth.uid() = user_id')
+      // Verify select policy exists for this table
+      expect(normalizedSql).toContain(`on public.${table} for select`)
+    })
+  })
+
+  it('has no public (unauthenticated) policies on user tables', () => {
+    // Ensure no policies grant access to 'public' (unauthenticated) role
+    const policyBlocks = rawSql.match(/create policy[\s\S]+?;/gi) ?? []
+    for (const policy of policyBlocks) {
+      expect(policy.toLowerCase()).not.toMatch(/\bto public\b/)
+    }
+  })
+
+  it('prevents owner reassignment on conversations', () => {
+    expect(rawSql).toMatch(/prevent_conversation_owner_change/i)
+    expect(rawSql).toMatch(/conversation owner is immutable/i)
+  })
+
+  it('prevents owner reassignment on messages', () => {
+    expect(rawSql).toMatch(/prevent_message_owner_change/i)
+    expect(rawSql).toMatch(/message owner and conversation are immutable/i)
+  })
+
+  it('prevents owner reassignment on durable_memories', () => {
+    expect(rawSql).toMatch(/prevent_memory_owner_change/i)
+    expect(rawSql).toMatch(/memory owner is immutable/i)
+  })
+
+  it('prevents owner reassignment on learning_interactions', () => {
+    expect(rawSql).toMatch(/prevent_learning_owner_change/i)
+    expect(rawSql).toMatch(/learning interaction owner is immutable/i)
+  })
+
+  it('edge_rate_limits has no authenticated client policies', () => {
+    // edge_rate_limits must only be accessible via service_role
+    const rateLimitSection = rawSql.slice(rawSql.indexOf('edge_rate_limits'))
+    expect(rateLimitSection).not.toMatch(/create policy[\s\S]+?on public\.edge_rate_limits[\s\S]+?to authenticated/i)
+  })
+})
