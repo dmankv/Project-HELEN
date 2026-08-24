@@ -54,7 +54,10 @@ API keys are **only** stored on the server; they are never sent to the browser.
 ## Memory
 
 Conversation history is stored in browser `localStorage` by `src/services/helenMemory.ts`.
-It is local to each browser session and is not synced to any server.
+It persists in that browser profile until cleared and is not synced to any server.
+
+The repository also contains separate CLI/prototype files (`bin/helen.sh`, `bin/helen-cli.py`,
+`src/cli/helen-cli.ts`, `src/services/defself_l.py`) that are not part of the deployed web app path.
 
 ---
 

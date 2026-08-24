@@ -40,7 +40,8 @@ jobs:
       - name: Verify build output
         run: |
           test -f dist/index.html || (echo "dist/index.html missing" && exit 1)
-          grep -q 'assets/' dist/index.html || (echo "dist/index.html has no hashed assets" && exit 1)
+          test -f dist/favicon.svg || (echo "dist/favicon.svg missing" && exit 1)
+          grep -q '/somthing/assets/' dist/index.html || (echo "dist/index.html missing /somthing/assets/ references" && exit 1)
           ! grep -q '/src/main.tsx' dist/index.html || (echo "dist/index.html still references /src/main.tsx" && exit 1)
 
       - name: Upload Pages artifact

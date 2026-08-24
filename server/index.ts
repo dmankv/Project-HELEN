@@ -1,7 +1,7 @@
 /**
  * HELEN API Server
  *
- * A minimal Node/Express gateway that proxies chat requests to an LLM provider
+ * A minimal standalone Node.js HTTP gateway that proxies chat requests to an LLM provider
  * using server-side credentials.  Provider API keys NEVER reach the browser.
  *
  * Supported providers (set HELEN_PROVIDER env var):
@@ -76,6 +76,10 @@ interface ChatRequest {
  * For untrusted or missing origins the Access-Control-Allow-Origin header is
  * omitted entirely so the browser will refuse cross-origin access.
  */
+function normalizeHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
+}
+
 function corsHeaders(origin: string | undefined): Record<string, string> {
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
     return {
@@ -241,14 +245,21 @@ function validateChatRequest(raw: unknown): ChatRequest {
 // ---------------------------------------------------------------------------
 
 const server = http.createServer(async (req, res) => {
-  const origin = req.headers['origin']
+  const origin = normalizeHeader(req.headers['origin'])
   const cors = corsHeaders(origin)
 
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    const preflightOrigin = req.headers['origin']
-    if (preflightOrigin && ALLOWED_ORIGINS.includes(preflightOrigin)) {
-      res.writeHead(204, corsHeaders(preflightOrigin))
+    const preflightOrigin = origin
+    const requestedMethod = normalizeHeader(req.headers['access-control-request-method'])
+    const isCorsPreflight = Boolean(requestedMethod)
+
+    if (!isCorsPreflight) {
+      // Non-CORS OPTIONS (for example server-to-server probes) is safe to answer
+      // without CORS authorization headers.
+      res.writeHead(204)
+    } else if (preflightOrigin && ALLOWED_ORIGINS.includes(preflightOrigin)) {
+      res.writeHead(204, cors)
     } else {
       res.writeHead(403)
     }
