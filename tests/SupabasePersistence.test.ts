@@ -355,20 +355,31 @@ describe('User-scoped cloud migration marker', () => {
 // ---------------------------------------------------------------------------
 
 describe('Persistence helper null/false → sync error', () => {
-  it('upsertConversation returning null should be treated as failure (not synced)', () => {
-    // Confirm the function returns null on DB error (via mocked client)
-    // The actual DaemonInterface logic checks `if (!convResult)` — validate here
-    // that null is falsy as expected.
-    const result: null = null
-    expect(!result).toBe(true)  // matches the `if (!convResult)` guard
+  it('DaemonInterface source guards upsertConversation result with if (!convResult)', async () => {
+    const src = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/components/DaemonInterface.tsx'),
+      'utf8',
+    )
+    // Verify the null-check guard pattern is present
+    expect(src).toContain('if (!convResult)')
+    expect(src).toContain("setSyncStatus('error')")
   })
 
-  it('insertMessage returning null should be treated as failure', () => {
+  it('DaemonInterface source guards insertMessage result for both user and assistant messages', async () => {
+    const src = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/components/DaemonInterface.tsx'),
+      'utf8',
+    )
+    expect(src).toContain('if (!r1)')
+    expect(src).toContain('if (!r2)')
+  })
+
+  it('null is falsy – guard condition covers null return', () => {
     const result: null = null
     expect(!result).toBe(true)
   })
 
-  it('insertMessage returning false should be treated as failure', () => {
+  it('false is falsy – guard condition covers false return', () => {
     const result: false = false
     expect(!result).toBe(true)
   })

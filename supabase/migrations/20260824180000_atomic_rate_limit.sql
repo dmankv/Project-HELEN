@@ -14,7 +14,6 @@ set search_path = public
 as $$
 declare
   v_now timestamptz := now();
-  v_window_start timestamptz;
   v_count integer;
 begin
   -- Upsert: insert or reset/increment atomically using a single statement.
@@ -33,8 +32,8 @@ begin
         else public.edge_rate_limits.window_start
       end,
       updated_at = v_now
-  returning request_count, window_start
-  into v_count, v_window_start;
+  returning request_count
+  into v_count;
 
   -- If the returning clause didn't populate (insert path), v_count = 1.
   if v_count is null then
