@@ -3,9 +3,9 @@
  * one-liner that was previously inlined in package.json's check:imports).
  *
  * Verifies that:
- *   - The four key source files exist.
+ *   - The five key source files exist.
  *   - main.tsx imports from './App'.
- *   - App.tsx imports from './components/HelenInterface'.
+ *   - App.tsx imports from './components/HelenInterface' and './components/LoginView'.
  *   - HelenInterface.tsx imports helenResponseBrain, helenMemory, and helenChatAPI.
  *
  * Exits non-zero and prints a message on the first failure.
@@ -40,9 +40,11 @@ function requireContains(content, pattern, description) {
 const main = read('src/main.tsx')
 const app = read('src/App.tsx')
 const helen = read('src/components/HelenInterface.tsx')
+read('src/components/LoginView.tsx')
 
 requireContains(main, `from './App'`, "main.tsx imports from './App'")
 requireContains(app, `from './components/HelenInterface'`, "App.tsx imports from './components/HelenInterface'")
+requireContains(app, `from './components/LoginView'`, "App.tsx imports from './components/LoginView'")
 requireContains(helen, 'helenResponseBrain', 'HelenInterface.tsx imports helenResponseBrain')
 requireContains(helen, 'helenMemory', 'HelenInterface.tsx imports helenMemory')
 requireContains(helen, 'helenChatAPI', 'HelenInterface.tsx imports helenChatAPI')
