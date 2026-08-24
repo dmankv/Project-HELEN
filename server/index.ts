@@ -250,7 +250,7 @@ const server = http.createServer(async (req, res) => {
 
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    const preflightOrigin = normalizeHeader(req.headers['origin'])
+    const preflightOrigin = origin
     const requestedMethod = normalizeHeader(req.headers['access-control-request-method'])
     const isCorsPreflight = Boolean(requestedMethod)
 
@@ -259,7 +259,7 @@ const server = http.createServer(async (req, res) => {
       // without CORS authorization headers.
       res.writeHead(204)
     } else if (preflightOrigin && ALLOWED_ORIGINS.includes(preflightOrigin)) {
-      res.writeHead(204, corsHeaders(preflightOrigin))
+      res.writeHead(204, cors)
     } else {
       res.writeHead(403)
     }
