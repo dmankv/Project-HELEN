@@ -155,7 +155,11 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function HelenInterface() {
+interface HelenInterfaceProps {
+  onLogInClick?: () => void
+}
+
+export default function HelenInterface({ onLogInClick }: HelenInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -422,15 +426,22 @@ export default function HelenInterface() {
             <span className="helen-logo-sm">🧠</span>
             <span>HELEN</span>
           </div>
-          <button
-            type="button"
-            className="clear-btn"
-            onClick={handleClear}
-            aria-label="Clear conversation"
-            title="Clear conversation (durable memories are preserved)"
-          >
-            Clear
-          </button>
+          <div className="header-actions">
+            {onLogInClick && (
+              <button type="button" className="login-btn" onClick={onLogInClick} aria-label="Log in">
+                Log in
+              </button>
+            )}
+            <button
+              type="button"
+              className="clear-btn"
+              onClick={handleClear}
+              aria-label="Clear conversation"
+              title="Clear conversation (durable memories are preserved)"
+            >
+              Clear
+            </button>
+          </div>
         </header>
 
         <div className="chat-area">
