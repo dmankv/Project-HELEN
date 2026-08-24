@@ -46,11 +46,19 @@ security definer
 set search_path = public
 as $$
 begin
-  if old.role is distinct from new.role and auth.role() <> 'service_role' then
+  if
+    old.role is distinct from new.role
+    and auth.role() not in ('service_role', 'supabase_admin')
+    and session_user not in ('postgres', 'supabase_admin')
+  then
     raise exception 'Only provider-side privileged context can change profile role';
   end if;
 
-  if old.id is distinct from new.id and auth.role() <> 'service_role' then
+  if
+    old.id is distinct from new.id
+    and auth.role() not in ('service_role', 'supabase_admin')
+    and session_user not in ('postgres', 'supabase_admin')
+  then
     raise exception 'Profile id is immutable';
   end if;
 
@@ -61,17 +69,19 @@ $$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
-  for each row execute procedure public.handle_new_auth_user();
+  for each row execute function public.handle_new_auth_user();
 
 drop trigger if exists set_profiles_updated_at on public.profiles;
 create trigger set_profiles_updated_at
   before update on public.profiles
-  for each row execute procedure public.set_profile_updated_at();
+  for each row execute function public.set_profile_updated_at();
 
 drop trigger if exists prevent_profiles_role_change on public.profiles;
 create trigger prevent_profiles_role_change
   before update on public.profiles
-  for each row execute procedure public.prevent_profile_role_change();
+  for each row
+  when (old.role is distinct from new.role or old.id is distinct from new.id)
+  execute function public.prevent_profile_role_change();
 
 alter table public.profiles enable row level security;
 grant select, update on table public.profiles to authenticated;

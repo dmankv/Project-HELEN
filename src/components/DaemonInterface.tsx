@@ -169,6 +169,11 @@ export default function DaemonInterface({
   onLogoutClick,
   currentUser = null,
 }: DaemonInterfaceProps = {}) {
+  const currentUserRoleLabel = currentUser?.role === 'admin'
+    ? 'Admin'
+    : currentUser?.role === 'user'
+      ? 'User'
+      : 'Unknown'
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -561,9 +566,9 @@ export default function DaemonInterface({
                   </span>
                   <span
                     className="account-role-label"
-                    aria-label={`Account role ${currentUser.role === 'admin' ? 'admin' : 'user'}`}
+                    aria-label={`Account role ${currentUserRoleLabel.toLowerCase()}`}
                   >
-                    Role: {currentUser.role === 'admin' ? 'Admin' : 'User'}
+                    Role: {currentUserRoleLabel}
                   </span>
                   {onLogoutClick && (
                     <button

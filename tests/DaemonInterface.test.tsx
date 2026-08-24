@@ -111,6 +111,11 @@ describe('DaemonInterface', () => {
     expect(screen.getByLabelText(/account role user/i)).toHaveTextContent('Role: User')
   })
 
+  it('shows unknown role status when role is unavailable', () => {
+    render(<DaemonInterface currentUser={{ email: 'unknown@example.com', role: null }} onLoginClick={vi.fn()} />)
+    expect(screen.getByLabelText(/account role unknown/i)).toHaveTextContent('Role: Unknown')
+  })
+
   // ── Sending a message ─────────────────────────────────────────────────────
 
   it('displays the user message immediately after sending', async () => {

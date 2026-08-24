@@ -209,9 +209,13 @@ export function supabaseOnAuthStateChange(
 ): () => void {
   const client = getClient()
   if (!client) return () => undefined
+  let latestEventId = 0
   const { data } = client.auth.onAuthStateChange((event, session) => {
+    const eventId = ++latestEventId
     void (async () => {
-      callback(session?.user ? await toAuthUser(client, session.user) : null, event)
+      const nextUser = session?.user ? await toAuthUser(client, session.user) : null
+      if (eventId !== latestEventId) return
+      callback(nextUser, event)
     })()
   })
   return () => data.subscription.unsubscribe()
