@@ -52,6 +52,11 @@ const ALLOWED_ORIGINS = (
 const MAX_HISTORY_TURNS = 20
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 30_000
+/** Maximum number of requests per IP per minute (rate limiting) */
+const RATE_LIMIT_MAX = Number(process.env.HELEN_RATE_LIMIT ?? 60)
+const RATE_LIMIT_WINDOW_MS = 60_000
+/** Maximum response body size accepted from upstream LLM providers (1 MB) */
+const MAX_RESPONSE_BODY_BYTES = 1024 * 1024
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,6 +99,24 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
   return {}
 }
 
+// ---------------------------------------------------------------------------
+// Rate limiter (per remote IP, in-memory sliding window)
+// ---------------------------------------------------------------------------
+
+const _rateCounts = new Map<string, { count: number; resetAt: number }>()
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const entry = _rateCounts.get(ip)
+  if (!entry || now >= entry.resetAt) {
+    _rateCounts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return false
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return true
+  entry.count++
+  return false
+}
+
 /** Maximum allowed request body size in bytes (64 KB is generous for chat payloads) */
 const MAX_BODY_BYTES = 64 * 1024
 
@@ -124,13 +147,24 @@ function httpsPost(
     const u = new URL(url)
     const options: https.RequestOptions = {
       hostname: u.hostname,
+      // Preserve non-default ports (e.g. for custom provider endpoints).
+      ...(u.port ? { port: Number(u.port) } : {}),
       path: u.pathname + u.search,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
     }
     const req = https.request(options, res => {
       const chunks: Buffer[] = []
-      res.on('data', chunk => chunks.push(chunk as Buffer))
+      let totalBytes = 0
+      res.on('data', chunk => {
+        const buf = chunk as Buffer
+        totalBytes += buf.length
+        if (totalBytes > MAX_RESPONSE_BODY_BYTES) {
+          req.destroy(new Error('Provider response body too large'))
+          return
+        }
+        chunks.push(buf)
+      })
       res.on('end', () =>
         resolve({ status: res.statusCode ?? 500, body: Buffer.concat(chunks).toString('utf-8') }),
       )
@@ -265,6 +299,16 @@ const server = http.createServer(async (req, res) => {
     }
     res.end()
     return
+  }
+
+  // Rate limiting – apply to all endpoints except OPTIONS preflight
+  if (req.method !== 'OPTIONS') {
+    const remoteIp = req.socket.remoteAddress ?? 'unknown'
+    if (isRateLimited(remoteIp)) {
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '60', ...cors })
+      res.end(JSON.stringify({ error: 'Too many requests. Please wait a moment.' }))
+      return
+    }
   }
 
   // Health check

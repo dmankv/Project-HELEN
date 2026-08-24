@@ -88,7 +88,7 @@ function commandResponse(input: string): CommandResult {
   if (lowered.startsWith('remember this:')) {
     const memoryText = normalized.slice('remember this:'.length).trim()
     if (!memoryText) return { handled: true, output: 'Please provide text after "remember this:".' }
-    session.memories.push({ text: memoryText, timestamp: new Date() })
+    session.memories.push({ text: memoryText, timestamp: new Date(), relevance: Date.now() })
     return { handled: true, output: `Got it. I will remember: "${memoryText}"` }
   }
   return { handled: false }

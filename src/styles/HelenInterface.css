@@ -139,6 +139,14 @@
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem 0.5rem;
+  list-style: none;
+  margin: 0;
+}
+
+.conversation-list-item {
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 
 .no-conversations {

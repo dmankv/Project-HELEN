@@ -2,6 +2,7 @@ export type UserMood = 'neutral' | 'frustrated' | 'excited' | 'confused' | 'urge
 
 export type ResponseIntent = 'answer' | 'clarify' | 'follow-up' | 'acknowledge' | 'suggest'
   | 'greeting' | 'identity' | 'coding' | 'coding-followup' | 'smalltalk' | 'humor' | 'refusal'
+  | 'prompt-injection'
 
 export interface MemorySnippet {
   text: string
@@ -50,6 +51,11 @@ const MOOD_PATTERNS: Array<{ mood: UserMood; pattern: RegExp }> = [
 //   8. suggest    – recommendation questions
 //   9. follow-up  – references to prior conversation
 const INTENT_PATTERNS: Array<{ intent: ResponseIntent; pattern: RegExp }> = [
+  // Prompt-injection attempts must be intercepted before any other intent.
+  {
+    intent: 'prompt-injection',
+    pattern: /\b(ignore (previous|prior|all|the above|your) (instructions?|rules?|guidelines?|directives?|constraints?)|disregard (your|all|previous) (instructions?|rules?|guidelines?)|forget (your|the|all|previous) (instructions?|rules?|guidelines?|training|constraints?)|override (your|the) (instructions?|rules?|guidelines?|safety)|you (are|must|will|should) now (act|behave|pretend|roleplay|respond)|(pretend|act|roleplay|imagine|assume) (you are|you're|that you are|you have no) (an? )?(unrestricted|unfiltered|uncensored|jailbreak|different|evil|bad|rogue|new|free)|DAN mode|jailbreak|system prompt|new persona|new instructions|override safety|bypass (safety|filters?|guidelines?|rules?)|no (restrictions|limitations|rules|guidelines)|as a (harmful|dangerous|evil|bad|unfiltered|unrestricted) (ai|bot|assistant)|forget you are helen|you are not helen)\b/i,
+  },
   {
     intent: 'identity',
     pattern: /\b(who are you|what are you|are you (a |an )?(real |actual )?(ai|bot|robot|human|person)|tell me about yourself|introduce yourself|what('s| is) your name|what do (i|we) call you|tell me your name|(^|\?)\s*your name\b)/i,
@@ -120,6 +126,11 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "That's outside what I can help with confidently right now, but I don't want to make something up. Is there another angle I can try?",
     "I want to be upfront — I'm not confident I have a good answer for that. Is there a related question I can actually help with?",
     "Good question, but I'd be doing you a disservice if I just made something up here. Want to narrow it down or try a different question?",
+  ],
+  'prompt-injection': [
+    "It looks like that message was trying to change how I behave — I'll stick with my usual self. Is there something I can actually help you with?",
+    "That looks like an instruction override attempt. I stay as HELEN regardless — is there something genuine I can help you with?",
+    "I noticed that message was trying to alter my guidelines. I'll keep being me — what can I actually do for you today?",
   ],
   clarify: [
     'Can I ask — what specifically are you trying to understand?',
@@ -320,6 +331,11 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   // 3. Refusal/uncertainty — honest fallback.
   if (intent === 'refusal') {
     return pick(CANNED_ANSWERS.refusal)
+  }
+
+  // 3b. Prompt-injection attempt — acknowledge and stay in character.
+  if (intent === 'prompt-injection') {
+    return pick(CANNED_ANSWERS['prompt-injection'])
   }
 
   // 4. For well-defined intents that have complete canned answers, use them.

@@ -164,9 +164,12 @@ export default function HelenInterface() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const [usingBackend, setUsingBackend] = useState(false)
+  const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Maps message id → learning interaction id (ephemeral; not persisted across page loads).
+  const msgToInteractionRef = useRef<Map<string, string>>(new Map())
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -289,7 +292,7 @@ export default function HelenInterface() {
 
     setLastIntent(intent)
 
-    learningSystem.recordInteraction(text, response, {
+    const interactionRecord = learningSystem.recordInteraction(text, response, {
       intent,
       confidence: 0.8,
       ambiguity: intent === 'clarify' ? 0.6 : 0.2,
@@ -304,6 +307,8 @@ export default function HelenInterface() {
       content: response,
       timestamp: new Date().toISOString(),
     }
+
+    msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
 
     const updated = [...nextMessages, aiMsg]
     setMessages(updated)
@@ -330,6 +335,7 @@ export default function HelenInterface() {
     setActiveConvId(null)
     setLastIntent(undefined)
     setConversations([])
+    setRatedMessages(new Set())
     localStorage.removeItem(MESSAGES_KEY)
     localStorage.removeItem(CONVERSATIONS_KEY)
     learningSystem.clearHistory()
@@ -337,7 +343,12 @@ export default function HelenInterface() {
   }
 
   const handleNewChat = () => {
-    handleClear()
+    // Start a blank conversation while preserving the conversation history in the sidebar.
+    // Use handleClear instead if you want to wipe everything.
+    setMessages([])
+    setActiveConvId(null)
+    setLastIntent(undefined)
+    saveMessages([])
   }
 
   const handleSelectConversation = (conv: Conversation) => {
@@ -371,25 +382,25 @@ export default function HelenInterface() {
             + New chat
           </button>
 
-          <div className="conversation-list" role="list">
+          <ul className="conversation-list">
             {conversations.length === 0 ? (
-              <p className="no-conversations">No conversations yet</p>
+              <li className="no-conversations">No conversations yet</li>
             ) : (
               conversations.map(conv => (
-                <button
-                  key={conv.id}
-                  type="button"
-                  role="listitem"
-                  className={'conversation-item ' + (conv.id === activeConvId ? 'active' : '')}
-                  onClick={() => handleSelectConversation(conv)}
-                  title={conv.title}
-                >
-                  <span className="conv-icon">💬</span>
-                  <span className="conv-title">{conv.title}</span>
-                </button>
+                <li key={conv.id} className="conversation-list-item">
+                  <button
+                    type="button"
+                    className={'conversation-item ' + (conv.id === activeConvId ? 'active' : '')}
+                    onClick={() => handleSelectConversation(conv)}
+                    title={conv.title}
+                  >
+                    <span className="conv-icon">💬</span>
+                    <span className="conv-title">{conv.title}</span>
+                  </button>
+                </li>
               ))
             )}
-          </div>
+          </ul>
 
           <div className="analytics-panel" aria-label="Usage stats">
             <p className="analytics-title">Stats</p>
@@ -478,6 +489,34 @@ export default function HelenInterface() {
                         minute: '2-digit',
                       })}
                     </span>
+                    {msg.role === 'assistant' && msgToInteractionRef.current.has(msg.id) && (
+                      ratedMessages.has(msg.id) ? (
+                        <span className="feedback-given">Thanks!</span>
+                      ) : (
+                        <span className="feedback-controls" aria-label="Rate this response">
+                          <button
+                            type="button"
+                            className="feedback-btn"
+                            aria-label="Helpful"
+                            onClick={() => {
+                              const interactionId = msgToInteractionRef.current.get(msg.id)
+                              if (interactionId) learningSystem.processFeedback(interactionId, 'helpful')
+                              setRatedMessages(prev => new Set(prev).add(msg.id))
+                            }}
+                          >👍</button>
+                          <button
+                            type="button"
+                            className="feedback-btn"
+                            aria-label="Not helpful"
+                            onClick={() => {
+                              const interactionId = msgToInteractionRef.current.get(msg.id)
+                              if (interactionId) learningSystem.processFeedback(interactionId, 'unhelpful')
+                              setRatedMessages(prev => new Set(prev).add(msg.id))
+                            }}
+                          >👎</button>
+                        </span>
+                      )
+                    )}
                   </div>
                 </div>
               </div>
