@@ -28,16 +28,15 @@ index.html
                  └─ src/styles/HelenInterface.css
 ```
 
-Legacy duplicate frontend files (`ChatInterface.tsx`, `Message.tsx`, `MessageInput.tsx`,
-`MessageList.tsx`, `helen-standalone.html`, and their associated CSS) have been removed.
-`HelenInterface.tsx` is the sole active chat component.
+`HelenInterface.tsx` is the sole active web chat component.
+Some older CLI/non-web files still exist and are documented below as separate entrypoints.
 
 ---
 
 ## Quick start (local)
 
 ```bash
-npm install
+npm ci --legacy-peer-deps
 npm run dev          # frontend at http://localhost:3000/somthing/
 ```
 
@@ -111,6 +110,23 @@ Deploy `server/index.ts` to any Node.js host:
 - **Fly.io / Railway / Render** — deploy as a plain Node.js service with `npm run server:dev` or `node dist/index.js` after `npm run build`.
 
 Set `HELEN_ALLOWED_ORIGINS` to the GitHub Pages URL for production.
+
+---
+
+## Non-web CLI/Python entrypoints (status)
+
+These files are **not** used by the deployed React/Vite website:
+
+- `bin/helen.sh`
+- `bin/helen-cli.py`
+- `src/cli/helen-cli.ts`
+- `src/services/defself_l.py`
+
+Current status:
+
+- They are separate experimental/local interfaces and are not wired into `index.html → src/main.tsx → src/App.tsx → src/components/HelenInterface.tsx`.
+- `src/cli/helen-cli.ts` imports modules that are not present in this branch, so these CLI wrappers are currently not production-ready.
+- `src/services/defself_l.py` is a standalone Python prototype and is not executed by the web app or build/deploy workflow.
 
 ---
 

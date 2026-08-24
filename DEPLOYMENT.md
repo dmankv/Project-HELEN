@@ -14,7 +14,7 @@ provider (OpenAI or Anthropic) without exposing API keys in the browser.
 ```
 index.html
   └─ src/main.tsx          (React root mount)
-       └─ src/App.tsx       (top-level component, theme toggle)
+       └─ src/App.tsx       (top-level component shell)
             └─ src/components/HelenInterface.tsx   (chat UI)
                  └─ src/services/helenResponseBrain.ts  (local rule engine)
                  └─ src/services/helenChatAPI.ts        (optional cloud API)
@@ -38,7 +38,7 @@ requests to that URL. The server at that URL must be the separately hosted `serv
 | `src/components/HelenInterface.tsx` | Chat UI, message list, input |
 | `src/services/helenResponseBrain.ts` | Rule/template-based local response engine |
 | `src/services/helenChatAPI.ts` | HTTP client for optional cloud API |
-| `src/services/helenMemory.ts` | In-browser session memory (localStorage) |
+| `src/services/helenMemory.ts` | In-browser durable memory persisted in localStorage until cleared |
 
 ---
 
@@ -92,8 +92,15 @@ npm test
 npm run server:dev
 
 # Server – typecheck / build
+npm run server:typecheck
 npm run server:build
 ```
+
+### Dependency strategy
+
+The repository intentionally uses a **single root lockfile** (`/package-lock.json`).
+`server/` has its own `package.json` for scripts/configuration, but commands resolve compiler/runtime
+tools from the root install (`../node_modules`). A second `server/package-lock.json` is not required.
 
 ---
 
@@ -109,6 +116,7 @@ The workflow (`.github/workflows/deploy.yml`):
 3. Installs dependencies with `npm ci --legacy-peer-deps`.
 4. Builds with `npm run build` (outputs to `dist/`).
 5. Verifies `dist/index.html` contains hashed asset paths and not `/src/main.tsx`.
+   It also verifies `dist/favicon.svg` exists.
 6. Uploads `dist/` as a Pages artifact.
 7. Deploys via `actions/deploy-pages`.
 
@@ -132,3 +140,4 @@ Vite is configured with `base: '/somthing/'` to match this URL.
 The optional server (`server/index.ts`) allows cross-origin requests **only** from origins
 listed in `HELEN_ALLOWED_ORIGINS`. Requests from unknown origins receive no
 `Access-Control-Allow-Origin` header. The server never echoes back an untrusted origin.
+Allowed CORS preflight requests return `204`; disallowed preflight requests return `403`.
