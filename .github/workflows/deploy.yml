@@ -44,6 +44,28 @@ jobs:
           grep -q '/somthing/assets/' dist/index.html || (echo "dist/index.html missing /somthing/assets/ references" && exit 1)
           ! grep -q '/src/main.tsx' dist/index.html || (echo "dist/index.html still references /src/main.tsx" && exit 1)
 
+      - name: Check imports
+        run: npm run check:imports
+
+      - name: Check dist
+        run: npm run check:dist
+
+      - name: Typecheck and build server
+        run: |
+          npm run server:typecheck
+          npm run server:build
+
+      - name: CLI smoke tests
+        run: npm run cli:smoke
+
+      - name: Python prototype smoke test
+        run: |
+          if command -v python3 >/dev/null 2>&1; then
+            npm run python:smoke
+          else
+            echo "python3 unavailable; skipping Python smoke test"
+          fi
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
