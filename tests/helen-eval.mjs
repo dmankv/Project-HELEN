@@ -87,6 +87,28 @@ assert(detectIntent('Write a Python function') === 'coding', 'coding intent')
 assert(detectIntent('How are you doing today?') === 'smalltalk', 'smalltalk intent')
 assert(detectIntent('Thanks for that') === 'acknowledge', 'acknowledge intent')
 
+// Name / identity variants (regression: must all resolve to 'identity', not 'acknowledge' or 'answer')
+section('Intent detection – name/identity variants')
+assert(detectIntent('what is your name?') === 'identity', 'intent: what is your name?')
+assert(detectIntent("what's your name?") === 'identity', "intent: what's your name?")
+assert(detectIntent('what do I call you?') === 'identity', 'intent: what do I call you?')
+assert(detectIntent('tell me your name') === 'identity', 'intent: tell me your name')
+assert(detectIntent('your name') === 'identity', 'intent: your name')
+
+// Mixed message: greeting + identity question
+assert(detectIntent("good thank you, but what do I call you? your name?") === 'identity',
+  'intent: mixed greeting+acknowledge+identity → identity wins')
+
+// Greeting + coding overlap – coding must win
+section('Intent detection – greeting + coding overlap')
+assert(detectIntent('Hi, write me a Python script') === 'coding', 'greeting+coding → coding wins')
+
+// Acknowledgement alone – must NOT be identity
+section('Intent detection – acknowledge is not identity')
+assert(detectIntent('ok got it thanks') === 'acknowledge', 'acknowledge alone → acknowledge')
+// "your name" embedded in non-question context must NOT trigger identity
+assert(detectIntent('I updated your name in the system') !== 'identity', '"your name" in sentence context → not identity')
+
 // ---------------------------------------------------------------------------
 // 3. Identity honesty
 // ---------------------------------------------------------------------------
@@ -98,6 +120,33 @@ const identityResponse = generateHumanLikeResponse('Are you a real human?', {
 })
 assertNotContains(identityResponse, 'yes, i am a human', 'does not claim to be human')
 assertNotContains(identityResponse, "i'm a real person", 'does not claim to be a real person')
+
+// ---------------------------------------------------------------------------
+// 3b. Name/identity response quality
+// ---------------------------------------------------------------------------
+section('Name/identity response quality')
+const nameInputs = [
+  'what is your name?',
+  "what's your name?",
+  'what do I call you?',
+  'tell me your name',
+  'your name',
+]
+for (const q of nameInputs) {
+  const intent = detectIntent(q)
+  assert(intent === 'identity', `detectIntent("${q}") → identity`)
+  const resp = generateHumanLikeResponse(q, { userMessage: q, mood: 'neutral', intent })
+  assertContains(resp, 'HELEN', `response to "${q}" names HELEN`)
+  assertNotContains(resp, 'yes, i am a human', `response to "${q}" does not claim humanity`)
+}
+
+// Mixed message must produce an identity response, not a generic clarification
+const mixedMsg = 'good thank you, but what do I call you? your name?'
+const mixedIntent = detectIntent(mixedMsg)
+assert(mixedIntent === 'identity', 'mixed message intent → identity')
+const mixedResp = generateHumanLikeResponse(mixedMsg, { userMessage: mixedMsg, mood: 'neutral', intent: mixedIntent })
+assertContains(mixedResp, 'HELEN', 'mixed message response names HELEN')
+assertNotContains(mixedResp, 'could you give me a little more context', 'mixed message does not fall back to generic clarification')
 
 // ---------------------------------------------------------------------------
 // 4. Social conversation
@@ -116,6 +165,29 @@ const frustResponse = generateHumanLikeResponse('I am so frustrated nothing work
   intent: 'answer',
 })
 assert(frustResponse.length > 10, 'non-empty frustration response')
+
+// ---------------------------------------------------------------------------
+// 4b. Gratitude and acknowledgement
+// ---------------------------------------------------------------------------
+section('Gratitude / acknowledgement')
+const gratIntent = detectIntent('Thanks for that')
+assert(gratIntent === 'acknowledge', 'gratitude → acknowledge intent')
+const gratResp = generateHumanLikeResponse('Thanks for that', { userMessage: 'Thanks for that', mood: 'neutral', intent: gratIntent })
+assert(gratResp.length > 0, 'non-empty acknowledge response')
+assertNotContains(gratResp, 'HELEN', 'acknowledge response does not unexpectedly introduce HELEN')
+
+// ---------------------------------------------------------------------------
+// 4c. Follow-up conversation
+// ---------------------------------------------------------------------------
+section('Follow-up conversation')
+const followIntent = detectIntent('can you continue from before?')
+assert(followIntent === 'follow-up', 'follow-up intent detected')
+const followResp = generateHumanLikeResponse('can you continue from before?', {
+  userMessage: 'can you continue from before?',
+  mood: 'neutral',
+  intent: followIntent,
+})
+assert(followResp.length > 0, 'non-empty follow-up response')
 
 // ---------------------------------------------------------------------------
 // 5. Memory: save and retrieve
