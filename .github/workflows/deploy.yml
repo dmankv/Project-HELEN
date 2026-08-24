@@ -43,6 +43,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Unit tests (component)
+        run: npm run test:unit
+
       - name: Verify build output
         run: npm run check:dist
 
