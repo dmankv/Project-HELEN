@@ -88,46 +88,56 @@ async function checkRateLimit(
   userId: string,
 ): Promise<{ allowed: boolean; remaining: number }> {
   const now = Date.now()
-  const windowStart = new Date(now - RATE_LIMIT_WINDOW_MS).toISOString()
 
-  // Upsert rate limit row using service-role (bypasses RLS)
-  const { data, error } = await serviceClient
+  // Read existing row first
+  const { data: existing, error: selectError } = await serviceClient
     .from('edge_rate_limits')
-    .upsert(
-      { user_id: userId, request_count: 1, window_start: new Date(now).toISOString(), updated_at: new Date(now).toISOString() },
-      { onConflict: 'user_id', ignoreDuplicates: false }
-    )
-    .select()
+    .select('request_count, window_start')
+    .eq('user_id', userId)
     .maybeSingle<{ request_count: number; window_start: string }>()
 
-  if (error || !data) {
-    // Fail open on DB errors — log but allow request
-    console.warn('[daemon-chat] rate limit check failed:', error?.message)
+  if (selectError) {
+    console.warn('[daemon-chat] rate limit select failed:', selectError.message)
     return { allowed: true, remaining: RATE_LIMIT_MAX }
   }
 
-  const windowStartTs = new Date(data.window_start).getTime()
+  const nowIso = new Date(now).toISOString()
 
-  if (windowStartTs < now - RATE_LIMIT_WINDOW_MS) {
-    // Window expired — reset
+  if (!existing) {
+    // First request for this user — insert a fresh row
     await serviceClient
       .from('edge_rate_limits')
-      .update({ request_count: 1, window_start: new Date(now).toISOString(), updated_at: new Date(now).toISOString() })
+      .insert({ user_id: userId, request_count: 1, window_start: nowIso, updated_at: nowIso })
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 }
+  }
+
+  const windowStartTs = new Date(existing.window_start).getTime()
+
+  if (windowStartTs < now - RATE_LIMIT_WINDOW_MS) {
+    // Current window expired — reset counter to 1
+    await serviceClient
+      .from('edge_rate_limits')
+      .update({ request_count: 1, window_start: nowIso, updated_at: nowIso })
       .eq('user_id', userId)
     return { allowed: true, remaining: RATE_LIMIT_MAX - 1 }
   }
 
-  if (data.request_count >= RATE_LIMIT_MAX) {
+  if (existing.request_count >= RATE_LIMIT_MAX) {
     return { allowed: false, remaining: 0 }
   }
 
-  // Increment
-  await serviceClient
+  // Increment atomically — use the current DB value to avoid races
+  const { error: updateError } = await serviceClient
     .from('edge_rate_limits')
-    .update({ request_count: data.request_count + 1, updated_at: new Date(now).toISOString() })
+    .update({ request_count: existing.request_count + 1, updated_at: nowIso })
     .eq('user_id', userId)
 
-  return { allowed: true, remaining: RATE_LIMIT_MAX - data.request_count - 1 }
+  if (updateError) {
+    console.warn('[daemon-chat] rate limit increment failed:', updateError.message)
+    return { allowed: true, remaining: RATE_LIMIT_MAX }
+  }
+
+  return { allowed: true, remaining: RATE_LIMIT_MAX - existing.request_count - 1 }
 }
 
 // ---------------------------------------------------------------------------

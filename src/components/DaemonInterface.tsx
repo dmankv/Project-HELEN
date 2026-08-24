@@ -158,6 +158,13 @@ function handleMemoryCommand(cmd: MemoryCommand): string {
 
 const MAX_API_TURNS = 20
 
+// Confidence/ambiguity defaults for local-brain responses recorded to Supabase.
+// These are fixed-point estimates: local mode always uses the same rule engine,
+// so we record a conservative baseline rather than a dynamically computed score.
+const LOCAL_BRAIN_DEFAULT_CONFIDENCE = 0.8
+const LOCAL_BRAIN_CLARIFY_AMBIGUITY = 0.6
+const LOCAL_BRAIN_DEFAULT_AMBIGUITY = 0.2
+
 function buildAPIHistory(messages: Message[]): APIMessage[] {
   return messages
     .slice(-MAX_API_TURNS * 2)
@@ -426,8 +433,8 @@ export default function DaemonInterface({
 
       const interactionRecord = learningSystem.recordInteraction(text, response, {
         intent,
-        confidence: 0.8,
-        ambiguity: intent === 'clarify' ? 0.6 : 0.2,
+        confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
+        ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
         memoryUsed: legacySnippets.length,
         planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
         timestamp: new Date(),
@@ -462,8 +469,8 @@ export default function DaemonInterface({
           input: text,
           response,
           intent,
-          confidence: 0.8,
-          ambiguity: intent === 'clarify' ? 0.6 : 0.2,
+          confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
+          ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
           memoryUsed: legacySnippets.length,
           planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
           createdAt: new Date().toISOString(),
