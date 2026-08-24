@@ -54,6 +54,7 @@ It proxies `POST /api/chat` to OpenAI or Anthropic using server-side credentials
 | `ANTHROPIC_API_KEY` | When provider=anthropic | – | Anthropic secret key |
 | `HELEN_MODEL` | No | provider default | Override model name |
 | `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | Comma-separated allowed CORS origins |
+| `HELEN_API_TOKEN` | **Yes (cloud mode)** | – | Required shared token for `/api/chat` (`X-HELEN-API-TOKEN`) |
 | `PORT` | No | `3001` | Listening port |
 | `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
 | `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` when deployed behind a reverse proxy (Vercel, Fly.io, nginx, etc.) so the rate limiter reads the real client IP from `X-Forwarded-For` instead of the proxy's socket address. **Leave unset when the server faces the internet directly** to prevent IP-spoofing. |
@@ -63,6 +64,7 @@ Frontend variable (set at Vite build time):
 | Variable | Description |
 |----------|-------------|
 | `VITE_HELEN_API_URL` | Full URL to server (e.g. `https://your-server.example.com`). Omit to use local mode. |
+| `VITE_HELEN_API_TOKEN` | Token sent as `X-HELEN-API-TOKEN` when calling `/api/chat`. |
 
 > **CSP note:** When `VITE_HELEN_API_URL` is set, `vite.config.ts` automatically adds that
 > server's origin to the `connect-src` directive of the built HTML's Content-Security-Policy,
@@ -146,7 +148,7 @@ Vite is configured with `base: '/Project-HELEN/'` to match this URL.
 - The HELEN cloud API must be hosted elsewhere if desired.
 - All data (conversation history) is stored in the user's browser (`localStorage`).
 - No analytics dashboard, no server-side memory – these are not deployed.
-- `src/services/defself_l.py` is an experimental standalone prototype and is not used by Pages.
+- `src/experimental/defself_l.py` is an experimental standalone prototype and is not used by Pages.
 
 ---
 
@@ -156,3 +158,9 @@ The optional server (`server/index.ts`) allows cross-origin requests **only** fr
 listed in `HELEN_ALLOWED_ORIGINS`. Requests from unknown origins receive no
 `Access-Control-Allow-Origin` header. The server never echoes back an untrusted origin.
 Allowed CORS preflight requests return `204`; disallowed preflight requests return `403`.
+
+## API token policy
+
+`POST /api/chat` additionally requires:
+- An allowed `Origin` header
+- `X-HELEN-API-TOKEN` matching `HELEN_API_TOKEN`

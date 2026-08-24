@@ -15,6 +15,7 @@
  *   HELEN_MODEL           model name overrides default per-provider
  *   HELEN_ALLOWED_ORIGINS comma-separated list of allowed CORS origins
  *                         default: http://localhost:3000,http://localhost:4173
+ *   HELEN_API_TOKEN       required shared token for /api/chat
  *
  * Frontend uses VITE_HELEN_API_URL to point at this server.
  * When VITE_HELEN_API_URL is not set the frontend falls back to its local
@@ -23,6 +24,7 @@
 
 import http from 'node:http'
 import https from 'node:https'
+import crypto from 'node:crypto'
 import { URL } from 'node:url'
 
 // ---------------------------------------------------------------------------
@@ -39,6 +41,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-3-haiku-20240307',
 }
 const MODEL = process.env.HELEN_MODEL ?? DEFAULT_MODELS[PROVIDER] ?? 'gpt-4o-mini'
+const API_TOKEN = process.env.HELEN_API_TOKEN ?? ''
 
 const ALLOWED_ORIGINS = (
   process.env.HELEN_ALLOWED_ORIGINS ??
@@ -67,6 +70,10 @@ const MAX_RESPONSE_BODY_BYTES = 1024 * 1024
  * internet, to prevent IP-spoofing via a forged X-Forwarded-For header.
  */
 const TRUST_PROXY = process.env.HELEN_TRUST_PROXY === '1'
+
+if (!API_TOKEN) {
+  throw new Error('HELEN_API_TOKEN is required for /api/chat access control')
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,13 +107,33 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
     return {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-HELEN-API-TOKEN',
       'Vary': 'Origin',
     }
   }
   // No origin header (same-origin / server-to-server) or untrusted origin:
   // do not advertise any allowed origin.
   return {}
+}
+
+function isAllowedOrigin(origin: string | undefined): boolean {
+  return Boolean(origin && ALLOWED_ORIGINS.includes(origin))
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  const leftRaw = Buffer.from(a)
+  const rightRaw = Buffer.from(b)
+  const maxLen = Math.max(leftRaw.length, rightRaw.length, 32)
+  const left = Buffer.alloc(maxLen)
+  const right = Buffer.alloc(maxLen)
+  leftRaw.copy(left)
+  rightRaw.copy(right)
+  return crypto.timingSafeEqual(left, right) && leftRaw.length === rightRaw.length
+}
+
+function hasValidToken(req: http.IncomingMessage): boolean {
+  const token = normalizeHeader(req.headers['x-helen-api-token']) ?? ''
+  return token.length > 0 && constantTimeEqual(token, API_TOKEN)
 }
 
 // ---------------------------------------------------------------------------
@@ -145,17 +172,34 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let totalBytes = 0
+    let finished = false
+
+    const fail = (message: string) => {
+      if (finished) return
+      finished = true
+      reject(new Error(message))
+    }
+
     req.on('data', chunk => {
+      if (finished) return
       const buf = chunk as Buffer
       totalBytes += buf.length
       if (totalBytes > MAX_BODY_BYTES) {
-        req.destroy(new Error('Request body too large'))
+        fail('Request body too large')
         return
       }
       chunks.push(buf)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')))
-    req.on('error', reject)
+    req.on('end', () => {
+      if (finished) return
+      finished = true
+      resolve(Buffer.concat(chunks).toString('utf-8'))
+    })
+    req.on('error', err => {
+      if (finished) return
+      finished = true
+      reject(err)
+    })
   })
 }
 
@@ -313,7 +357,7 @@ const server = http.createServer(async (req, res) => {
       // Non-CORS OPTIONS (for example server-to-server probes) is safe to answer
       // without CORS authorization headers.
       res.writeHead(204)
-    } else if (preflightOrigin && ALLOWED_ORIGINS.includes(preflightOrigin)) {
+    } else if (isAllowedOrigin(preflightOrigin)) {
       res.writeHead(204, cors)
     } else {
       res.writeHead(403)
@@ -349,6 +393,17 @@ const server = http.createServer(async (req, res) => {
 
   // Chat endpoint
   if (req.url === '/api/chat' && req.method === 'POST') {
+    if (!isAllowedOrigin(origin)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Origin is not allowed.' }))
+      return
+    }
+    if (!hasValidToken(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', ...cors })
+      res.end(JSON.stringify({ error: 'Unauthorized.' }))
+      return
+    }
+
     let chatReq: ChatRequest
 
     try {
@@ -383,6 +438,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`[helen-api] Listening on http://localhost:${PORT}`)
   console.log(`[helen-api] Provider: ${PROVIDER}  Model: ${MODEL}`)
+  console.log('[helen-api] API token auth: enabled')
 })
 
 // ---------------------------------------------------------------------------
