@@ -23,6 +23,11 @@ import {
   retrieveRelevant,
   formatMemoriesForContext,
 } from '../src/services/helenMemory.js'
+import {
+  SIDEBAR_OPEN_KEY,
+  loadSidebarOpen,
+  saveSidebarOpen,
+} from '../src/components/sidebarPreference.js'
 
 // ---------------------------------------------------------------------------
 // Mini test framework
@@ -56,6 +61,10 @@ global.localStorage = {
   getItem: k => _store[k] ?? null,
   setItem: (k, v) => { _store[k] = v },
   removeItem: k => { delete _store[k] },
+}
+
+function resetStore() {
+  for (const key of Object.keys(_store)) delete _store[key]
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +257,41 @@ assert(listMemories().length === 1, 'durable memory survives clear-chat simulati
 forgetAll()
 
 // ---------------------------------------------------------------------------
-// 9. Refusal / safety patterns (static checks on response brain)
+// 9. Sidebar preference persistence helpers
+// ---------------------------------------------------------------------------
+section('Sidebar preference persistence')
+resetStore()
+assert(loadSidebarOpen() === true, 'no stored preference defaults sidebar open')
+
+global.localStorage.setItem(SIDEBAR_OPEN_KEY, 'false')
+assert(loadSidebarOpen() === false, 'stored "false" initializes sidebar closed')
+
+global.localStorage.setItem(SIDEBAR_OPEN_KEY, 'true')
+assert(loadSidebarOpen() === true, 'stored "true" initializes sidebar open')
+
+global.localStorage.setItem(SIDEBAR_OPEN_KEY, 'unexpected')
+assert(loadSidebarOpen() === true, 'malformed stored preference safely defaults open')
+
+saveSidebarOpen(false)
+assert(global.localStorage.getItem(SIDEBAR_OPEN_KEY) === 'false', 'sidebar preference writer stores "false"')
+
+saveSidebarOpen(true)
+assert(global.localStorage.getItem(SIDEBAR_OPEN_KEY) === 'true', 'sidebar preference writer stores "true"')
+
+const originalGetItem = global.localStorage.getItem
+global.localStorage.getItem = () => { throw new Error('storage read failed') }
+assert(loadSidebarOpen() === true, 'storage read failure safely defaults sidebar open')
+global.localStorage.getItem = originalGetItem
+
+const originalSetItem = global.localStorage.setItem
+global.localStorage.setItem = () => { throw new Error('storage write failed') }
+saveSidebarOpen(false)
+assert(global.localStorage.getItem(SIDEBAR_OPEN_KEY) === 'true', 'storage write failure does not overwrite prior preference')
+global.localStorage.setItem = originalSetItem
+resetStore()
+
+// ---------------------------------------------------------------------------
+// 10. Refusal / safety patterns (static checks on response brain)
 // ---------------------------------------------------------------------------
 section('Refusal / safety (static)')
 // The local brain should handle "identity" without claiming humanity
@@ -261,7 +304,7 @@ assert(identity2.length > 0, 'returns a non-empty identity response')
 assertNotContains(identity2, 'yes, i am human', 'does not play-act as human')
 
 // ---------------------------------------------------------------------------
-// 10. Repetition check
+// 11. Repetition check
 // ---------------------------------------------------------------------------
 section('Repetition check')
 const responses = new Set()
@@ -275,7 +318,7 @@ for (let i = 0; i < 6; i++) {
 assert(responses.size >= 2, 'greeting responses have variation (≥2 unique in 6 tries)')
 
 // ---------------------------------------------------------------------------
-// 11. CLI regression tests (spawn subprocess, non-interactive only)
+// 12. CLI regression tests (spawn subprocess, non-interactive only)
 // ---------------------------------------------------------------------------
 section('CLI regression – one-shot --message')
 {
@@ -338,7 +381,7 @@ section('CLI regression – one-shot --message')
 }
 
 // ---------------------------------------------------------------------------
-// 12. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
+// 13. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
 // ---------------------------------------------------------------------------
 section('Live model tests')
 if (process.env.HELEN_EVAL_LIVE !== 'true') {
@@ -376,7 +419,7 @@ if (process.env.HELEN_EVAL_LIVE !== 'true') {
 }
 
 // ---------------------------------------------------------------------------
-// 13. Sidebar source-level assertions
+// 14. Sidebar source-level assertions
 //     Checks that the TSX source reflects the correct conditional render logic
 //     without requiring a DOM environment.
 // ---------------------------------------------------------------------------
@@ -407,6 +450,16 @@ section('Sidebar source-level assertions')
   assert(
     src.includes('{!sidebarOpen && (') && src.includes('className="sidebar-reopen"'),
     'reopen button is conditionally rendered when sidebar is closed',
+  )
+
+  assert(
+    src.includes('const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen)'),
+    'sidebar state uses lazy loadSidebarOpen initializer',
+  )
+
+  assert(
+    /useEffect\(\(\) => \{\s+saveSidebarOpen\(sidebarOpen\)\s+\}, \[sidebarOpen\]\)/.test(src),
+    'sidebar preference is persisted when sidebarOpen changes',
   )
 
   // Close button accessible label

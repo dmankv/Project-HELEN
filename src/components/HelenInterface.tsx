@@ -17,6 +17,7 @@ import {
 } from '../services/helenMemory'
 import { callChatAPI, hasBackend } from '../services/helenChatAPI'
 import type { APIMessage } from '../services/helenChatAPI'
+import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
 import '../styles/HelenInterface.css'
 
 interface Message {
@@ -163,7 +164,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen)
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
@@ -185,6 +186,10 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
     el.style.height = 'auto'
     el.style.height = el.scrollHeight + 'px'
   }, [input])
+
+  useEffect(() => {
+    saveSidebarOpen(sidebarOpen)
+  }, [sidebarOpen])
 
   const handleSend = useCallback(async () => {
     const text = input.trim()
