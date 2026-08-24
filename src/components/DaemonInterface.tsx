@@ -34,6 +34,13 @@ import {
 import type { SyncStatus } from '../services/supabasePersistence'
 import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem, runLegacyIdMigration, genUUID } from '../services/daemonStorageMigration'
 import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
+import {
+  loadLocalPreferences,
+  loadCloudPreferences,
+  toPersonalitySettings,
+} from '../services/daemonPersonalityPreferences'
+import type { PersonalityPreferences } from '../services/daemonPersonalityPreferences'
+import PersonalityPreferencesEditor from './PersonalityPreferencesEditor'
 import '../styles/DaemonInterface.css'
 
 interface Message {
@@ -190,7 +197,7 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 interface DaemonInterfaceProps {
   onLoginClick?: () => void
   onLogoutClick?: () => void
-  currentUser?: { email: string; role?: 'user' | 'admin' | null } | null
+  currentUser?: { id?: string; email: string; role?: 'user' | 'admin' | null } | null
 }
 
 export default function DaemonInterface({
@@ -214,6 +221,8 @@ export default function DaemonInterface({
   const [authError, setAuthError] = useState(false)
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('unconfigured')
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
+  const [personalityPrefs, setPersonalityPrefs] = useState<PersonalityPreferences>(() => loadLocalPreferences())
+  const [showPreferences, setShowPreferences] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -280,6 +289,14 @@ export default function DaemonInterface({
         })
       }
     })()
+  }, [currentUser])
+
+  // Load cloud personality preferences when the user signs in.
+  useEffect(() => {
+    if (!currentUser?.id) return
+    void loadCloudPreferences(currentUser.id).then(cloud => {
+      if (cloud) setPersonalityPrefs(cloud)
+    })
   }, [currentUser])
 
   const handleSend = useCallback(async () => {
@@ -480,6 +497,7 @@ export default function DaemonInterface({
         memories: legacySnippets.length > 0 ? legacySnippets : undefined,
         wantsShortAnswer,
         lastIntent,
+        personality: toPersonalitySettings(personalityPrefs),
       })
 
       setLastIntent(intent)
@@ -756,7 +774,31 @@ export default function DaemonInterface({
                         : 'Sync ready'}
             </p>
           </div>
+          <div className="sidebar-preferences">
+            <button
+              type="button"
+              className="preferences-open-btn"
+              onClick={() => setShowPreferences(true)}
+              aria-label="Open personality preferences"
+              title="Edit Daemon's communication style for your account"
+            >
+              ⚙ Preferences
+            </button>
+          </div>
         </nav>
+      )}
+
+      {showPreferences && (
+        <div className="preferences-overlay" role="presentation">
+          <PersonalityPreferencesEditor
+            userId={currentUser?.id ?? null}
+            onClose={() => setShowPreferences(false)}
+            onSaved={saved => {
+              setPersonalityPrefs(saved)
+              setShowPreferences(false)
+            }}
+          />
+        </div>
       )}
 
       <main className="daemon-main">

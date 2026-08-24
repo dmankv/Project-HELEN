@@ -1,13 +1,55 @@
 export type UserMood = 'neutral' | 'frustrated' | 'excited' | 'confused' | 'urgent' | 'sad'
+  | 'overwhelmed' | 'discouraged'
 
 export type ResponseIntent = 'answer' | 'clarify' | 'follow-up' | 'acknowledge' | 'suggest'
   | 'greeting' | 'identity' | 'coding' | 'coding-followup' | 'smalltalk' | 'humor' | 'uncertain'
-  | 'prompt-injection'
+  | 'prompt-injection' | 'pushback'
 
 export interface MemorySnippet {
   text: string
   timestamp?: Date
   relevance?: number
+}
+
+/**
+ * Per-response personality settings derived from the user's saved preferences.
+ * All fields fall back to safe defaults if absent.
+ * These settings influence tone and phrasing only — they cannot override
+ * safety, factuality, crisis, refusal, or relationship-boundary policy.
+ */
+export interface PersonalitySettings {
+  /** How much detail to include by default. Default: 'balanced'. */
+  detailLevel?: 'concise' | 'balanced' | 'detailed'
+  /** How warm/expressive Daemon should be. Default: 'balanced'. */
+  warmth?: 'reserved' | 'balanced' | 'warm'
+  /** How much humor to use. Default: 'light'. */
+  humorLevel?: 'none' | 'light' | 'moderate'
+  /** How direct to be. Default: 'balanced'. */
+  directness?: 'gentle' | 'balanced' | 'direct'
+  /** Whether mild profanity is permitted in clearly casual contexts. Default: false. */
+  allowMildProfanity?: boolean
+  /** Whether to proactively ask follow-up questions. Default: true. */
+  followUpQuestions?: boolean
+  /**
+   * Opt-in custom greeting/sign-off text.
+   * Daemon will use this text as a sign-off phrase only when set by the user.
+   * Disabled by default; must be explicitly enabled as an account preference.
+   * This is user-personalised text, NOT a claim of romantic reciprocity by Daemon.
+   */
+  customGreeting?: string | null
+  /** Whether to gently note patterns like stress or avoidance. Default: false. */
+  patternRecognition?: boolean
+}
+
+export const DEFAULT_PERSONALITY: Required<PersonalitySettings> = {
+  detailLevel: 'balanced',
+  warmth: 'balanced',
+  humorLevel: 'light',
+  directness: 'balanced',
+  allowMildProfanity: false,
+  followUpQuestions: true,
+  customGreeting: null,
+  patternRecognition: false,
 }
 
 export interface ResponseContext {
@@ -17,6 +59,8 @@ export interface ResponseContext {
   memories?: MemorySnippet[]
   wantsShortAnswer?: boolean
   lastIntent?: ResponseIntent
+  /** Optional per-user personality settings. Falls back to DEFAULT_PERSONALITY. */
+  personality?: PersonalitySettings
 }
 
 // ---------------------------------------------------------------------------
@@ -26,15 +70,23 @@ export interface ResponseContext {
 const MOOD_PATTERNS: Array<{ mood: UserMood; pattern: RegExp }> = [
   { mood: 'urgent', pattern: /\b(urgent|asap|immediately|right now|quickly|deadline|emergency)\b/i },
   {
+    mood: 'overwhelmed',
+    pattern: /\b(overwhelmed|too much|too many|can'?t keep up|drowning|burned? out|burnout|falling behind|piling up|where (do|should) i (even |start)|don'?t know where to start|procrastinat\w*)\b/i,
+  },
+  {
+    mood: 'discouraged',
+    pattern: /\b(discouraged|giving up|hopeless|pointless|what'?s the point|can'?t do (this|it)|going to fail|will fail|afraid (it|this) (will|won'?t)|fear of fail|scared (it|this) (will|won'?t)|not good enough|never (going to|gonna)|not meant to)\b/i,
+  },
+  {
     mood: 'frustrated',
-    pattern: /\b(frustrated|annoyed|upset|angry|stuck|hate|broken|not working|nothing works|doesn'?t work|so dumb|losing my mind|can'?t take it|drives? me (crazy|nuts|mad)|why (won'?t|doesn'?t|isn'?t)|ugh|argh|wtf)\b/i
+    pattern: /\b(frustrated|annoyed|upset|angry|stuck|hate|broken|not working|nothing works|doesn'?t work|so dumb|losing my mind|can'?t take it|drives? me (crazy|nuts|mad)|why (won'?t|doesn'?t|isn'?t)|ugh|argh|wtf)\b/i,
   },
   {
     mood: 'sad',
-    pattern: /\b(sad|unhappy|down|depressed|lonely|heartbroken|crying|miserable|grief|feel(ing)? (low|bad|awful|terrible|horrible|empty|hopeless)|not okay|not ok|struggling|rough day|hard day|hard time|hurts?|in pain)\b/i
+    pattern: /\b(sad|unhappy|down|depressed|lonely|heartbroken|crying|miserable|grief|feel(ing)? (low|bad|awful|terrible|horrible|empty|hopeless)|not okay|not ok|struggling|rough day|hard day|hard time|hurts?|in pain)\b/i,
   },
   { mood: 'confused', pattern: /\b(confused|unsure|not sure|don'?t understand|dont understand|lost|unclear|what does that mean|makes no sense)\b/i },
-  { mood: 'excited', pattern: /\b(excited|awesome|great|amazing|love|fantastic|yay|can'?t wait|so good|so cool|thrilled|pumped|stoked)\b/i }
+  { mood: 'excited', pattern: /\b(excited|awesome|great|amazing|love|fantastic|yay|can'?t wait|so good|so cool|thrilled|pumped|stoked)\b/i },
 ]
 
 // Intent patterns are listed in priority order — highest priority first.
@@ -67,7 +119,14 @@ const INTENT_PATTERNS: Array<{ intent: ResponseIntent; pattern: RegExp }> = [
   { intent: 'clarify', pattern: /\b(what do you mean|clarify|can you explain|not sure|confused|which one)\b/i },
   { intent: 'acknowledge', pattern: /\b(thanks|thank you|got it|makes sense|understood|okay|ok)\b/i },
   { intent: 'suggest', pattern: /\b(should i|recommend|suggest|best way|what should|options|idea)\b/i },
-  { intent: 'follow-up', pattern: /\b(follow up|earlier|before|that one|as mentioned|continue)\b/i }
+  { intent: 'follow-up', pattern: /\b(follow up|earlier|before|that one|as mentioned|continue)\b/i },
+]
+
+// Pushback patterns — signals that the user may be making a weak/risky/impulsive decision.
+// detectIntent does NOT use these; pushback is applied as an overlay in generateHumanLikeResponse.
+export const PUSHBACK_PATTERNS: RegExp[] = [
+  /\b(just do it|don'?t (over)?think|i don'?t care (about |if )?the (risks?|consequences?|downsides?)|ignore the (risks?|warnings?|downsides?)|it'?s (definitely|totally|always) (fine|safe|okay|worth it)|nothing (can|could|will) go wrong|i'?m (sure|certain) (it'?s|this (is|will)))\b/i,
+  /\b(quit (my |the )?job|drop out|all[ -]in|bet (everything|it all)|spend (everything|it all)|max out (my )?credit|take out a loan (to|for) (invest|gamble|bet)|invest (everything|it all) in)\b/i,
 ]
 
 // ---------------------------------------------------------------------------
@@ -162,7 +221,13 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "One solid option is to break the problem into smaller pieces and tackle each one.",
     "My suggestion: map out what you need first, then pick the approach that fits best.",
     "You might want to try a few approaches and see which feels most natural for your use case.",
-  ]
+  ],
+  pushback: [
+    "That might work — though it's worth thinking through what happens if it doesn't. What's your backup plan?",
+    "I hear you, and I want to help you succeed here. I do think it's worth pausing on the risks for a moment. Want to walk through them quickly?",
+    "Sounds like you're fired up about this — which is good. Just want to make sure you're going in with eyes open. What's the worst-case scenario here?",
+    "I'm with you on the goal. I'd feel remiss not flagging some things worth considering first — interested?",
+  ],
 }
 
 // ---------------------------------------------------------------------------
@@ -170,21 +235,25 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
 // ---------------------------------------------------------------------------
 
 const MOOD_OPENERS: Record<UserMood, string[]> = {
-  neutral: ['Sure.', 'Absolutely.', 'Okay.', 'Of course.', 'Happy to help.'],
-  frustrated: ["I hear you.", "That sounds frustrating.", "Let's make this easier.", "Let's fix that.", "I get it — that's annoying."],
+  neutral: ['Sure.', 'Absolutely.', 'Happy to help.', 'Of course.', 'Let me dig into that.'],
+  frustrated: ["I hear you.", "That sounds frustrating.", "Let's make this easier.", "Let's sort that out.", "I get it — that's annoying."],
   sad: ["I'm sorry to hear that.", "That sounds really hard.", "I'm here if you want to talk.", "That's tough — I'm listening."],
-  excited: ['Love that energy.', "That's exciting.", 'Nice momentum.', "Great — let's dive in.", "Awesome, let's go!"],
-  confused: ['No worries.', "Let's break it down.", "You're not alone in that.", "That's a fair thing to wonder about.", "Let me clarify."],
-  urgent: ["Got it — moving fast.", "On it.", "Let's handle this now.", "Right away.", "Quick answer coming."]
+  excited: ['Nice!', "That's exciting.", 'Love that energy.', "Great — let's go.", "Okay, let's run with this."],
+  confused: ['No worries.', "Let's break it down.", "That's a fair thing to wonder about.", "Let me clarify."],
+  urgent: ["Got it — moving fast.", "On it.", "Let's handle this now.", "Right away."],
+  overwhelmed: ["Okay, let's slow down.", "One thing at a time.", "I've got you.", "Let's find the next small step."],
+  discouraged: ["That feeling is real, and it makes sense.", "I hear you.", "Let's look at this differently for a second."],
 }
 
 const CLOSERS: Record<UserMood, string[]> = {
-  neutral: ['Want me to go deeper?', 'I can expand if you want.', 'Happy to refine this with you.', 'Let me know if you need more.', 'Anything else I can help with?'],
-  frustrated: ["If you want, I'll keep this step-by-step.", 'We can troubleshoot this together.', "I'll stay with you through it.", "Take your time — I'm here.", "Let's work through it."],
+  neutral: ['Want me to go deeper?', 'I can expand if you want.', 'Let me know if you need more.', 'Anything else I can help with?'],
+  frustrated: ["We can troubleshoot this together.", "I'll stay with you through it.", "Take your time — I'm here.", "Let's work through it step by step."],
   sad: ["I'm here whenever you need.", "Take your time — no rush.", "Feel free to talk about anything."],
-  excited: ['Want to push it further?', "We can level this up from here.", "Tell me where you'd like to take it next.", "Let's keep the momentum going!", "What's the next step?"],
-  confused: ['If helpful, I can simplify this more.', 'I can give a concrete example next.', 'Want me to rephrase this in simpler terms?', "Ask away if anything is still unclear.", "We can go step by step if that helps."],
-  urgent: ['If needed, I can give a fastest-path checklist.', 'I can keep this brief and actionable.', "Say the word and I'll prioritize the next step.", "What else do you need right now?", "I'm ready for the next task."]
+  excited: ['Want to push it further?', "Tell me where you'd like to take it next.", "What's the next step?"],
+  confused: ['Want me to rephrase this in simpler terms?', "Ask away if anything is still unclear.", "We can go step by step if that helps."],
+  urgent: ['I can keep this brief and actionable.', "What else do you need right now?", "I'm ready for the next task."],
+  overwhelmed: ["We don't have to solve everything at once.", "What feels most important right now?", "I'm here — one step at a time."],
+  discouraged: ["What would actually help right now — talking it through, or a practical next step?", "You don't have to figure this all out alone."],
 }
 
 // ---------------------------------------------------------------------------
@@ -198,27 +267,34 @@ const MOOD_FULL_RESPONSES: Partial<Record<UserMood, string[]>> = {
     "I hear you. Sometimes things are just tough and there's no quick fix. I'm here if you need to vent or want any kind of help.",
   ],
   frustrated: [
-    "Ugh, that sounds really frustrating. Let's figure it out together — what exactly is happening?",
-    "I get it, that kind of thing is genuinely annoying. Can you tell me more about what's going wrong so we can fix it?",
+    "That sounds genuinely frustrating. Let's figure it out together — what exactly is happening?",
+    "I get it, that kind of thing is annoying. Can you tell me more about what's going wrong so we can fix it?",
     "That sounds maddening. Let's slow down and work through it step by step. What are you seeing?",
   ],
   excited: [
-    "That's amazing — seriously, congrats! Tell me more, I want to hear all about it.",
-    "Love that energy! That's genuinely exciting news. What happened?",
-    "Yes! That's awesome. I'm pumped for you — what's next?",
-    "Okay, that's really cool. I'm here for it — fill me in!",
+    "That's great — tell me more, I want to hear all about it.",
+    "Love that energy! What happened?",
+    "Okay, that's really cool — fill me in!",
   ],
   urgent: [
-    "On it — let's move. What exactly do you need right now?",
-    "Got it, moving fast. Tell me the most critical piece and we'll tackle that first.",
+    "On it — what exactly do you need right now?",
+    "Moving fast. Tell me the most critical piece and we'll tackle that first.",
     "Right away. What's the single most important thing we need to solve right now?",
-    "No time to waste — I'm ready. What's the situation?",
   ],
   confused: [
     "Totally fair — let's untangle this together. What part is throwing you off?",
     "No worries at all, this stuff can be confusing. Walk me through what's unclear and we'll break it down.",
-    "You're not alone in that. Let me help clarify — what's the part that doesn't quite make sense?",
-    "Let's slow down and make sure this clicks. What specifically is confusing you?",
+    "You're not alone in that. What's the part that doesn't quite make sense?",
+  ],
+  overwhelmed: [
+    "When everything piles up, it's hard to know where to even start — I get it. Let's just find one thing to move on right now. What feels most urgent?",
+    "That feeling is real and makes sense. You don't have to tackle everything at once. What's the smallest thing that would actually make a dent?",
+    "Okay — let's not try to solve all of it at once. What's the one thing that, if you did it today, would make everything else a little easier?",
+  ],
+  discouraged: [
+    "I hear that. Being afraid something will fail doesn't mean it will — but it does mean it matters to you. That's actually a good sign. What's the specific fear?",
+    "That discouragement is real, and it makes sense. Let's look at it practically — what would success actually take? Sometimes that's more possible than it feels.",
+    "Fear of failure is just caring about the outcome. What would a small, low-stakes test of the idea look like — something you could try without betting everything on it?",
   ],
 }
 
@@ -237,6 +313,14 @@ export function detectMood(input: string): UserMood {
 // that the prior coding clarification requested.
 const CODING_LANG_PATTERN = /\b(python|javascript|typescript|js|ts|java|c\+\+|cpp|c#|csharp|ruby|go|rust|php|swift|kotlin|bash|shell|sql|html|css|react|node)\b/i
 const CODING_GOAL_PATTERN = /\b(sort|filter|fetch|parse|read|write|create|delete|update|loop|iterate|list|map|reduce|find|search|generate|validate|format|convert|connect|call|return|print|display|render|calculate|count|sum|merge|split|join)\b/i
+
+/**
+ * Returns true if the message contains signals of impulsive/risky reasoning
+ * that Daemon should respectfully push back on.
+ */
+export function detectPushback(input: string): boolean {
+  return PUSHBACK_PATTERNS.some(p => p.test(input))
+}
 
 export function detectIntent(input: string, lastIntent?: ResponseIntent): ResponseIntent {
   // If we just asked a coding clarification, check whether this message supplies
@@ -262,6 +346,9 @@ export function detectIntent(input: string, lastIntent?: ResponseIntent): Respon
   // Short but substantive questions ("What is AI?", "How?") are left to reach 'answer'.
   const words = input.trim().split(/\s+/)
   if (words.length <= 2 && /\?/.test(input) && !words.some(w => /[a-z]{4,}/i.test(w))) return 'uncertain'
+
+  // Pushback: risky/impulsive phrasing detected
+  if (detectPushback(input)) return 'pushback'
 
   return 'answer'
 }
@@ -308,22 +395,44 @@ function pick<T>(arr: T[]): T {
 // ---------------------------------------------------------------------------
 
 export function generateHumanLikeResponse(baseResponse: string, context: ResponseContext): string {
-  const { mood, intent, memories, wantsShortAnswer } = context
+  const { mood, intent, memories, wantsShortAnswer, personality } = context
+
+  // Resolve effective personality settings (defaults apply for any unset field)
+  const ps: Required<PersonalitySettings> = { ...DEFAULT_PERSONALITY, ...(personality ?? {}) }
+  const isWarm = ps.warmth === 'warm'
+  const isReserved = ps.warmth === 'reserved'
+
+  // Determine whether to include a follow-up question based on preferences
+  const includeFollowUp = ps.followUpQuestions
+
+  // 0. Custom greeting/sign-off — prepend only when the intent is greeting
+  //    and the user has explicitly opted in.  This is NOT a romantic claim.
+  const signoff = (ps.customGreeting && intent === 'greeting')
+    ? ` ${ps.customGreeting.trim()}`
+    : ''
 
   // 1. For emotionally charged moods that warrant a full bespoke reply, use
   //    the mood-specific response pool directly (no echo).
   //    Apply to all non-greeting, non-humor, non-identity intents so mood
   //    always takes priority over generic answer/clarify/suggest flows.
   const moodFull = MOOD_FULL_RESPONSES[mood]
-  const moodOverrideIntents: ResponseIntent[] = ['answer', 'clarify', 'suggest', 'follow-up', 'acknowledge']
+  const moodOverrideIntents: ResponseIntent[] = ['answer', 'clarify', 'suggest', 'follow-up', 'acknowledge', 'pushback']
   if (moodFull && moodOverrideIntents.includes(intent)) {
     const opener = pick(moodFull)
     if (wantsShortAnswer) return opener
-    return `${opener} ${pick(CLOSERS[mood])}`
+    const closer = includeFollowUp ? ` ${pick(CLOSERS[mood])}` : ''
+    return `${opener}${closer}`
   }
 
   // 2. Humor — return a standalone joke/banter response.
+  //    Never use humor for sad/overwhelmed/discouraged moods.
   if (intent === 'humor') {
+    if (mood === 'sad' || mood === 'overwhelmed' || mood === 'discouraged') {
+      return "I can try to lighten the mood a bit later — but let me make sure you're okay first. What's going on?"
+    }
+    if (ps.humorLevel === 'none') {
+      return pick(CANNED_ANSWERS.answer)
+    }
     return pick(CANNED_ANSWERS.humor)
   }
 
@@ -337,14 +446,29 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
     return pick(CANNED_ANSWERS['prompt-injection'])
   }
 
+  // 3c. Pushback — challenge weak/risky/impulsive decisions respectfully.
+  if (intent === 'pushback') {
+    return pick(CANNED_ANSWERS.pushback)
+  }
+
   // 4. For well-defined intents that have complete canned answers, use them.
-  //    'answer' is included here so its context-asking responses are returned
-  //    standalone rather than being embedded in the composition pipeline.
-  //    'follow-up' and 'suggest' are included so their complete-sentence pools
-  //    are used directly rather than being fed through the fragment composition path.
   const standAloneIntents: ResponseIntent[] = ['greeting', 'identity', 'smalltalk', 'acknowledge', 'clarify', 'answer', 'follow-up', 'suggest']
   if (standAloneIntents.includes(intent)) {
-    return pick(CANNED_ANSWERS[intent])
+    const base = pick(CANNED_ANSWERS[intent])
+    if (intent === 'greeting' && signoff) return base + signoff
+    // Reserved warmth: strip extra openers; warm: they stand as-is
+    if (isReserved && intent === 'acknowledge') {
+      // Shorter ack for reserved warmth
+      return pick(["Sure, got it.", "Understood.", "Noted.", "Got it."])
+    }
+    if (isWarm && intent === 'greeting') {
+      return pick([
+        "Really glad you're here — what's on your mind?",
+        "Hey! Always happy to see you. What can I help with?",
+        "Hi there! I'm here — what do you need today?",
+      ]) + signoff
+    }
+    return base
   }
 
   // 5. Coding clarification: first ask for details; on follow-up, acknowledge and proceed.
@@ -362,7 +486,8 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   const memory = memoryPhrase(memories)
 
   if (!rawContent) {
-    return `${pick(openerPool)} ${pick(closerPool)}`.replace(/\s+/g, ' ').trim()
+    const closer = includeFollowUp ? ` ${pick(closerPool)}` : ''
+    return `${pick(openerPool)}${closer}`.replace(/\s+/g, ' ').trim()
   }
 
   // 7. For answer / suggest / follow-up: build a composed response using a
@@ -374,12 +499,13 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
   const candidates: string[] = []
   const openers = shuffled(openerPool).slice(0, 3)
   const cores = shuffled(CANNED_ANSWERS[intent] ?? CANNED_ANSWERS.answer).slice(0, 3)
-  const closers = shuffled(closerPool).slice(0, 3)
+  const closers = includeFollowUp ? shuffled(closerPool).slice(0, 3) : ['']
 
   for (const opener of openers) {
     for (const core of cores) {
       for (const closer of closers) {
-        const candidate = `${opener} ${memory}${core}${topic}. ${closer}`
+        const suffix = closer ? `. ${closer}` : '.'
+        const candidate = `${opener} ${memory}${core}${topic}${suffix}`
           .replace(/\s+/g, ' ')
           .trim()
         candidates.push(candidate)
