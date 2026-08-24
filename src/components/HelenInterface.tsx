@@ -182,21 +182,6 @@ export default function HelenInterface() {
     el.style.height = el.scrollHeight + 'px'
   }, [input])
 
-  const persistConversation = useCallback(
-    (updated: Message[], convId: string, convList: Conversation[]) => {
-      const existing = convList.find(c => c.id === convId)
-      const updatedConv: Conversation = existing
-        ? { ...existing, messages: updated }
-        : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-      const updatedConvList = existing
-        ? convList.map(c => (c.id === convId ? updatedConv : c))
-        : [updatedConv, ...convList]
-      setConversations(updatedConvList)
-      saveConversations(updatedConvList)
-    },
-    [],
-  )
-
   const handleSend = useCallback(async () => {
     const text = input.trim()
     if (!text || isThinking) return
@@ -217,106 +202,170 @@ export default function HelenInterface() {
     const convId = activeConvId ?? nextId()
     if (!activeConvId) setActiveConvId(convId)
 
-    // Check for memory command first
-    const memCmd = parseMemoryCommand(text)
-    if (memCmd) {
-      await new Promise(r => setTimeout(r, 400))
-      const responseText = handleMemoryCommand(memCmd)
-      const aiMsg: Message = {
-        id: nextId(),
-        role: 'assistant',
-        content: responseText,
-        timestamp: new Date().toISOString(),
-      }
-      const updated = [...nextMessages, aiMsg]
-      setMessages(updated)
-      saveMessages(updated)
-      persistConversation(updated, convId, conversations)
-      setIsThinking(false)
-      return
-    }
-
-    // Try backend first
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    if (hasBackend()) {
-      const apiHistory = buildAPIHistory(nextMessages)
-      const backendResponse = await callChatAPI(apiHistory, controller.signal)
-      if (backendResponse !== null) {
-        setUsingBackend(true)
+    try {
+      // Check for memory command first
+      const memCmd = parseMemoryCommand(text)
+      if (memCmd) {
+        await new Promise(r => setTimeout(r, 400))
+        const responseText = handleMemoryCommand(memCmd)
         const aiMsg: Message = {
           id: nextId(),
           role: 'assistant',
-          content: backendResponse,
+          content: responseText,
           timestamp: new Date().toISOString(),
         }
         const updated = [...nextMessages, aiMsg]
         setMessages(updated)
         saveMessages(updated)
-        persistConversation(updated, convId, conversations)
+        // Use functional update to avoid stale conversations closure
+        setConversations(prev => {
+          const existing = prev.find(c => c.id === convId)
+          const updatedConv: Conversation = existing
+            ? { ...existing, messages: updated }
+            : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
+          const updatedList = existing
+            ? prev.map(c => (c.id === convId ? updatedConv : c))
+            : [updatedConv, ...prev]
+          saveConversations(updatedList)
+          return updatedList
+        })
         setIsThinking(false)
-        abortRef.current = null
         return
       }
-      setUsingBackend(false)
-      // User may have cancelled while awaiting the backend response
-      if (controller.signal.aborted) {
-        setIsThinking(false)
-        abortRef.current = null
-        return
+
+      // Try backend first
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      if (hasBackend()) {
+        const apiHistory = buildAPIHistory(nextMessages)
+        const backendResponse = await callChatAPI(apiHistory, controller.signal)
+        if (backendResponse !== null) {
+          setUsingBackend(true)
+          const aiMsg: Message = {
+            id: nextId(),
+            role: 'assistant',
+            content: backendResponse,
+            timestamp: new Date().toISOString(),
+          }
+          const updated = [...nextMessages, aiMsg]
+          setMessages(updated)
+          saveMessages(updated)
+          setConversations(prev => {
+            const existing = prev.find(c => c.id === convId)
+            const updatedConv: Conversation = existing
+              ? { ...existing, messages: updated }
+              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
+            const updatedList = existing
+              ? prev.map(c => (c.id === convId ? updatedConv : c))
+              : [updatedConv, ...prev]
+            saveConversations(updatedList)
+            return updatedList
+          })
+          setIsThinking(false)
+          abortRef.current = null
+          return
+        }
+        setUsingBackend(false)
+        // User may have cancelled while awaiting the backend response
+        if (controller.signal.aborted) {
+          setIsThinking(false)
+          abortRef.current = null
+          return
+        }
+        // Backend was configured but unreachable — notify user and stop
+        {
+          const errMsg: Message = {
+            id: nextId(),
+            role: 'assistant',
+            content: 'The cloud backend is unreachable right now. Falling back to local mode for this message.',
+            timestamp: new Date().toISOString(),
+          }
+          const updated = [...nextMessages, errMsg]
+          setMessages(updated)
+          saveMessages(updated)
+          setConversations(prev => {
+            const existing = prev.find(c => c.id === convId)
+            const updatedConv: Conversation = existing
+              ? { ...existing, messages: updated }
+              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
+            const updatedList = existing
+              ? prev.map(c => (c.id === convId ? updatedConv : c))
+              : [updatedConv, ...prev]
+            saveConversations(updatedList)
+            return updatedList
+          })
+          setIsThinking(false)
+          abortRef.current = null
+          return
+        }
       }
+
+      // Local brain fallback
+      await new Promise(r => setTimeout(r, thinkingDelay(text)))
+
+      const durableMemories = retrieveRelevant(text, 5)
+      const legacySnippets: MemorySnippet[] = durableMemories.map(m => ({
+        text: m.text,
+        relevance: new Date(m.createdAt).getTime(),
+      }))
+
+      const mood = detectMood(text)
+      const intent = detectIntent(text, lastIntent)
+      const wantsShortAnswer = text.trim().split(/\s+/).length <= 5
+
+      const response = generateHumanLikeResponse(text, {
+        userMessage: text,
+        mood,
+        intent,
+        memories: legacySnippets.length > 0 ? legacySnippets : undefined,
+        wantsShortAnswer,
+        lastIntent,
+      })
+
+      setLastIntent(intent)
+
+      const interactionRecord = learningSystem.recordInteraction(text, response, {
+        intent,
+        confidence: 0.8,
+        ambiguity: intent === 'clarify' ? 0.6 : 0.2,
+        memoryUsed: legacySnippets.length,
+        planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
+        timestamp: new Date(),
+      })
+
+      const aiMsg: Message = {
+        id: nextId(),
+        role: 'assistant',
+        content: response,
+        timestamp: new Date().toISOString(),
+      }
+
+      msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
+
+      const updated = [...nextMessages, aiMsg]
+      setMessages(updated)
+      saveMessages(updated)
+      setConversations(prev => {
+        const existing = prev.find(c => c.id === convId)
+        const updatedConv: Conversation = existing
+          ? { ...existing, messages: updated }
+          : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
+        const updatedList = existing
+          ? prev.map(c => (c.id === convId ? updatedConv : c))
+          : [updatedConv, ...prev]
+        saveConversations(updatedList)
+        return updatedList
+      })
+      setIsThinking(false)
+      abortRef.current = null
+    } catch (err) {
+      // Ensure the UI is never permanently frozen if an unexpected error occurs
+      console.error('[helen] Unexpected error in handleSend:', (err as Error).message)
+      setIsThinking(false)
+      abortRef.current = null
     }
-
-    // Local brain fallback
-    await new Promise(r => setTimeout(r, thinkingDelay(text)))
-
-    const durableMemories = retrieveRelevant(text, 5)
-    const legacySnippets: MemorySnippet[] = durableMemories.map(m => ({
-      text: m.text,
-      relevance: new Date(m.createdAt).getTime(),
-    }))
-
-    const mood = detectMood(text)
-    const intent = detectIntent(text, lastIntent)
-    const wantsShortAnswer = text.trim().split(/\s+/).length <= 5
-
-    const response = generateHumanLikeResponse(text, {
-      userMessage: text,
-      mood,
-      intent,
-      memories: legacySnippets.length > 0 ? legacySnippets : undefined,
-      wantsShortAnswer,
-      lastIntent,
-    })
-
-    setLastIntent(intent)
-
-    const interactionRecord = learningSystem.recordInteraction(text, response, {
-      intent,
-      confidence: 0.8,
-      ambiguity: intent === 'clarify' ? 0.6 : 0.2,
-      memoryUsed: legacySnippets.length,
-      planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
-      timestamp: new Date(),
-    })
-
-    const aiMsg: Message = {
-      id: nextId(),
-      role: 'assistant',
-      content: response,
-      timestamp: new Date().toISOString(),
-    }
-
-    msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
-
-    const updated = [...nextMessages, aiMsg]
-    setMessages(updated)
-    saveMessages(updated)
-    persistConversation(updated, convId, conversations)
-    setIsThinking(false)
-    abortRef.current = null
-  }, [input, isThinking, messages, activeConvId, lastIntent, conversations, persistConversation])
+  }, [input, isThinking, messages, activeConvId, lastIntent])
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort()
@@ -349,6 +398,11 @@ export default function HelenInterface() {
     setActiveConvId(null)
     setLastIntent(undefined)
     saveMessages([])
+    // Persist the current conversation list so it survives page reload.
+    setConversations(prev => {
+      saveConversations(prev)
+      return prev
+    })
   }
 
   const handleSelectConversation = (conv: Conversation) => {
@@ -365,7 +419,7 @@ export default function HelenInterface() {
         <nav className="helen-sidebar" aria-label="Conversation history">
           <div className="sidebar-header">
             <div className="helen-brand">
-              <span className="helen-logo">🧠</span>
+              <span className="helen-logo" aria-hidden="true">🧠</span>
               <span>HELEN</span>
             </div>
             <button
@@ -394,7 +448,7 @@ export default function HelenInterface() {
                     onClick={() => handleSelectConversation(conv)}
                     title={conv.title}
                   >
-                    <span className="conv-icon">💬</span>
+                    <span className="conv-icon" aria-hidden="true">💬</span>
                     <span className="conv-title">{conv.title}</span>
                   </button>
                 </li>
@@ -415,8 +469,9 @@ export default function HelenInterface() {
               </div>
             </div>
             {hasBackend() && (
-              <p className="backend-badge" title={usingBackend ? 'Responses from cloud model' : 'Using local brain'}>
-                {usingBackend ? '☁️ Cloud' : '🖥️ Local'}
+              <p className="backend-badge" title={usingBackend ? 'Responses from cloud model' : 'Using local brain'} aria-label={usingBackend ? 'Cloud mode active' : 'Local mode active'}>
+                <span aria-hidden="true">{usingBackend ? '☁️' : '🖥️'}</span>
+                {' '}{usingBackend ? 'Cloud' : 'Local'}
               </p>
             )}
           </div>
@@ -437,7 +492,7 @@ export default function HelenInterface() {
         )}
         <header className="helen-header">
           <div className="header-title">
-            <span className="helen-logo-sm">🧠</span>
+            <span className="helen-logo-sm" aria-hidden="true">🧠</span>
             <span>HELEN</span>
           </div>
           <button
@@ -457,11 +512,12 @@ export default function HelenInterface() {
             role="log"
             aria-live="polite"
             aria-label="Conversation"
+            aria-busy={isThinking}
           >
             {messages.length === 0 && !isThinking && (
               <div className="welcome-screen">
                 <div className="welcome-content">
-                  <div className="welcome-icon">🧠</div>
+                  <div className="welcome-icon" aria-hidden="true">🧠</div>
                   <h1>Hello, I'm HELEN</h1>
                   <p>Your adaptive AI assistant. Say something to begin.</p>
                   <p className="welcome-hint">
@@ -477,7 +533,7 @@ export default function HelenInterface() {
                 key={msg.id}
                 className={'message-row ' + (msg.role === 'user' ? 'user-row' : 'assistant-row')}
               >
-                <div className="message-avatar">{msg.role === 'user' ? '👤' : '🧠'}</div>
+                <div className="message-avatar" aria-hidden="true">{msg.role === 'user' ? '👤' : '🧠'}</div>
                 <div className="message-body">
                   <div className={'bubble ' + (msg.role === 'user' ? 'user-bubble' : 'assistant-bubble')}>
                     <div className="bubble-text">{msg.content}</div>
@@ -503,7 +559,7 @@ export default function HelenInterface() {
                               if (interactionId) learningSystem.processFeedback(interactionId, 'helpful')
                               setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}
-                          >👍</button>
+                          ><span aria-hidden="true">👍</span></button>
                           <button
                             type="button"
                             className="feedback-btn"
@@ -513,7 +569,7 @@ export default function HelenInterface() {
                               if (interactionId) learningSystem.processFeedback(interactionId, 'unhelpful')
                               setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}
-                          >👎</button>
+                          ><span aria-hidden="true">👎</span></button>
                         </span>
                       )
                     )}
@@ -524,10 +580,10 @@ export default function HelenInterface() {
 
             {isThinking && (
               <div className="message-row assistant-row">
-                <div className="message-avatar">🧠</div>
+                <div className="message-avatar" aria-hidden="true">🧠</div>
                 <div className="message-body">
                   <div className="bubble assistant-bubble">
-                    <div className="typing-indicator">
+                    <div className="typing-indicator" aria-label="HELEN is typing">
                       <span></span>
                       <span></span>
                       <span></span>
@@ -556,6 +612,7 @@ export default function HelenInterface() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Message HELEN…"
+              aria-label="Message input"
               disabled={isThinking}
               rows={1}
             />
