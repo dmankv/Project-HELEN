@@ -1,9 +1,0 @@
-.chat-interface {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 900px;
-  margin: 0 auto;
-  height: 100%;
-  background-color: var(--color-background);
-}
