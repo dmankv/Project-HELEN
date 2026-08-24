@@ -3,9 +3,9 @@ import {
   detectMood,
   detectIntent,
   generateHumanLikeResponse,
-} from '../services/daemonResponseBrain'
-import type { MemorySnippet, ResponseIntent } from '../services/daemonResponseBrain'
-import learningSystem from '../services/daemon_learning_integration'
+} from '../services/helenResponseBrain'
+import type { MemorySnippet, ResponseIntent } from '../services/helenResponseBrain'
+import learningSystem from '../services/helen_learning_integration'
 import {
   saveMemory,
   listMemories,
@@ -14,11 +14,11 @@ import {
   forgetAll,
   retrieveRelevant,
   formatMemoriesForContext,
-} from '../services/daemonMemory'
-import { callChatAPI, hasBackend } from '../services/daemonChatAPI'
-import type { APIMessage } from '../services/daemonChatAPI'
+} from '../services/helenMemory'
+import { callChatAPI, hasBackend, isAPIFailure } from '../services/helenChatAPI'
+import type { APIMessage } from '../services/helenChatAPI'
 import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
-import '../styles/DaemonInterface.css'
+import '../styles/HelenInterface.css'
 
 interface Message {
   id: string
@@ -34,8 +34,8 @@ interface Conversation {
   createdAt: string
 }
 
-const MESSAGES_KEY = 'daemon_messages'
-const CONVERSATIONS_KEY = 'daemon_conversations'
+const MESSAGES_KEY = 'helen_messages'
+const CONVERSATIONS_KEY = 'helen_conversations'
 const MIN_THINKING_DELAY = 600
 const MAX_THINKING_DELAY = 1800
 
@@ -85,7 +85,7 @@ function conversationTitle(messages: Message[]): string {
 }
 
 let _idCounter = 0
-const nextId = () => 'daemon-' + Date.now() + '-' + (++_idCounter)
+const nextId = () => 'helen-' + Date.now() + '-' + (++_idCounter)
 
 // ---------------------------------------------------------------------------
 // Memory command parser
@@ -157,11 +157,17 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 // Component
 // ---------------------------------------------------------------------------
 
-interface DaemonInterfaceProps {
+interface HelenInterfaceProps {
   onLoginClick?: () => void
+  onLogoutClick?: () => void
+  currentUser?: { email: string } | null
 }
 
-export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps = {}) {
+export default function HelenInterface({
+  onLoginClick,
+  onLogoutClick,
+  currentUser = null,
+}: HelenInterfaceProps = {}) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -170,6 +176,7 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const [usingBackend, setUsingBackend] = useState(false)
+  const [authError, setAuthError] = useState(false)
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -211,6 +218,8 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
 
     const convId = activeConvId ?? nextId()
     if (!activeConvId) setActiveConvId(convId)
+    let backendFailedThisTurn = false
+    let authErrorThisTurn = false
 
     try {
       // Check for memory command first
@@ -249,13 +258,14 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
 
       if (hasBackend()) {
         const apiHistory = buildAPIHistory(nextMessages)
-        const backendResponse = await callChatAPI(apiHistory, controller.signal)
-        if (backendResponse !== null) {
+        const backendResult = await callChatAPI(apiHistory, controller.signal)
+        if (typeof backendResult === 'string') {
           setUsingBackend(true)
+          setAuthError(false)
           const aiMsg: Message = {
             id: nextId(),
             role: 'assistant',
-            content: backendResponse,
+            content: backendResult,
             timestamp: new Date().toISOString(),
           }
           const updated = [...nextMessages, aiMsg]
@@ -278,37 +288,16 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
         }
         setUsingBackend(false)
         // User may have cancelled while awaiting the backend response
-        if (controller.signal.aborted) {
+        if (controller.signal.aborted || (isAPIFailure(backendResult) && backendResult.reason === 'aborted')) {
           setIsThinking(false)
           abortRef.current = null
           return
         }
-        // Backend was configured but unreachable — notify user and stop
-        {
-          const errMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: 'The cloud backend is unreachable right now. Falling back to local mode for this message.',
-            timestamp: new Date().toISOString(),
-          }
-          const updated = [...nextMessages, errMsg]
-          setMessages(updated)
-          saveMessages(updated)
-          setConversations(prev => {
-            const existing = prev.find(c => c.id === convId)
-            const updatedConv: Conversation = existing
-              ? { ...existing, messages: updated }
-              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-            const updatedList = existing
-              ? prev.map(c => (c.id === convId ? updatedConv : c))
-              : [updatedConv, ...prev]
-            saveConversations(updatedList)
-            return updatedList
-          })
-          setIsThinking(false)
-          abortRef.current = null
-          return
+        if (isAPIFailure(backendResult) && backendResult.reason === 'auth') {
+          setAuthError(true)
+          authErrorThisTurn = true
         }
+        backendFailedThisTurn = true
       }
 
       // Local brain fallback
@@ -350,10 +339,19 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
         content: response,
         timestamp: new Date().toISOString(),
       }
-
+      const fallbackMsg: Message | null = backendFailedThisTurn
+        ? {
+            id: nextId(),
+            role: 'assistant',
+            content: authErrorThisTurn
+              ? 'The cloud backend rejected the request (authentication error). Sign in to use cloud chat. Using local mode for this response.'
+              : 'The cloud backend is unreachable right now. I used local mode for this response.',
+            timestamp: new Date().toISOString(),
+          }
+        : null
       msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
 
-      const updated = [...nextMessages, aiMsg]
+      const updated = fallbackMsg ? [...nextMessages, fallbackMsg, aiMsg] : [...nextMessages, aiMsg]
       setMessages(updated)
       saveMessages(updated)
       setConversations(prev => {
@@ -371,7 +369,7 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
       abortRef.current = null
     } catch (err) {
       // Ensure the UI is never permanently frozen if an unexpected error occurs
-      console.error('[daemon] Unexpected error in handleSend:', (err as Error).message)
+      console.error('[helen] Unexpected error in handleSend:', (err as Error).message)
       setIsThinking(false)
       abortRef.current = null
     }
@@ -398,8 +396,12 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
     setConversations([])
     setRatedMessages(new Set())
     abortRef.current = null
-    localStorage.removeItem(MESSAGES_KEY)
-    localStorage.removeItem(CONVERSATIONS_KEY)
+    try {
+      localStorage.removeItem(MESSAGES_KEY)
+      localStorage.removeItem(CONVERSATIONS_KEY)
+    } catch {
+      // best-effort only; UI state is already reset in-memory
+    }
     learningSystem.clearHistory()
     // Durable memories are intentionally preserved. Use "forget all memories" to erase them.
   }
@@ -427,13 +429,13 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
   const insights = learningSystem.getLearningInsights()
 
   return (
-    <div className="daemon-app">
+    <div className="helen-app">
       {sidebarOpen && (
-        <nav className="daemon-sidebar" aria-label="Conversation history">
+        <nav className="helen-sidebar" aria-label="Conversation history">
           <div className="sidebar-header">
-            <div className="daemon-brand">
-              <span className="daemon-logo" aria-hidden="true">🧠</span>
-              <span>Daemon</span>
+            <div className="helen-brand">
+              <span className="helen-logo" aria-hidden="true">🧠</span>
+              <span>HELEN</span>
             </div>
             <button
               type="button"
@@ -488,36 +490,42 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
               <p
                 className="backend-badge"
                 title={
-                  messages.length === 0
-                    ? 'Cloud mode configured — will activate on first message'
-                    : usingBackend
-                      ? 'Responses from cloud model'
-                      : 'Using local brain'
+                  authError
+                    ? 'Authentication error — sign in to use cloud chat'
+                    : messages.length === 0
+                      ? 'Cloud mode configured — will activate on first message'
+                      : usingBackend
+                        ? 'Responses from cloud model'
+                        : 'Using local brain'
                 }
                 aria-label={
-                  messages.length === 0
-                    ? 'Cloud mode configured'
-                    : usingBackend
-                      ? 'Cloud mode active'
-                      : 'Local mode active'
+                  authError
+                    ? 'Cloud auth error'
+                    : messages.length === 0
+                      ? 'Cloud mode configured'
+                      : usingBackend
+                        ? 'Cloud mode active'
+                        : 'Local mode active'
                 }
               >
                 <span aria-hidden="true">
-                  {usingBackend || messages.length === 0 ? '☁️' : '🖥️'}
+                  {authError ? '⚠️' : usingBackend || messages.length === 0 ? '☁️' : '🖥️'}
                 </span>
                 {' '}
-                {usingBackend
-                  ? 'Cloud'
-                  : messages.length === 0
-                    ? 'Cloud (ready)'
-                    : 'Local'}
+                {authError
+                  ? 'Auth error'
+                  : usingBackend
+                    ? 'Cloud'
+                    : messages.length === 0
+                      ? 'Cloud (ready)'
+                      : 'Local'}
               </p>
             )}
           </div>
         </nav>
       )}
 
-      <main className="daemon-main">
+      <main className="helen-main">
         {!sidebarOpen && (
           <button
             type="button"
@@ -529,10 +537,10 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
             ▶
           </button>
         )}
-        <header className="daemon-header">
+        <header className="helen-header">
           <div className="header-title">
-            <span className="daemon-logo-sm" aria-hidden="true">🧠</span>
-            <span>Daemon</span>
+            <span className="helen-logo-sm" aria-hidden="true">🧠</span>
+            <span>HELEN</span>
           </div>
           <div className="header-actions">
             <button
@@ -545,15 +553,34 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
               Clear All
             </button>
             {onLoginClick && (
-              <button
-                type="button"
-                className="login-btn"
-                onClick={onLoginClick}
-                aria-label="Log in"
-                title="Log in"
-              >
-                Log in
-              </button>
+              currentUser ? (
+                <>
+                  <span className="account-label" aria-label={`Signed in as ${currentUser.email}`}>
+                    {currentUser.email}
+                  </span>
+                  {onLogoutClick && (
+                    <button
+                      type="button"
+                      className="login-btn"
+                      onClick={onLogoutClick}
+                      aria-label="Log out"
+                      title="Log out"
+                    >
+                      Log out
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="login-btn"
+                  onClick={onLoginClick}
+                  aria-label="Log in"
+                  title="Log in"
+                >
+                  Log in
+                </button>
+              )
             )}
           </div>
         </header>
@@ -570,7 +597,7 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
               <div className="welcome-screen">
                 <div className="welcome-content">
                   <div className="welcome-icon" aria-hidden="true">🧠</div>
-                  <h1>Hello, I'm Daemon</h1>
+                  <h1>Hello, I'm HELEN</h1>
                   <p>Your adaptive AI assistant. Say something to begin.</p>
                   <p className="welcome-hint">
                     Try: <em>"remember this: I prefer concise answers"</em><br />
@@ -635,7 +662,7 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
                 <div className="message-avatar" aria-hidden="true">🧠</div>
                 <div className="message-body">
                   <div className="bubble assistant-bubble">
-                    <div className="typing-indicator" aria-label="Daemon is typing">
+                    <div className="typing-indicator" aria-label="HELEN is typing">
                       <span></span>
                       <span></span>
                       <span></span>
@@ -659,11 +686,11 @@ export default function DaemonInterface({ onLoginClick }: DaemonInterfaceProps =
           <div className="input-area">
             <textarea
               ref={textareaRef}
-              className="daemon-input"
+              className="helen-input"
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message Daemon…"
+              placeholder="Message HELEN…"
               aria-label="Message input"
               disabled={isThinking}
               rows={1}

@@ -1,67 +1,261 @@
-import { useState, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '../styles/LoginView.css'
+import {
+  completePasswordReset,
+  completeVerification,
+  loginUser,
+  registerUser,
+  requestPasswordReset,
+  requestVerification,
+} from '../services/helenAuthAPI'
+import type { AuthUser } from '../services/helenAuthAPI'
+
+type AuthRoute =
+  | 'login'
+  | 'register'
+  | 'forgot-password'
+  | 'reset-password'
+  | 'verify-email'
 
 interface LoginViewProps {
+  mode: AuthRoute
+  token: string
+  hasBackend: boolean
   onBackToChat: () => void
+  onNavigate: (route: AuthRoute | 'chat', token?: string) => void
+  onAuthSuccess: (user: AuthUser) => void
 }
 
-export default function LoginView({ onBackToChat }: LoginViewProps) {
-  const [submitted, setSubmitted] = useState(false)
+function clearSensitive(...setters: Array<(value: string) => void>): void {
+  for (const set of setters) set('')
+}
 
-  const handleSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    // Authentication is not configured. No credentials are stored or transmitted.
-    setSubmitted(true)
+export default function LoginView({
+  mode,
+  token,
+  hasBackend,
+  onBackToChat,
+  onNavigate,
+  onAuthSuccess,
+}: LoginViewProps) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+  const [status, setStatus] = useState('')
+  const headingRef = useRef<HTMLHeadingElement>(null)
+
+  useEffect(() => {
+    headingRef.current?.focus()
+    setError('')
+    setStatus('')
+    clearSensitive(setPassword, setPasswordConfirm)
+  }, [mode])
+
+  useEffect(() => {
+    return () => {
+      clearSensitive(setPassword, setPasswordConfirm)
+    }
   }, [])
+
+  const title = useMemo(() => {
+    switch (mode) {
+      case 'register': return 'Create account'
+      case 'forgot-password': return 'Reset password'
+      case 'reset-password': return 'Set new password'
+      case 'verify-email': return 'Verify email'
+      default: return 'Log in'
+    }
+  }, [mode])
+
+  const backendWarning = !hasBackend
+    ? 'Authentication API is not configured. Set VITE_HELEN_AUTH_API_URL (or VITE_HELEN_API_URL) to enable login flows.'
+    : ''
+
+  const withPending = useCallback(async (work: () => Promise<void>) => {
+    setPending(true)
+    setError('')
+    setStatus('')
+    try {
+      await work()
+    } catch {
+      setError('Request failed. Please try again.')
+    } finally {
+      setPending(false)
+      clearSensitive(setPassword, setPasswordConfirm)
+    }
+  }, [])
+
+  const onSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!hasBackend) {
+      setError('Authentication backend is not available.')
+      clearSensitive(setPassword, setPasswordConfirm)
+      return
+    }
+
+    void withPending(async () => {
+      if (mode === 'login') {
+        const result = await loginUser(email, password)
+        if (!result.ok || !result.user) {
+          setError(result.message)
+          return
+        }
+        setStatus('Login successful.')
+        onAuthSuccess(result.user)
+        return
+      }
+
+      if (mode === 'register') {
+        const result = await registerUser(email, password, passwordConfirm)
+        if (!result.ok) {
+          setError(result.message)
+          return
+        }
+        setStatus(result.message)
+        return
+      }
+
+      if (mode === 'forgot-password') {
+        const result = await requestPasswordReset(email)
+        setStatus(result.message)
+        return
+      }
+
+      if (mode === 'reset-password') {
+        if (!token) {
+          setError('Missing reset token in URL.')
+          return
+        }
+        const result = await completePasswordReset(token, password, passwordConfirm)
+        if (!result.ok) {
+          setError(result.message)
+          return
+        }
+        setStatus(result.message)
+        return
+      }
+
+      if (mode === 'verify-email') {
+        if (!token) {
+          setError('Missing verification token in URL.')
+          return
+        }
+        const result = await completeVerification(token)
+        setStatus(result.message)
+      }
+    })
+  }, [email, hasBackend, mode, onAuthSuccess, password, passwordConfirm, token, withPending])
+
+  const onResendVerification = useCallback(() => {
+    if (!hasBackend) {
+      setError('Authentication backend is not available.')
+      return
+    }
+    void withPending(async () => {
+      const result = await requestVerification(email)
+      setStatus(result.message)
+    })
+  }, [email, hasBackend, withPending])
 
   return (
     <main className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <span className="daemon-logo-sm" aria-hidden="true">🧠</span>
-          <span className="login-title">Daemon – Log In</span>
+          <span className="helen-logo-sm" aria-hidden="true">🧠</span>
+          <h1 ref={headingRef} className="login-title" tabIndex={-1}>{title}</h1>
         </div>
 
-        <p className="login-notice">
-          Authentication is not yet configured. This form is UI-only and does
-          not store or transmit any credentials.
-        </p>
+        {backendWarning && <p className="login-notice" role="status">{backendWarning}</p>}
+        {!!error && <p className="login-error" role="alert">{error}</p>}
+        {!!status && <p className="login-submitted-notice" role="status">{status}</p>}
 
-        {submitted && (
-          <p className="login-submitted-notice" role="status">
-            Authentication is not configured yet. No action was taken.
-          </p>
-        )}
+        <form className="login-form" onSubmit={onSubmit} noValidate>
+          {(mode === 'login' || mode === 'register' || mode === 'forgot-password') && (
+            <div className="login-field">
+              <label htmlFor="login-email">Email</label>
+              <input
+                id="login-email"
+                type="email"
+                name="email"
+                autoComplete="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                maxLength={254}
+                disabled={pending}
+              />
+            </div>
+          )}
 
-        <form className="login-form" onSubmit={handleSubmit} noValidate>
-          <div className="login-field">
-            <label htmlFor="login-username">User</label>
-            <input
-              id="login-username"
-              type="text"
-              name="username"
-              autoComplete="username"
-              placeholder="Username"
-              aria-label="Username"
-            />
-          </div>
+          {(mode === 'login' || mode === 'register' || mode === 'reset-password') && (
+            <div className="login-field">
+              <label htmlFor="login-password">Password</label>
+              <input
+                id="login-password"
+                type="password"
+                name="password"
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                minLength={8}
+                maxLength={128}
+                disabled={pending}
+              />
+            </div>
+          )}
 
-          <div className="login-field">
-            <label htmlFor="login-password">Password</label>
-            <input
-              id="login-password"
-              type="password"
-              name="current-password"
-              autoComplete="current-password"
-              placeholder="Password"
-              aria-label="Password"
-            />
-          </div>
+          {(mode === 'register' || mode === 'reset-password') && (
+            <div className="login-field">
+              <label htmlFor="login-password-confirm">Confirm password</label>
+              <input
+                id="login-password-confirm"
+                type="password"
+                name="passwordConfirm"
+                autoComplete="new-password"
+                value={passwordConfirm}
+                onChange={e => setPasswordConfirm(e.target.value)}
+                required
+                minLength={8}
+                maxLength={128}
+                disabled={pending}
+              />
+            </div>
+          )}
 
-          <button type="submit" className="login-submit-btn">
-            Log In
+          {mode === 'verify-email' && (
+            <p className="login-notice">Use the verification link from your email, then submit to complete verification.</p>
+          )}
+
+          <button type="submit" className="login-submit-btn" disabled={pending || !hasBackend}>
+            {pending ? 'Please wait…' : title}
           </button>
         </form>
+
+        <nav className="login-links" aria-label="Authentication navigation">
+          {mode !== 'login' && (
+            <button type="button" className="login-back-btn" onClick={() => onNavigate('login')}>
+              Log in
+            </button>
+          )}
+          {mode !== 'register' && (
+            <button type="button" className="login-back-btn" onClick={() => onNavigate('register')}>
+              Create account
+            </button>
+          )}
+          {mode !== 'forgot-password' && (
+            <button type="button" className="login-back-btn" onClick={() => onNavigate('forgot-password')}>
+              Forgot password
+            </button>
+          )}
+          {mode === 'verify-email' && (
+            <button type="button" className="login-back-btn" onClick={onResendVerification} disabled={pending || !hasBackend}>
+              Resend verification
+            </button>
+          )}
+        </nav>
 
         <button
           type="button"

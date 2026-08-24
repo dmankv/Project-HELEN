@@ -636,6 +636,15 @@
   background-color: var(--color-surface-light);
 }
 
+.account-label {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Responsive: mobile input ────────────────────────── */
 @media (max-width: 640px) {
   .input-area {
