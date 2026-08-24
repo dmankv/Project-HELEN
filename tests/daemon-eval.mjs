@@ -210,7 +210,7 @@ assert(followResp.length > 0, 'non-empty follow-up response')
 // ---------------------------------------------------------------------------
 section('Memory: save and retrieve')
 forgetAll() // clean slate
-const m1 = saveMemory('I prefer Python over JavaScript')
+saveMemory('I prefer Python over JavaScript')
 const m2 = saveMemory('My name is Alex')
 assert(listMemories().length === 2, 'two memories saved')
 assert(listMemories()[0].text === m2.text, 'most recent first')
