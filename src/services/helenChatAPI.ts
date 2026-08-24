@@ -18,6 +18,16 @@ export interface APIResponse {
   message: string
 }
 
+/** Reason the API call did not return a message. */
+export type APIFailureReason = 'auth' | 'error' | 'aborted'
+
+/** Structured result returned when the backend call does not produce a message. */
+export interface APIFailure {
+  reason: APIFailureReason
+  /** HTTP status code when available (e.g. 401, 403, 502). */
+  status?: number
+}
+
 const BASE_URL: string = import.meta.env.VITE_HELEN_API_URL ?? ''
 const API_TOKEN: string = import.meta.env.VITE_HELEN_API_TOKEN ?? ''
 
@@ -25,12 +35,13 @@ const API_TIMEOUT_MS = 8_000
 
 /**
  * Call the backend /api/chat endpoint.
- * Returns null if the backend is not configured or the request fails.
+ * Returns the assistant reply on success, or an APIFailure describing why it failed.
+ * Returns null when the backend is not configured (local-brain mode with no failure).
  */
 export async function callChatAPI(
   messages: APIMessage[],
   signal?: AbortSignal,
-): Promise<string | null> {
+): Promise<string | APIFailure | null> {
   if (!BASE_URL) return null
 
   const controller = new AbortController()
@@ -54,8 +65,12 @@ export async function callChatAPI(
     clearTimeout(timeoutId)
 
     if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        console.error(`[helen-api] Auth error: ${res.status}`)
+        return { reason: 'auth', status: res.status }
+      }
       console.warn(`[helen-api] Request failed: ${res.status}`)
-      return null
+      return { reason: 'error', status: res.status }
     }
 
     const data = (await res.json()) as APIResponse
@@ -64,14 +79,19 @@ export async function callChatAPI(
     clearTimeout(timeoutId)
     if ((err as Error).name === 'AbortError') {
       console.warn('[helen-api] Request aborted')
-    } else {
-      console.warn('[helen-api] Request error:', (err as Error).message)
+      return { reason: 'aborted' }
     }
-    return null
+    console.warn('[helen-api] Request error:', (err as Error).message)
+    return { reason: 'error' }
   }
 }
 
 /** True when a backend URL is configured. */
 export function hasBackend(): boolean {
   return BASE_URL.length > 0
+}
+
+/** Type guard: check if a callChatAPI result is a failure. */
+export function isAPIFailure(result: string | APIFailure | null): result is APIFailure {
+  return result !== null && typeof result === 'object'
 }

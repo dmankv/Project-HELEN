@@ -164,3 +164,52 @@ Allowed CORS preflight requests return `204`; disallowed preflight requests retu
 `POST /api/chat` additionally requires:
 - An allowed `Origin` header
 - `X-HELEN-API-TOKEN` matching `HELEN_API_TOKEN`
+
+---
+
+## Live evaluation CI (`live-eval.yml`)
+
+The `live-eval.yml` workflow runs daily at 07:00 UTC and on manual dispatch. It sends real
+requests to a deployed backend to verify end-to-end behaviour. It is **no-op by default**:
+if the required secrets are not configured the workflow emits a skip message and exits 0.
+
+To enable live evaluation, provision the following repository secrets in
+**Settings → Secrets and variables → Actions**:
+
+| Secret | Description |
+|--------|-------------|
+| `HELEN_EVAL_API_URL` | Base URL of the deployed server (e.g. `https://your-server.example.com`) |
+| `HELEN_EVAL_API_TOKEN` | Token sent as `X-HELEN-API-TOKEN` in evaluation requests |
+| `HELEN_EVAL_ORIGIN` | The allowed origin the evaluation runner presents to the server |
+
+All three secrets must be set for live evaluation to run.
+
+---
+
+## Backend-mode deployment checklist
+
+When connecting the frontend to a hosted backend, follow these steps **in order**:
+
+1. Deploy `server/` to a platform that supports Node.js (Render, Railway, Fly.io, etc.).
+2. Set the server's runtime environment variables:
+   - `HELEN_API_TOKEN` (required — server refuses to start without it)
+   - `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (depending on provider)
+   - `HELEN_ALLOWED_ORIGINS` — must include **exactly** the deployed GitHub Pages URL:
+     `https://dmankv.github.io`
+3. Rebuild and redeploy the **frontend** with the build-time variables set:
+   - `VITE_HELEN_API_URL` — the server base URL from step 1
+   - `VITE_HELEN_API_TOKEN` — must match `HELEN_API_TOKEN` from step 2
+   - Both variables must be set as **GitHub Actions secrets** (or environment variables in your
+     build environment) before running `npm run build`.
+
+> **Why a full rebuild is required:** `VITE_HELEN_API_URL` is baked into the `dist/` artifact
+> at build time by the Vite CSP plugin, which patches `connect-src` in `dist/index.html` to
+> include the backend origin. If you deploy the existing `dist/` artifact and then set env vars
+> at runtime, the browser will block every API call with a CSP violation. A rebuild and redeploy
+> via the `deploy.yml` workflow (triggered on push to `main`) is the correct path.
+
+4. After the deployment workflow succeeds, verify:
+   - `https://dmankv.github.io/Project-HELEN/` loads and shows the `☁️ Cloud (ready)` badge.
+   - Sending a message receives a response from the cloud model (badge changes to `☁️ Cloud`).
+   - If the badge shows `⚠️ Auth error`, the token mismatch between `VITE_HELEN_API_TOKEN`
+     and `HELEN_API_TOKEN` must be corrected and the frontend rebuilt.
