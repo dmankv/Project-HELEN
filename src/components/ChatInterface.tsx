@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import MessageList from './MessageList'
 import MessageInput from './MessageInput'
+import { callChatAPI } from '../services/helenChatAPI'
+import type { APIMessage } from '../services/helenChatAPI'
+import { detectMood, detectIntent, generateHumanLikeResponse } from '../services/helenResponseBrain'
 import '../styles/ChatInterface.css'
 
 export interface Message {
@@ -23,8 +26,36 @@ export default function ChatInterface() {
     scrollToBottom()
   }, [messages])
 
+  const sendReply = async (content: string, history: Message[]) => {
+    try {
+      const apiMessages: APIMessage[] = history
+        .filter((m): m is Message & { role: 'user' | 'assistant' } =>
+          m.role === 'user' || m.role === 'assistant'
+        )
+        .map(m => ({ role: m.role, content: m.content }))
+      let responseText = await callChatAPI(apiMessages)
+
+      if (!responseText) {
+        const mood = detectMood(content)
+        const intent = detectIntent(content, undefined)
+        responseText = generateHumanLikeResponse(content, { userMessage: content, mood, intent })
+      }
+
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: responseText,
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, aiMessage])
+    } catch (error) {
+      console.error('Error sending message:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleSendMessage = async (content: string) => {
-    // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -34,26 +65,7 @@ export default function ChatInterface() {
 
     setMessages(prev => [...prev, userMessage])
     setIsLoading(true)
-
-    try {
-      // TODO: Replace with actual API call
-      // const response = await apiService.sendMessage(content)
-      
-      // Simulate AI response
-      setTimeout(() => {
-        const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: 'This is a placeholder response. Connect your AI API to enable real interactions.',
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, aiMessage])
-        setIsLoading(false)
-      }, 500)
-    } catch (error) {
-      console.error('Error sending message:', error)
-      setIsLoading(false)
-    }
+    sendReply(content, [...messages, userMessage])
   }
 
   return (

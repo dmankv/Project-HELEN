@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-"""Text-based CLI Interface for HELEN
-A terminal-based conversational interface with dark theme.
-"""
+// Text-based CLI Interface for HELEN
+// A terminal-based conversational interface with dark theme.
 
 import * as readline from 'readline'
 import HELEN from '../services/helen.js'
