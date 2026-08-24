@@ -55,9 +55,15 @@ function saveDurable(memories: DurableMemory[]): void {
 
 function genId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `mem-${crypto.randomUUID()}`
+    return crypto.randomUUID()
   }
-  return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+  // Fallback: generate a compliant v4 UUID from random bytes
+  const hex = Array.from({ length: 16 }, () =>
+    Math.floor(Math.random() * 256).toString(16).padStart(2, '0'),
+  )
+  hex[6] = ((parseInt(hex[6], 16) & 0x0f) | 0x40).toString(16).padStart(2, '0')
+  hex[8] = ((parseInt(hex[8], 16) & 0x3f) | 0x80).toString(16).padStart(2, '0')
+  return `${hex.slice(0,4).join('')}-${hex.slice(4,6).join('')}-${hex.slice(6,8).join('')}-${hex.slice(8,10).join('')}-${hex.slice(10).join('')}`
 }
 
 // ---------------------------------------------------------------------------
