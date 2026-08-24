@@ -13,7 +13,7 @@
     "server:build": "npm run build --prefix server",
     "server:typecheck": "npm run typecheck --prefix server",
     "python:smoke": "python3 tests/defself_l_smoke.py",
-    "check:imports": "test -f src/main.tsx && test -f src/App.tsx && test -f src/components/HelenInterface.tsx && grep -q \"from './App'\" src/main.tsx && grep -q \"from './components/HelenInterface'\" src/App.tsx && ! grep -R \"../services/helen.js\" src",
+    "check:imports": "test -f src/main.tsx && test -f src/App.tsx && test -f src/components/HelenInterface.tsx && test -f src/components/LoginView.tsx && test -f src/viewRouting.ts && grep -q \"from './App'\" src/main.tsx && grep -q \"from './components/HelenInterface'\" src/App.tsx && grep -q \"from './components/LoginView'\" src/App.tsx && ! grep -R \"../services/helen.js\" src",
     "check:dist": "test -f dist/index.html && test -f dist/favicon.svg && grep -q '/somthing/assets/' dist/index.html && ! grep -q '/src/main.tsx' dist/index.html",
     "cli:smoke": "npx tsx tests/cli-smoke.mjs"
   },

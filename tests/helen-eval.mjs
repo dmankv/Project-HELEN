@@ -23,6 +23,7 @@ import {
   retrieveRelevant,
   formatMemoriesForContext,
 } from '../src/services/helenMemory.js'
+import { hashForView, viewFromHash } from '../src/viewRouting.js'
 
 // ---------------------------------------------------------------------------
 // Mini test framework
@@ -339,6 +340,17 @@ section('CLI regression – one-shot --message')
 
 // ---------------------------------------------------------------------------
 // 12. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
+// ---------------------------------------------------------------------------
+section('Login view routing helpers')
+assert(viewFromHash('') === 'chat', 'empty hash routes to chat')
+assert(viewFromHash('#/') === 'chat', 'root hash routes to chat')
+assert(viewFromHash('#/login') === 'login', 'login hash routes to login')
+assert(viewFromHash('#/LOGIN') === 'login', 'login hash is case-insensitive')
+assert(hashForView('chat') === '#/', 'chat hash is #/')
+assert(hashForView('login') === '#/login', 'login hash is #/login')
+
+// ---------------------------------------------------------------------------
+// 13. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
 // ---------------------------------------------------------------------------
 section('Live model tests')
 if (process.env.HELEN_EVAL_LIVE !== 'true') {
