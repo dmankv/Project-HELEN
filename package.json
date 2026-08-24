@@ -8,7 +8,9 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "test": "npx tsx tests/helen-eval.mjs",
-    "server:dev": "npx tsx server/index.ts"
+    "server:dev": "npx tsx server/index.ts",
+    "server:build": "npm run build --prefix server",
+    "server:typecheck": "npm run typecheck --prefix server"
   },
   "dependencies": {
     "axios": "^1.6.0",

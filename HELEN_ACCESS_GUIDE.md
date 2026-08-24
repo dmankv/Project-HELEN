@@ -1,304 +1,73 @@
-# HELEN - Adaptive AI Assistant
-## Deployment & Access Guide
+# HELEN – Access Guide
 
-### 🚀 Quick Start
+## Live site
 
-HELEN is now live and ready for interaction! This guide provides all the information you need to access and interact with your smart, learning AI assistant.
+**GitHub Pages:** https://jackdeadicay-boop.github.io/somthing/
 
----
-
-## 📡 Access URLs
-
-### Primary Access
-**Web Interface:** `https://helen-ai.vercel.app`
-
-### Development Environment
-**Local Development:** `http://localhost:3000`
-
-### API Endpoints
-- **Chat API:** `https://helen-api.vercel.app/api/chat`
-- **Learning API:** `https://helen-api.vercel.app/api/learning`
-- **Analytics API:** `https://helen-api.vercel.app/api/analytics`
+> If the page is blank, see the **Deployment** section below.
 
 ---
 
-## 🎯 What Makes HELEN Special
+## Quick start (local development)
 
-### Adaptive Intelligence
-- **Intent Understanding**: HELEN analyzes your requests to understand what you really need
-- **Memory System**: Remembers your interactions and learns from them
-- **Smart Planning**: Breaks down complex tasks into manageable steps
-- **Continuous Learning**: Improves based on your feedback
-
-### Key Features
-1. **Memory Retrieval** - HELEN recalls relevant past conversations
-2. **Multi-Step Planning** - Handles complex queries with structured approaches
-3. **Candidate Evaluation** - Generates and evaluates multiple response options
-4. **Feedback Integration** - Learns from your ratings and comments
-5. **Real-time Analytics** - Track HELEN's performance and learning progress
-
----
-
-## 💬 How to Interact with HELEN
-
-### Basic Usage
-1. Visit the web interface
-2. Type your question or request in the message input
-3. Press Enter or click Send
-4. HELEN will process your request through its learning pipeline
-5. Provide feedback by clicking the 👍/👎 buttons
-
-### Example Interactions
-
-**Information Request**
-```
-User: "What is machine learning?"
-HELEN: [Processes intent as 'request-explanation']
-       [Retrieves relevant memory if available]
-       [Plans structured explanation]
-       [Generates response with examples]
+```bash
+git clone https://github.com/jackdeadicay-boop/somthing.git
+cd somthing
+npm ci --legacy-peer-deps
+npm run dev          # http://localhost:3000
 ```
 
-**Complex Task**
-```
-User: "Help me create a web application"
-HELEN: [Processes intent as 'request-creation']
-       [Creates detailed plan with steps]
-       [Breaks down into components]
-       [Generates structured guidance]
-```
-
-**Memory Access**
-```
-User: "Remember when we talked about AI?"
-HELEN: [Processes intent as 'memory-access']
-       [Retrieves relevant past interactions]
-       [Synthesizes response from memory]
-```
+No environment variables are needed for local use. HELEN's built-in
+rule/template-based engine responds without any external API.
 
 ---
 
-## 📊 Analytics & Monitoring
+## How HELEN works
 
-Click the 📊 Analytics button in the sidebar to view:
-- Memory statistics
-- Feedback analytics
-- Learning progress
-- Intent tracking
-- Success rates
+The browser loads `index.html` → `src/main.tsx` → `src/App.tsx` → `src/components/HelenInterface.tsx`.
 
----
+All chat responses are generated locally by `src/services/helenResponseBrain.ts`
+unless `VITE_HELEN_API_URL` is set at build time, in which case requests are forwarded to the
+separately hosted `server/` API proxy.
 
-## 🧠 HELEN's Learning Process
-
-### 7-Step Decision Pipeline
-
-1. **Intent Inference** - Analyzes your message to identify intent
-   - Question? → 'question'
-   - Contains 'help'? → 'request-information'
-   - Contains 'create'? → 'request-creation'
-
-2. **Memory Retrieval** - Pulls relevant past interactions
-   - Keywords match
-   - Intent similarity
-   - Temporal relevance
-
-3. **Planning** - Creates action plan
-   - Identifies complexity (simple/moderate/complex)
-   - Plans logical steps
-   - Considers dependencies
-
-4. **Candidate Generation** - Generates multiple response options
-   - Direct response
-   - Memory-informed response
-   - Structured breakdown
-
-5. **Evaluation** - Scores each candidate
-   - Confidence calculation
-   - Memory relevance boost
-   - Ambiguity penalty
-
-6. **Selection** - Chooses best response
-   - Compares scores
-   - Applies confidence threshold
-   - Asks for clarification if needed
-
-7. **Learning** - Stores outcome for future improvement
-   - Records interaction
-   - Waits for feedback
-   - Updates policies
-   - Adjusts thresholds
+**The current response engine is rule/template-based**, not an LLM. Responses are pattern-matched
+from a set of predefined templates. No seven-step AI pipeline is implemented in the frontend.
 
 ---
 
-## ⚙️ Configuration
+## Optional cloud API
 
-### Confidence Threshold
-- **Default**: 0.6
-- **Adjusts dynamically** based on feedback quality
-- **Increases** when false positives occur
-- **Decreases** when valid responses are rejected
+To connect HELEN to an LLM (OpenAI or Anthropic):
 
-### Memory Management
-- **Auto-indexed** by intent and keywords
-- **Retrievals** limited to top 5 most relevant
-- **Retention** of all interactions for learning
-- **Privacy** - All data stored locally
+1. Deploy `server/index.ts` to a Node.js-capable host (not GitHub Pages).
+2. Set the required server environment variables (see `DEPLOYMENT.md`).
+3. Build the frontend with:
+   ```bash
+   VITE_HELEN_API_URL=https://your-server.example.com npm run build
+   ```
+4. Deploy `dist/` to GitHub Pages (or any static host).
 
-### Policy Updates
-- **Real-time** feedback processing
-- **Exponential moving average** of scores
-- **Version tracking** for all policy changes
-- **History preservation** for audit trail
+API keys are **only** stored on the server; they are never sent to the browser.
 
 ---
 
-## 🔧 Technical Stack
+## Memory
 
-### Frontend
-- React 18 with TypeScript
-- Vite for fast development
-- Responsive CSS with theming
-- Dark/Light mode support
-
-### Backend Services
-- Python learning algorithm (defself_l.py)
-- TypeScript/Node.js middleware
-- In-memory memory store
-- Policy management system
-
-### Deployment
-- Vercel for web hosting
-- GitHub for version control
-- CI/CD pipeline for auto-deployment
-- Real-time analytics dashboard
+Conversation history is stored in browser `localStorage` by `src/services/helenMemory.ts`.
+It is local to each browser session and is not synced to any server.
 
 ---
 
-## 📝 Feedback System
+## Deployment
 
-### Explicit Feedback (Recommended)
-Rate HELEN's responses:
-- 👍 **Helpful** - Response was useful and accurate
-- ⊖ **Neutral** - Response was okay but could be better
-- 👎 **Unhelpful** - Response missed the mark
+For full deployment instructions, environment variables, and CI/CD details see
+[DEPLOYMENT.md](./DEPLOYMENT.md).
 
-### Implicit Feedback
-HELEN learns from:
-- Follow-up questions (indicates confusion)
-- Response length preferences
-- Topic patterns
-- Interaction frequency
-
-### Optional Comments
-Add specific feedback:
-- "Too technical for me"
-- "Missing specific examples"
-- "Perfect explanation!"
-- Any suggestions for improvement
+**GitHub Pages source must be set to "GitHub Actions"** in repository settings or the live site
+will display a blank page (the raw `index.html` source instead of the Vite build output).
 
 ---
 
-## 🎓 Learning Examples
+## Support
 
-### Example 1: Improving Explanations
-```
-Cycle 1:
-- User asks about neural networks
-- HELEN gives technical explanation
-- User rates as "unhelpful" - Too technical
-
-Cycle 2:
-- HELEN learns: User prefers simpler explanations
-- Future responses simplified
-- Policy adjusted to prefer beginner-friendly approach
-
-Cycle 3:
-- User rates simplified explanation as "helpful"
-- Policy reinforced
-```
-
-### Example 2: Memory Utilization
-```
-Cycle 1:
-- User: "What's your favorite programming language?"
-- HELEN: Generic response
-- User: Neutral feedback
-
-Cycle 2:
-- User: "What should I learn after Python?"
-- HELEN searches memory
-- Finds previous context about preferences
-- Gives personalized recommendation
-- User: Helpful feedback
-
-Cycle 3:
-- Policy learns to prioritize memory-informed responses
-```
-
----
-
-## 🚨 Troubleshooting
-
-### HELEN asks for clarification too often
-- Provide more context in your questions
-- Be more specific about what you need
-- HELEN will learn your communication style
-
-### Responses are too generic
-- Rate unhelpful responses
-- Add specific feedback comments
-- HELEN adjusts based on your feedback
-
-### Memory not being used
-- Have more conversations first
-- Ask follow-up questions on same topics
-- Reference previous conversations explicitly
-
----
-
-## 📈 Performance Metrics
-
-View in Analytics:
-- **Interaction Count** - Total conversations
-- **Success Rate** - Percentage of helpful responses
-- **Learning Cycles** - Policy updates processed
-- **Memory Stats** - Indexed conversations
-- **Intent Distribution** - Most common request types
-- **Complexity Distribution** - Task difficulty breakdown
-
----
-
-## 🔐 Privacy & Data
-
-- All conversations stored locally
-- No external API calls for basic responses
-- Feedback used only for improvement
-- Full transparency in decision-making
-- Export data anytime
-
----
-
-## 📞 Support
-
-### Issues or Suggestions?
-- Open an issue on GitHub: `jackdeadicay-boop/somthing`
-- Email: jackdeadicay@gmail.com
-- Check the documentation in the repository
-
----
-
-## 🌟 Future Enhancements
-
-- Multi-language support
-- Voice interaction
-- Integration with external APIs
-- Advanced NLP models
-- Collaborative learning across users
-- Custom training capabilities
-
----
-
-**Welcome to HELEN - Your Adaptive AI Assistant! 🤖**
-
-*HELEN learns, thinks, and improves with every interaction.*
+- GitHub Issues: https://github.com/jackdeadicay-boop/somthing/issues

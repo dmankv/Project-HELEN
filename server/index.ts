@@ -71,13 +71,23 @@ interface ChatRequest {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns CORS headers only when the request origin is in ALLOWED_ORIGINS.
+ * For untrusted or missing origins the Access-Control-Allow-Origin header is
+ * omitted entirely so the browser will refuse cross-origin access.
+ */
 function corsHeaders(origin: string | undefined): Record<string, string> {
-  const allowed = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
-  return {
-    'Access-Control-Allow-Origin': allowed ?? '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    return {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Vary': 'Origin',
+    }
   }
+  // No origin header (same-origin / server-to-server) or untrusted origin:
+  // do not advertise any allowed origin.
+  return {}
 }
 
 /** Maximum allowed request body size in bytes (64 KB is generous for chat payloads) */
@@ -236,7 +246,12 @@ const server = http.createServer(async (req, res) => {
 
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, cors)
+    const preflightOrigin = req.headers['origin']
+    if (preflightOrigin && ALLOWED_ORIGINS.includes(preflightOrigin)) {
+      res.writeHead(204, corsHeaders(preflightOrigin))
+    } else {
+      res.writeHead(403)
+    }
     res.end()
     return
   }
