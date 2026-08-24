@@ -18,7 +18,7 @@ export interface APIResponse {
   message: string
 }
 
-const BASE_URL: string = (import.meta as { env?: Record<string, string> }).env?.VITE_HELEN_API_URL ?? ''
+const BASE_URL: string = import.meta.env.VITE_HELEN_API_URL ?? ''
 
 const API_TIMEOUT_MS = 8_000
 

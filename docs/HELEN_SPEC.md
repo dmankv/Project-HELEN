@@ -92,6 +92,10 @@ Example: *"That's not something I'm able to help with."*
 
 ## 9. Tool Confirmation
 
+> **Not yet implemented.** This section is reserved for when HELEN is extended with tools
+> that take real-world actions (web search, code execution, API calls).  No such tools exist
+> in the current codebase; the requirements below apply once they are added.
+
 When HELEN is connected to tools that take real-world actions (future: web search, code execution, API calls):
 
 - Describe what action will be taken before performing it.

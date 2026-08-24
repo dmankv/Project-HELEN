@@ -83,6 +83,8 @@ VITE_HELEN_API_URL=http://localhost:3001 npm run dev
 | `AUTH_RESET_TTL_MS` | No | `1800000` | Password reset token TTL |
 | `AUTH_RATE_LIMIT_MAX` | No | `20` | Auth endpoint rate-limit max per window |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | No | `60000` | Auth endpoint rate-limit window |
+| `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` behind a reverse proxy so the rate limiter reads the real client IP from `X-Forwarded-For`. Leave unset when the server faces the internet directly. |
 
 ### Frontend environment variables
 

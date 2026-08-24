@@ -65,6 +65,8 @@ It proxies `POST /api/chat` to OpenAI/Anthropic and also serves authentication e
 | `AUTH_RESET_TTL_MS` | No | `1800000` | Reset token lifetime |
 | `AUTH_RATE_LIMIT_MAX` | No | `20` | Auth rate-limit requests per IP per endpoint |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | No | `60000` | Auth rate-limit window |
+| `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` when deployed behind a reverse proxy (Vercel, Fly.io, nginx, etc.) so the rate limiter reads the real client IP from `X-Forwarded-For` instead of the proxy's socket address. **Leave unset when the server faces the internet directly** to prevent IP-spoofing. |
 
 Frontend variable (set at Vite build time):
 
@@ -72,6 +74,12 @@ Frontend variable (set at Vite build time):
 |----------|-------------|
 | `VITE_HELEN_API_URL` | Full URL to server (e.g. `https://your-server.example.com`). Omit to use local mode. |
 | `VITE_HELEN_AUTH_API_URL` | Optional explicit auth API URL; defaults to `VITE_HELEN_API_URL`. |
+
+> **CSP note:** When `VITE_HELEN_API_URL` is set, `vite.config.ts` automatically adds that
+> server's origin to the `connect-src` directive of the built HTML's Content-Security-Policy,
+> allowing the browser to reach the backend.  If you patch or replace `dist/index.html` after
+> the build, ensure `connect-src` includes your server's origin — otherwise every API call
+> will be blocked by the browser with a CSP violation.
 
 **GitHub Pages cannot host the server.** GitHub Pages is static-only. The server must be
 separately deployed to a platform that supports running Node.js (Render, Railway, Fly.io, etc.).

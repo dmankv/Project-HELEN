@@ -58,6 +58,17 @@ const AUTH_OUTBOX_FILE = process.env.AUTH_DEV_EMAIL_OUTBOX_FILE
   ? path.resolve(process.env.AUTH_DEV_EMAIL_OUTBOX_FILE)
   : path.resolve(path.dirname(AUTH_DATA_FILE), 'auth-email-outbox.jsonl')
 
+/**
+ * When HELEN_TRUST_PROXY=1 the server is assumed to sit behind a trusted
+ * reverse proxy (nginx, Vercel, Fly.io, Render, etc.) that sets the
+ * X-Forwarded-For header.  The rate limiter will use the first (left-most)
+ * value from that header as the client IP instead of the socket address.
+ *
+ * Leave unset (the default) when the server is exposed directly to the
+ * internet, to prevent IP-spoofing via a forged X-Forwarded-For header.
+ */
+const TRUST_PROXY = process.env.HELEN_TRUST_PROXY === '1'
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -267,9 +278,18 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 }
 
 function isSecureRequest(req: http.IncomingMessage): boolean {
-  const proto = normalizeHeader(req.headers['x-forwarded-proto'])
-  if (proto && proto.toLowerCase().split(',')[0].trim() === 'https') return true
+  if (TRUST_PROXY) {
+    const proto = normalizeHeader(req.headers['x-forwarded-proto'])
+    if (proto && proto.toLowerCase().split(',')[0].trim() === 'https') return true
+  }
   return Boolean((req.socket as { encrypted?: boolean }).encrypted)
+}
+
+function requestIp(req: http.IncomingMessage): string {
+  const socketIp = req.socket.remoteAddress ?? 'unknown'
+  if (!TRUST_PROXY) return socketIp
+  const forwarded = normalizeHeader(req.headers['x-forwarded-for'])
+  return forwarded?.split(',')[0]?.trim() || socketIp
 }
 
 // ---------------------------------------------------------------------------
@@ -575,8 +595,7 @@ function requireCsrf(
 }
 
 function authRateKey(req: http.IncomingMessage, scope: string): string {
-  const ip = req.socket.remoteAddress ?? 'unknown'
-  return `${scope}:${ip}`
+  return `${scope}:${requestIp(req)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -721,7 +740,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (method !== 'OPTIONS') {
-    const remoteIp = req.socket.remoteAddress ?? 'unknown'
+    const remoteIp = requestIp(req)
     if (requestUrl.startsWith('/api/chat')) {
       if (isRateLimited(chatRateCounts, remoteIp, CHAT_RATE_LIMIT_MAX, 60_000)) {
         res.writeHead(429, {
