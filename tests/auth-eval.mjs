@@ -181,16 +181,16 @@ section('Login success/failure + session/logout')
   const session = await request('/api/auth/session')
   assert(session.res.status === 200 && session.body?.authenticated === true, 'session endpoint validates active login')
 
-  const legacySessionId = cookieJar.get('daemon_session') ?? ''
-  const legacyCsrfToken = cookieJar.get('daemon_csrf') ?? ''
+  const savedSessionId = cookieJar.get('daemon_session') ?? ''
+  const savedCsrfToken = cookieJar.get('daemon_csrf') ?? ''
   cookieJar.delete('daemon_session')
   cookieJar.delete('daemon_csrf')
-  cookieJar.set('helen_session', legacySessionId)
-  cookieJar.set('helen_csrf', legacyCsrfToken)
+  cookieJar.set('helen_session', savedSessionId)
+  cookieJar.set('helen_csrf', savedCsrfToken)
   const migratedSession = await request('/api/auth/session')
   assert(migratedSession.body?.authenticated === true, 'legacy session cookie remains authenticated during migration')
-  assert(cookieJar.get('daemon_session') === legacySessionId, 'legacy session is reissued under daemon cookie name')
-  assert(cookieJar.get('daemon_csrf') === legacyCsrfToken, 'legacy CSRF token is reissued under daemon cookie name')
+  assert(cookieJar.get('daemon_session') === savedSessionId, 'legacy session is reissued under daemon cookie name')
+  assert(cookieJar.get('daemon_csrf') === savedCsrfToken, 'legacy CSRF token is reissued under daemon cookie name')
   assert(cookieJar.get('helen_session') === '', 'legacy session cookie is expired after migration')
   assert(cookieJar.get('helen_csrf') === '', 'legacy CSRF cookie is expired after migration')
 

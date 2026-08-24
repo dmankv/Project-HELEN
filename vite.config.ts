@@ -33,8 +33,9 @@ function daemonCspPlugin() {
     transformIndexHtml(html: string): string {
       if (extraOrigins.size === 0) return html
       return html.replace(
-        /connect-src 'self'[^;]*/,
-        `connect-src 'self' ${[...extraOrigins].join(' ')}`,
+        /connect-src 'self'([^;]*)/,
+        (_match, existingSources: string) =>
+          `connect-src 'self'${existingSources} ${[...extraOrigins].join(' ')}`,
       )
     },
   }
