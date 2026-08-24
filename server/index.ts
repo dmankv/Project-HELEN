@@ -105,6 +105,17 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
 
 const _rateCounts = new Map<string, { count: number; resetAt: number }>()
 
+/** Evict expired entries to prevent unbounded memory growth. */
+function evictExpiredRateCounts(): void {
+  const now = Date.now()
+  for (const [ip, entry] of _rateCounts) {
+    if (now >= entry.resetAt) _rateCounts.delete(ip)
+  }
+}
+
+// Run eviction once per rate-limit window so the map stays bounded.
+setInterval(evictExpiredRateCounts, RATE_LIMIT_WINDOW_MS).unref()
+
 function isRateLimited(ip: string): boolean {
   const now = Date.now()
   const entry = _rateCounts.get(ip)
@@ -339,7 +350,7 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       const msg = (err as Error).message
       // Do not leak API key details – only surface a safe excerpt
-      const safe = msg.replace(/sk-[A-Za-z0-9-]+/g, '[redacted]')
+      const safe = msg.replace(/\b(sk-[A-Za-z0-9_-]+|sk-ant-[A-Za-z0-9_-]+)/g, '[redacted]')
       console.error('[helen-api] Provider error:', safe)
       res.writeHead(502, { 'Content-Type': 'application/json', ...cors })
       res.end(JSON.stringify({ error: 'Provider request failed. Please try again.' }))
@@ -355,5 +366,28 @@ server.listen(PORT, () => {
   console.log(`[helen-api] Listening on http://localhost:${PORT}`)
   console.log(`[helen-api] Provider: ${PROVIDER}  Model: ${MODEL}`)
 })
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+
+function shutdown(signal: string): void {
+  console.log(`[helen-api] ${signal} received – shutting down gracefully`)
+  server.close(err => {
+    if (err) {
+      console.error('[helen-api] Error during shutdown:', err.message)
+      process.exit(1)
+    }
+    process.exit(0)
+  })
+  // Force-exit after 10 s if connections don't drain in time
+  setTimeout(() => {
+    console.error('[helen-api] Shutdown timed out – forcing exit')
+    process.exit(1)
+  }, 10_000).unref()
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
 
 export default server

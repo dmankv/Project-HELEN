@@ -64,8 +64,8 @@ Conversation history is stored in browser `localStorage` by `src/services/helenM
 It persists in that browser profile until cleared and is not synced to any server.
 
 The repository also contains separate CLI/prototype files (`bin/helen.sh`, `bin/helen-cli.py`,
-`src/cli/helen-cli.ts`, `src/services/defself_l.py`) that are not part of the deployed web app path.
-`src/services/defself_l.py` is an experimental standalone prototype.
+`src/cli/helen-cli.ts`, `src/experimental/defself_l.py`) that are not part of the deployed web app path.
+`src/experimental/defself_l.py` is an experimental standalone prototype.
 
 ---
 
