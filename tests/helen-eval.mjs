@@ -302,6 +302,14 @@ section('CLI regression – one-shot --message')
   assert(stdinMode.status === 0, 'CLI stdin mode exits 0')
   assert(stdinMode.stdout.trim().length > 0, 'CLI stdin mode produces output')
 
+  // empty stdin exits promptly without hanging
+  const emptyStdin = spawnSync(
+    'npx', ['tsx', cliPath],
+    { cwd: repoRoot, encoding: 'utf8', input: '', timeout: 10_000 },
+  )
+  assert(emptyStdin.status === 0, 'empty stdin exits 0')
+  assert(emptyStdin.signal === null, 'empty stdin does not hang (no kill signal)')
+
   // unknown flag rejection
   const unknown = spawnSync(
     'npx', ['tsx', cliPath, '--bogus-flag'],
