@@ -156,8 +156,8 @@ export class HelenLearningSystem {
 
   /**
    * Get pending interactions awaiting feedback.
-   * @todo Not yet called from any UI path. Reserved for a future feedback review panel.
    */
+  // TODO (future) : Expose this through a feedback review panel.
   getPendingLearning(): InteractionRecord[] {
     return this.interactionHistory.filter(i => !i.feedback)
   }
@@ -198,8 +198,8 @@ export class HelenLearningSystem {
 
   /**
    * Export learning data for analysis.
-   * @todo Not yet called from any UI path. Reserved for a future data-export feature.
    */
+  // TODO (future) : Add a user-facing data-export action.
   exportLearningData(): string {
     return JSON.stringify({
       interactions: this.interactionHistory,
