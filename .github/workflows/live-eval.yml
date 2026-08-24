@@ -12,10 +12,10 @@ jobs:
   live-eval:
     runs-on: ubuntu-latest
     env:
-      HELEN_EVAL_LIVE: 'true'
-      VITE_HELEN_API_URL: ${{ secrets.HELEN_EVAL_API_URL }}
-      HELEN_EVAL_API_TOKEN: ${{ secrets.HELEN_EVAL_API_TOKEN }}
-      HELEN_EVAL_ORIGIN: ${{ secrets.HELEN_EVAL_ORIGIN }}
+      DAEMON_EVAL_LIVE: 'true'
+      VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+      DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
+      DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
       - name: Validate live-eval configuration
         id: config
         run: |
-          if [ -z "${VITE_HELEN_API_URL}" ] || [ -z "${HELEN_EVAL_API_TOKEN}" ] || [ -z "${HELEN_EVAL_ORIGIN}" ]; then
+          if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "Skipping live evaluation: required secrets are not configured."
           else
@@ -42,4 +42,4 @@ jobs:
 
       - name: Run live evaluation
         if: steps.config.outputs.configured == 'true'
-        run: npx tsx tests/helen-eval.mjs
+        run: npx tsx tests/daemon-eval.mjs

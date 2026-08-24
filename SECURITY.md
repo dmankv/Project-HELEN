@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-HELEN is currently pre-release (`0.1.x`). Security fixes are applied to the
+Daemon is currently pre-release (`0.1.x`). Security fixes are applied to the
 latest commit on the `main` branch only.
 
 | Version | Supported          |

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import readline from 'node:readline'
-import { detectIntent, detectMood, generateHumanLikeResponse, type MemorySnippet, type ResponseIntent } from '../services/helenResponseBrain.js'
+import { detectIntent, detectMood, generateHumanLikeResponse, type MemorySnippet, type ResponseIntent } from '../services/daemonResponseBrain.js'
 
 const colors = {
   reset: '\x1b[0m',
@@ -31,7 +31,7 @@ function displayHeader(): void {
   console.log(colors.bright + colors.cyan)
   console.log('  ╔═══════════════════════════════════════════════════════════════════════════════╗')
   console.log('  ║                                                                               ║')
-  console.log('  ║                  🤖  HELEN - Local CLI Assistant  🤖                          ║')
+  console.log('  ║                  🤖  Daemon - Local CLI Assistant  🤖                          ║')
   console.log('  ║                                                                               ║')
   console.log('  ║                     Type "help" for commands                                  ║')
   console.log('  ║                                                                               ║')
@@ -203,7 +203,7 @@ async function runInteractive(): Promise<void> {
     const response = handleInput(trimmed)
     if (response) {
       console.log(colors.dim + colors.gray + 'YOU: ' + colors.reset + trimmed)
-      console.log(colors.bright + colors.green + 'HELEN: ' + colors.reset + response)
+      console.log(colors.bright + colors.green + 'Daemon: ' + colors.reset + response)
     }
     rl.prompt()
   })

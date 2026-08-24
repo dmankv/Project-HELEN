@@ -21,6 +21,10 @@ if (!baseMatch) {
 }
 
 const rawBasePath = baseMatch[1]
+const protectedPagesBasePath = '/Project-HELEN/'
+if (rawBasePath !== protectedPagesBasePath) {
+  fail(`Vite base path must remain ${protectedPagesBasePath}, received ${rawBasePath}`)
+}
 const normalizedBasePath = rawBasePath.endsWith('/') ? rawBasePath : `${rawBasePath}/`
 const assetPrefix = `${normalizedBasePath}assets/`
 

@@ -7,8 +7,8 @@ import {
   registerUser,
   requestPasswordReset,
   requestVerification,
-} from '../services/helenAuthAPI'
-import type { AuthUser } from '../services/helenAuthAPI'
+} from '../services/daemonAuthAPI'
+import type { AuthUser } from '../services/daemonAuthAPI'
 
 type AuthRoute =
   | 'login'
@@ -70,7 +70,7 @@ export default function LoginView({
   }, [mode])
 
   const backendWarning = !hasBackend
-    ? 'Authentication API is not configured. Set VITE_HELEN_AUTH_API_URL (or VITE_HELEN_API_URL) to enable login flows.'
+    ? 'Authentication API is not configured. Set VITE_DAEMON_AUTH_API_URL (or VITE_DAEMON_API_URL) to enable login flows.'
     : ''
 
   const withPending = useCallback(async (work: () => Promise<void>) => {
@@ -163,7 +163,7 @@ export default function LoginView({
     <main className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <span className="helen-logo-sm" aria-hidden="true">🧠</span>
+          <span className="daemon-logo-sm" aria-hidden="true">🧠</span>
           <h1 ref={headingRef} className="login-title" tabIndex={-1}>{title}</h1>
         </div>
 

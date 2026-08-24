@@ -1,7 +1,9 @@
 /**
- * HELEN Learning Integration
+ * Daemon Learning Integration
  * Bridges TypeScript implementation with Python learning algorithm
  */
+
+import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem } from './daemonStorageMigration'
 
 export interface LearningMetadata {
   intent: string
@@ -44,12 +46,12 @@ interface StoredStats {
   policyVersion: number
 }
 
-const STORAGE_KEY = 'helen_learning_data'
+const STORAGE_KEY = 'daemon_learning_data'
 const MAX_HISTORY = 200 // bound history to keep UI responsive
 
 function loadFromStorage(): { history: InteractionRecord[]; stats: StoredStats } {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = loadMigratedStorageItem(STORAGE_KEY, LEGACY_STORAGE_KEYS.learningData)
     if (!raw) return { history: [], stats: { totalInteractions: 0, successfulResponses: 0, learningCycles: 0, policyVersion: 1 } }
     const parsed = JSON.parse(raw) as { history: StoredRecord[]; stats: StoredStats }
     const history: InteractionRecord[] = (parsed.history || []).map(r => ({
@@ -63,7 +65,7 @@ function loadFromStorage(): { history: InteractionRecord[]; stats: StoredStats }
   }
 }
 
-export class HelenLearningSystem {
+export class DaemonLearningSystem {
   private interactionHistory: InteractionRecord[]
   private agentStats: StoredStats
 
@@ -222,4 +224,4 @@ export class HelenLearningSystem {
   }
 }
 
-export default new HelenLearningSystem()
+export default new DaemonLearningSystem()

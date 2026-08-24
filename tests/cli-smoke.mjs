@@ -5,7 +5,7 @@
  *
  * Covers:
  *   - npm entrypoint  --message one-shot (user-facing npm script)
- *   - npm entrypoint name question → HELEN
+ *   - npm entrypoint name question → Daemon
  *   - direct tsx  --message one-shot
  *   - one-line stdin mode
  *   - empty stdin exits promptly (no hang)
@@ -28,7 +28,7 @@ import os from 'node:os'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, '..')
-const cliPath = path.join(repoRoot, 'src', 'cli', 'helen-cli.ts')
+const cliPath = path.join(repoRoot, 'src', 'cli', 'daemon-cli.ts')
 const tmpDir = os.tmpdir()
 
 let passed = 0
@@ -76,7 +76,7 @@ check('npm run cli -- --message "hello" produces output', npmMsg.stdout.trim().l
 
 const npmName = run('npm', ['run', 'cli', '--', '--message', 'What is your name?'], { cwd: repoRoot })
 check('npm run cli -- --message "What is your name?" exits 0', npmName.status === 0, npmName)
-check('npm run cli -- --message "What is your name?" names HELEN', npmName.stdout.toLowerCase().includes('helen'), npmName)
+check('npm run cli -- --message "What is your name?" says "My name is Daemon"', npmName.stdout.toLowerCase().includes('my name is daemon'), npmName)
 
 // ── Direct tsx invocations ───────────────────────────────────────────────────
 console.log('\n  [direct tsx]')
@@ -123,7 +123,7 @@ check('--message with no value error mentions "Missing value"', missingVal.stder
 // ── Shell wrapper ────────────────────────────────────────────────────────────
 console.log('\n  [shell wrapper]')
 
-const shWrapper = path.join(repoRoot, 'bin', 'helen.sh')
+const shWrapper = path.join(repoRoot, 'bin', 'daemon.sh')
 const sh = run('bash', [shWrapper, '--message', 'hello'], { cwd: tmpDir })
 check('shell wrapper from /tmp exits 0', sh.status === 0, sh)
 check('shell wrapper from /tmp produces output', sh.stdout.trim().length > 0, sh)
@@ -137,7 +137,7 @@ console.log('\n  [python wrapper]')
 if (!python3Available) {
   console.log('  ⚠️  python3 not found; skipping Python wrapper tests')
 } else {
-  const pyWrapper = path.join(repoRoot, 'bin', 'helen-cli.py')
+  const pyWrapper = path.join(repoRoot, 'bin', 'daemon-cli.py')
 
   const py = run('python3', [pyWrapper, '--message', 'hello'], { cwd: tmpDir })
   check('python wrapper from /tmp exits 0', py.status === 0, py)

@@ -1,4 +1,4 @@
-"""Experimental standalone self-learning prototype for HELEN.
+"""Experimental standalone self-learning prototype for Daemon.
 
 This module is not imported by the production web frontend. It provides a
 standalone Python prototype of a learning pipeline for local experimentation.
@@ -185,7 +185,7 @@ class MemoryStore:
 
 
 class SelfLearningAgent:
-    """Core self-learning AI agent implementing HELEN's intelligence."""
+    """Core self-learning AI agent implementing Daemon's intelligence."""
     
     def __init__(self):
         self.memory_store = MemoryStore()

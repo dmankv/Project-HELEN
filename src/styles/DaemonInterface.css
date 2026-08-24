@@ -1,6 +1,6 @@
-/* HELEN interface */
+/* Daemon interface */
 
-.helen-app {
+.daemon-app {
   display: flex;
   flex-direction: row;
   height: 100vh;
@@ -11,7 +11,7 @@
 }
 
 /* ── Main content column ─────────────────────────────── */
-.helen-main {
+.daemon-main {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -21,7 +21,7 @@
 }
 
 /* ── Sidebar ─────────────────────────────────────────── */
-.helen-sidebar {
+.daemon-sidebar {
   display: flex;
   flex-direction: column;
   width: 260px;
@@ -38,7 +38,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .helen-sidebar { animation: none; }
+  .daemon-sidebar { animation: none; }
   .sidebar-reopen { transition: none; }
 }
 
@@ -87,7 +87,7 @@
   min-height: 56px;
 }
 
-.helen-brand {
+.daemon-brand {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -96,7 +96,7 @@
   white-space: nowrap;
 }
 
-.helen-logo {
+.daemon-logo {
   font-size: 1.4rem;
   flex-shrink: 0;
 }
@@ -236,8 +236,8 @@
   letter-spacing: 0.05em;
 }
 
-/* ── Helen Header ────────────────────────────────────── */
-.helen-header {
+/* ── Daemon Header ────────────────────────────────────── */
+.daemon-header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -246,10 +246,6 @@
   border-bottom: 1px solid var(--color-border);
   background-color: var(--color-surface);
   flex-shrink: 0;
-}
-
-.header-title {
-  flex: 1;
 }
 
 .header-actions {
@@ -282,7 +278,7 @@
   flex: 1;
 }
 
-.helen-logo-sm {
+.daemon-logo-sm {
   font-size: 1.2rem;
 }
 
@@ -538,13 +534,13 @@
 
 /* ── Responsive ──────────────────────────────────────── */
 @media (max-width: 768px) {
-  .helen-sidebar {
+  .daemon-sidebar {
     width: 220px;
   }
 }
 
 @media (max-width: 640px) {
-  .helen-sidebar {
+  .daemon-sidebar {
     position: absolute;
     z-index: 100;
     height: 100%;
@@ -571,7 +567,7 @@
   flex-shrink: 0;
 }
 
-.helen-input {
+.daemon-input {
   flex: 1;
   background-color: var(--color-surface-light);
   border: 1px solid var(--color-border);
@@ -584,12 +580,12 @@
   overflow-y: auto;
 }
 
-.helen-input:focus {
+.daemon-input:focus {
   outline: none;
   border-color: var(--color-primary);
 }
 
-.helen-input::placeholder {
+.daemon-input::placeholder {
   color: var(--color-text-secondary);
 }
 
@@ -655,7 +651,7 @@
     padding: 0.5rem 0.75rem 0.75rem;
   }
 
-  .helen-input {
+  .daemon-input {
     font-size: 0.95rem;
   }
 }

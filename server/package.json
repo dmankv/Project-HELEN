@@ -1,7 +1,7 @@
 {
-  "name": "helen-api",
+  "name": "daemon-api",
   "version": "1.0.0",
-  "description": "HELEN chat gateway – server-side LLM proxy",
+  "description": "Daemon chat gateway – server-side LLM proxy",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

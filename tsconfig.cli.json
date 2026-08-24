@@ -13,5 +13,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/cli", "src/services/helenResponseBrain.ts"]
+  "include": ["src/cli", "src/services/daemonResponseBrain.ts"]
 }
