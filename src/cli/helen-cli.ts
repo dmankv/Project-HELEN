@@ -58,60 +58,68 @@ function displayStats(): void {
   console.log(`Uptime: ${minutes}m ${seconds}s`)
 }
 
-function commandResponse(input: string): string | null {
+interface CommandResult {
+  handled: boolean
+  output?: string
+}
+
+function commandResponse(input: string): CommandResult {
   const normalized = input.trim()
   const lowered = normalized.toLowerCase()
-  if (!normalized) return ''
+  if (!normalized) return { handled: true }
 
   if (lowered === 'help') {
     displayHelp()
-    return ''
+    return { handled: true }
   }
   if (lowered === 'stats') {
     displayStats()
-    return ''
+    return { handled: true }
   }
   if (lowered === 'clear') {
     if (process.stdout.isTTY) console.clear()
     displayHeader()
-    return ''
+    return { handled: true }
   }
   if (lowered === 'what do you remember?' || lowered === 'memories') {
-    if (session.memories.length === 0) return 'No in-session memories yet.'
-    return session.memories.map((m, i) => `${i + 1}. ${m.text}`).join('\n')
+    if (session.memories.length === 0) return { handled: true, output: 'No in-session memories yet.' }
+    return { handled: true, output: session.memories.map((m, i) => `${i + 1}. ${m.text}`).join('\n') }
   }
   if (lowered.startsWith('remember this:')) {
     const memoryText = normalized.slice('remember this:'.length).trim()
-    if (!memoryText) return 'Please provide text after "remember this:".'
+    if (!memoryText) return { handled: true, output: 'Please provide text after "remember this:".' }
     session.memories.push({ text: memoryText, timestamp: new Date() })
-    return `Got it. I will remember: "${memoryText}"`
+    return { handled: true, output: `Got it. I will remember: "${memoryText}"` }
   }
-  return null
+  return { handled: false }
 }
 
 function generateLocalReply(input: string): string {
+  const previousIntent = session.lastIntent
   const mood = detectMood(input)
-  const intent = detectIntent(input, session.lastIntent)
+  const intent = detectIntent(input, previousIntent)
   session.lastIntent = intent
   return generateHumanLikeResponse(input, {
     userMessage: input,
     mood,
     intent,
     memories: session.memories.slice(-5),
-    lastIntent: session.lastIntent,
+    lastIntent: previousIntent,
   })
 }
 
-function handleInput(input: string): string {
+function handleInput(input: string | null): string | null {
+  if (input === null) return null
   const command = commandResponse(input)
-  if (command !== null) return command
+  if (command.handled) return command.output ?? null
   session.messageCount += 1
   return generateLocalReply(input)
 }
 
 async function runNonInteractive(message?: string): Promise<void> {
   if (message) {
-    console.log(handleInput(message))
+    const response = handleInput(message)
+    if (response) console.log(response)
     return
   }
 
@@ -122,7 +130,8 @@ async function runNonInteractive(message?: string): Promise<void> {
     console.log('No input provided. Use --help or run interactively.')
     return
   }
-  console.log(handleInput(input))
+  const response = handleInput(input)
+  if (response) console.log(response)
 }
 
 function parseMessageArg(argv: string[]): string | undefined {
@@ -134,7 +143,12 @@ function parseMessageArg(argv: string[]): string | undefined {
       process.exit(0)
     }
     if (arg === '--message' || arg === '-m') {
-      return argv[i + 1]
+      const value = argv[i + 1]
+      if (!value || value.startsWith('-')) {
+        console.error('Missing value for --message/-m.')
+        process.exit(1)
+      }
+      return value
     }
   }
   return undefined

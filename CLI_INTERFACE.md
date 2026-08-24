@@ -1,6 +1,6 @@
 # HELEN CLI Interface
 
-## Supported command
+## Run CLI
 
 ```bash
 npm run cli
