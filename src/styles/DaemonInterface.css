@@ -645,6 +645,14 @@
   white-space: nowrap;
 }
 
+.account-role-label {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.45rem;
+}
+
 /* ── Responsive: mobile input ────────────────────────── */
 @media (max-width: 640px) {
   .input-area {

@@ -124,14 +124,34 @@ The easiest way to enable real account sign-up/sign-in on the static GitHub Page
    - `VITE_SUPABASE_URL` = `https://your-project-id.supabase.co`
    - `VITE_SUPABASE_ANON_KEY` = `your-anon-public-key`
 5. Trigger a new deployment (push to `main` or run **Actions → Deploy to GitHub Pages → Run workflow**).
+6. Apply `supabase/migrations/20260824143000_managed_auth_rbac.sql` in the Supabase Dashboard SQL Editor.
+7. In Supabase SQL Editor (privileged context), assign the first admin by UUID/email lookup:
+   ```sql
+   update public.profiles
+   set role = 'admin'
+   where id = (
+     select id from auth.users where lower(email) = lower('<admin-email>')
+   );
+   ```
 
 Authentication is then available at `https://dmankv.github.io/Project-HELEN/#/login`.
 
 > The anon key is intentionally public and safe to embed. Never embed the Supabase service-role key,
 > JWT secret, or any other private credential in the frontend build.
+>
+> Public build configuration is limited to `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+> Keep service-role keys, provider admin API keys, and privileged tokens only in provider-side contexts.
 
 **Unconfigured behaviour:** When `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are absent, auth
 forms show a clear "not configured" notice; the rest of the app (local Daemon chat) is unaffected.
+
+**Admin revocation / recovery (provider-side only):**
+- Demote an admin:
+  ```sql
+  update public.profiles set role = 'user' where id = '<user-uuid>';
+  ```
+- Emergency recovery when no admins remain: use Supabase Dashboard SQL Editor as project admin and
+  promote a trusted account with the same `update ... set role = 'admin' ...` query above.
 
 ### Self-hosted auth (optional fallback)
 

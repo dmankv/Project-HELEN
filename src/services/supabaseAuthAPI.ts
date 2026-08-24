@@ -22,6 +22,8 @@ import { createClient } from '@supabase/supabase-js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AuthUser } from './daemonAuthAPI'
 
+type AuthRole = 'user' | 'admin'
+
 // ---------------------------------------------------------------------------
 // Supabase client – only initialised when both config values are present
 // ---------------------------------------------------------------------------
@@ -58,11 +60,23 @@ function getClient(): SupabaseClient | null {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function toAuthUser(sbUser: import('@supabase/supabase-js').User): AuthUser {
+async function fetchRole(client: SupabaseClient, userId: string): Promise<AuthRole | null> {
+  const { data, error } = await client
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle<{ role: AuthRole }>()
+
+  if (error || !data?.role) return null
+  return data.role
+}
+
+async function toAuthUser(client: SupabaseClient, sbUser: import('@supabase/supabase-js').User): Promise<AuthUser> {
   return {
     id: sbUser.id,
     email: sbUser.email ?? '',
     emailVerified: sbUser.email_confirmed_at != null,
+    role: await fetchRole(client, sbUser.id),
   }
 }
 
@@ -90,7 +104,7 @@ export async function supabaseGetCurrentSession(): Promise<AuthUser | null> {
   if (!client) return null
   const { data } = await client.auth.getSession()
   const user = data.session?.user ?? null
-  return user ? toAuthUser(user) : null
+  return user ? toAuthUser(client, user) : null
 }
 
 /** Sign up with email + password. */
@@ -123,7 +137,7 @@ export async function supabaseLogin(
   if (error || !data.user) {
     return { ok: false, user: null, message: error?.message ?? 'Invalid email or password.' }
   }
-  return { ok: true, user: toAuthUser(data.user), message: 'Logged in.' }
+  return { ok: true, user: await toAuthUser(client, data.user), message: 'Logged in.' }
 }
 
 /** Sign out the current user. */
@@ -196,7 +210,9 @@ export function supabaseOnAuthStateChange(
   const client = getClient()
   if (!client) return () => undefined
   const { data } = client.auth.onAuthStateChange((event, session) => {
-    callback(session?.user ? toAuthUser(session.user) : null, event)
+    void (async () => {
+      callback(session?.user ? await toAuthUser(client, session.user) : null, event)
+    })()
   })
   return () => data.subscription.unsubscribe()
 }
