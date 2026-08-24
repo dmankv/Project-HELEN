@@ -23,12 +23,12 @@ export default function LoginView({ onBackToChat }: LoginViewProps) {
 
   return (
     <main className="login-page" aria-labelledby="login-heading">
-      <section className="login-card" aria-live="polite">
+      <section className="login-card">
         <h1 id="login-heading">Log in to HELEN</h1>
         <p className="login-copy">Authentication backend is not configured in this deployment.</p>
 
         <form className="login-form" onSubmit={handleSubmit}>
-          <label htmlFor="login-user">User</label>
+          <label htmlFor="login-user">Username</label>
           <input
             ref={userInputRef}
             id="login-user"
@@ -50,7 +50,11 @@ export default function LoginView({ onBackToChat }: LoginViewProps) {
           <button type="submit">Log in</button>
         </form>
 
-        {message && <p className="login-message">{message}</p>}
+        {message && (
+          <p className="login-message" aria-live="polite">
+            {message}
+          </p>
+        )}
 
         <button type="button" className="back-to-chat-btn" onClick={onBackToChat}>
           Back to HELEN chat

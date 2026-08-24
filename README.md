@@ -21,13 +21,13 @@ The authoritative frontend implementation follows this import chain:
 index.html
   └─ src/main.tsx
        └─ src/App.tsx
-            └─ src/components/HelenInterface.tsx
-            └─ src/components/LoginView.tsx
+            ├─ src/components/HelenInterface.tsx
+            │    └─ src/services/helenResponseBrain.ts  (local rule engine)
+            │    └─ src/services/helenChatAPI.ts        (optional cloud API)
+            │    └─ src/services/helenMemory.ts         (browser localStorage)
+            │    └─ src/styles/HelenInterface.css
+            ├─ src/components/LoginView.tsx
             └─ src/viewRouting.ts
-                 └─ src/services/helenResponseBrain.ts  (local rule engine)
-                 └─ src/services/helenChatAPI.ts        (optional cloud API)
-                 └─ src/services/helenMemory.ts         (browser localStorage)
-                 └─ src/styles/HelenInterface.css
 ```
 
 `HelenInterface.tsx` is the sole active web chat component.

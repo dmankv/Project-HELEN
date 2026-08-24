@@ -339,7 +339,7 @@ section('CLI regression – one-shot --message')
 }
 
 // ---------------------------------------------------------------------------
-// 12. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
+// 12. Login view routing helpers
 // ---------------------------------------------------------------------------
 section('Login view routing helpers')
 assert(viewFromHash('') === 'chat', 'empty hash routes to chat')
