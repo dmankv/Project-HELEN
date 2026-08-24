@@ -54,10 +54,10 @@ npm run cli -- --message "hello"
 
 ```bash
 # Start the API gateway
-OPENAI_API_KEY=sk-... npm run server:dev
+OPENAI_API_KEY=sk-... HELEN_API_TOKEN=change-me npm run server:dev
 
 # Point the frontend at it
-VITE_HELEN_API_URL=http://localhost:3001 npm run dev
+VITE_HELEN_API_URL=http://localhost:3001 VITE_HELEN_API_TOKEN=change-me npm run dev
 ```
 
 ### Backend environment variables
@@ -69,6 +69,7 @@ VITE_HELEN_API_URL=http://localhost:3001 npm run dev
 | `ANTHROPIC_API_KEY` | If anthropic | — | Anthropic secret key |
 | `HELEN_MODEL` | No | `gpt-4o-mini` / `claude-3-haiku-20240307` | Model name |
 | `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | CORS allowed origins |
+| `HELEN_API_TOKEN` | **Yes (cloud mode)** | — | Required token for `/api/chat` requests (`X-HELEN-API-TOKEN`) |
 | `PORT` | No | `3001` | Server port |
 | `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
 | `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` behind a reverse proxy so the rate limiter reads the real client IP from `X-Forwarded-For`. Leave unset when the server faces the internet directly. |
@@ -78,6 +79,7 @@ VITE_HELEN_API_URL=http://localhost:3001 npm run dev
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `VITE_HELEN_API_URL` | No | _(empty — uses local brain)_ | URL of HELEN API server |
+| `VITE_HELEN_API_TOKEN` | If using cloud mode | _(empty)_ | Token sent as `X-HELEN-API-TOKEN` to backend |
 
 ---
 
@@ -108,7 +110,7 @@ HELEN_EVAL_LIVE=true npm test         # also runs live model tests (requires bac
 ### Frontend (GitHub Pages — current)
 
 The frontend builds as a static site and is deployed via the existing GitHub Actions workflow.
-No secrets go to the browser. The `VITE_HELEN_API_URL` env var can be left unset for full
+Provider secrets never go to the browser. The `VITE_HELEN_API_URL` env var can be left unset for full
 static operation, or set to a deployed server URL.
 
 ### Backend (serverless / Node)
@@ -129,7 +131,7 @@ These files are **not** used by the deployed React/Vite website:
 
 - `src/cli/helen-cli.ts` (supported local CLI, run with `npm run cli`)
 - `bin/helen.sh` / `bin/helen-cli.py` (wrappers for the same TypeScript CLI)
-- `src/services/defself_l.py` (experimental standalone Python prototype)
+- `src/experimental/defself_l.py` (experimental standalone Python prototype)
 
 The CLI intentionally uses local, in-process logic and does not import browser-only services.
 The Python prototype is not part of the web build/deploy/runtime path.

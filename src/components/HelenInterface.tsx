@@ -211,6 +211,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
 
     const convId = activeConvId ?? nextId()
     if (!activeConvId) setActiveConvId(convId)
+    let backendFailedThisTurn = false
 
     try {
       // Check for memory command first
@@ -283,32 +284,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
           abortRef.current = null
           return
         }
-        // Backend was configured but unreachable — notify user and stop
-        {
-          const errMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: 'The cloud backend is unreachable right now. Falling back to local mode for this message.',
-            timestamp: new Date().toISOString(),
-          }
-          const updated = [...nextMessages, errMsg]
-          setMessages(updated)
-          saveMessages(updated)
-          setConversations(prev => {
-            const existing = prev.find(c => c.id === convId)
-            const updatedConv: Conversation = existing
-              ? { ...existing, messages: updated }
-              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-            const updatedList = existing
-              ? prev.map(c => (c.id === convId ? updatedConv : c))
-              : [updatedConv, ...prev]
-            saveConversations(updatedList)
-            return updatedList
-          })
-          setIsThinking(false)
-          abortRef.current = null
-          return
-        }
+        backendFailedThisTurn = true
       }
 
       // Local brain fallback
@@ -350,10 +326,17 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
         content: response,
         timestamp: new Date().toISOString(),
       }
-
+      const fallbackMsg: Message | null = backendFailedThisTurn
+        ? {
+            id: nextId(),
+            role: 'assistant',
+            content: 'The cloud backend is unreachable right now. I used local mode for this response.',
+            timestamp: new Date().toISOString(),
+          }
+        : null
       msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
 
-      const updated = [...nextMessages, aiMsg]
+      const updated = fallbackMsg ? [...nextMessages, fallbackMsg, aiMsg] : [...nextMessages, aiMsg]
       setMessages(updated)
       saveMessages(updated)
       setConversations(prev => {
@@ -398,8 +381,12 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
     setConversations([])
     setRatedMessages(new Set())
     abortRef.current = null
-    localStorage.removeItem(MESSAGES_KEY)
-    localStorage.removeItem(CONVERSATIONS_KEY)
+    try {
+      localStorage.removeItem(MESSAGES_KEY)
+      localStorage.removeItem(CONVERSATIONS_KEY)
+    } catch {
+      // best-effort only; UI state is already reset in-memory
+    }
     learningSystem.clearHistory()
     // Durable memories are intentionally preserved. Use "forget all memories" to erase them.
   }

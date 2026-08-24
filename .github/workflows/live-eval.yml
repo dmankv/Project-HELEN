@@ -1,0 +1,45 @@
+name: Live Evaluation
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-eval:
+    runs-on: ubuntu-latest
+    env:
+      HELEN_EVAL_LIVE: 'true'
+      VITE_HELEN_API_URL: ${{ secrets.HELEN_EVAL_API_URL }}
+      HELEN_EVAL_API_TOKEN: ${{ secrets.HELEN_EVAL_API_TOKEN }}
+      HELEN_EVAL_ORIGIN: ${{ secrets.HELEN_EVAL_ORIGIN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Validate live-eval configuration
+        id: config
+        run: |
+          if [ -z "${VITE_HELEN_API_URL}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping live evaluation: HELEN_EVAL_API_URL secret is not configured."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.config.outputs.configured == 'true'
+        run: npm ci --legacy-peer-deps
+
+      - name: Run live evaluation
+        if: steps.config.outputs.configured == 'true'
+        run: npm test
