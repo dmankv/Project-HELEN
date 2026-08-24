@@ -14,11 +14,11 @@ fi
 
 if [ ! -d "node_modules" ]; then
     echo "Installing dependencies..."
-    npm install
+    npm ci --legacy-peer-deps
 fi
 
 echo ""
 echo "🤖 Welcome to HELEN - Terminal Interface"
 echo ""
 
-npx ts-node src/cli/helen-cli.ts
+npx tsx src/cli/helen-cli.ts "$@"

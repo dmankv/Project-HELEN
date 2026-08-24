@@ -1,7 +1,7 @@
-"""Self-Learning Algorithm for HELEN AI Assistant
-This module implements the core learning and decision-making logic for HELEN,
-enabling the AI to understand requests, plan actions, evaluate options,
-and improve based on feedback and outcomes.
+"""Experimental standalone self-learning prototype for HELEN.
+
+This module is not imported by the production web frontend. It provides a
+standalone Python prototype of a learning pipeline for local experimentation.
 """
 
 from typing import Dict, List, Tuple, Any, Optional
@@ -149,19 +149,22 @@ class MemoryStore:
         
         # Retrieve by keyword similarity
         keywords = self._extract_keywords(user_input)
-        relevant_records: Dict[LearningRecord, float] = {}
+        relevance_scores: Dict[int, float] = {}
+        records_by_id: Dict[int, LearningRecord] = {}
         
         for keyword in keywords:
             for record in self.indexed_by_keyword.get(keyword, []):
-                relevant_records[record] = relevant_records.get(record, 0) + 1
+                record_id = id(record)
+                records_by_id[record_id] = record
+                relevance_scores[record_id] = relevance_scores.get(record_id, 0.0) + 1.0
         
         # Sort by relevance score
-        sorted_records = sorted(
-            relevant_records.items(),
+        sorted_record_ids = sorted(
+            relevance_scores.items(),
             key=lambda x: x[1],
             reverse=True
         )
-        return [record for record, _ in sorted_records[:top_k]]
+        return [records_by_id[record_id] for record_id, _ in sorted_record_ids[:top_k]]
     
     def _extract_keywords(self, text: str) -> List[str]:
         """Extract keywords from text for indexing."""
@@ -453,7 +456,7 @@ class SelfLearningAgent:
         }
 
 
-# Example usage and testing
+# Example standalone demo
 if __name__ == "__main__":
     agent = SelfLearningAgent()
     

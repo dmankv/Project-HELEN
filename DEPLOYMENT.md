@@ -88,12 +88,18 @@ npm run lint
 # Run tests
 npm test
 
+# CLI smoke (non-interactive)
+npm run cli -- --message "hello"
+
 # Server – development (tsx hot reload)
 npm run server:dev
 
 # Server – typecheck / build
 npm run server:typecheck
 npm run server:build
+
+# Experimental Python prototype smoke check
+npm run python:smoke
 ```
 
 ### Dependency strategy
@@ -132,6 +138,7 @@ Vite is configured with `base: '/somthing/'` to match this URL.
 - The HELEN cloud API must be hosted elsewhere if desired.
 - All data (conversation history) is stored in the user's browser (`localStorage`).
 - No analytics dashboard, no server-side memory – these are not deployed.
+- `src/services/defself_l.py` is an experimental standalone prototype and is not used by Pages.
 
 ---
 

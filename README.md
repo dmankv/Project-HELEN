@@ -40,6 +40,14 @@ npm ci --legacy-peer-deps
 npm run dev          # frontend at http://localhost:3000/somthing/
 ```
 
+CLI (local terminal mode):
+
+```bash
+npm run cli
+# one-shot non-interactive:
+npm run cli -- --message "hello"
+```
+
 ---
 
 ## Backend (optional — enables cloud model responses)
@@ -117,16 +125,12 @@ Set `HELEN_ALLOWED_ORIGINS` to the GitHub Pages URL for production.
 
 These files are **not** used by the deployed React/Vite website:
 
-- `bin/helen.sh`
-- `bin/helen-cli.py`
-- `src/cli/helen-cli.ts`
-- `src/services/defself_l.py`
+- `src/cli/helen-cli.ts` (supported local CLI, run with `npm run cli`)
+- `bin/helen.sh` / `bin/helen-cli.py` (wrappers for the same TypeScript CLI)
+- `src/services/defself_l.py` (experimental standalone Python prototype)
 
-Current status:
-
-- They are separate experimental/local interfaces and are not wired into `index.html → src/main.tsx → src/App.tsx → src/components/HelenInterface.tsx`.
-- `src/cli/helen-cli.ts` imports modules that are not present in this branch, so these CLI wrappers are currently not production-ready.
-- `src/services/defself_l.py` is a standalone Python prototype and is not executed by the web app or build/deploy workflow.
+The CLI intentionally uses local, in-process logic and does not import browser-only services.
+The Python prototype is not part of the web build/deploy/runtime path.
 
 ---
 

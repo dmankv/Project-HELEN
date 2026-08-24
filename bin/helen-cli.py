@@ -13,12 +13,12 @@ def main():
     try:
         # Check if node_modules exist
         if not os.path.exists('node_modules'):
-            print("Dependencies not installed. Running npm install...")
-            subprocess.run(['npm', 'install'], check=True)
+            print("Dependencies not installed. Running npm ci --legacy-peer-deps...")
+            subprocess.run(['npm', 'ci', '--legacy-peer-deps'], check=True)
         
-        # Build TypeScript if needed
+        # Run TypeScript CLI via tsx from root dependencies
         print("Starting HELEN CLI...\n")
-        subprocess.run(['npx', 'ts-node', 'src/cli/helen-cli.ts'], check=False)
+        subprocess.run(['npx', 'tsx', 'src/cli/helen-cli.ts', *sys.argv[1:]], check=False)
     
     except KeyboardInterrupt:
         print("\n\nHELEN CLI terminated.")
