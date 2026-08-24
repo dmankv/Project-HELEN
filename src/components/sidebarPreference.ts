@@ -2,13 +2,7 @@ export const SIDEBAR_OPEN_KEY = 'helen_sidebar_open'
 
 function getSidebarPreferenceStorage(): Pick<Storage, 'getItem' | 'setItem'> | undefined {
   try {
-    if (typeof window !== 'undefined' && window.localStorage) return window.localStorage
-  } catch {
-    // Ignore storage access failures and fall back safely.
-  }
-
-  try {
-    return typeof localStorage === 'undefined' ? undefined : localStorage
+    return (globalThis as { localStorage?: Pick<Storage, 'getItem' | 'setItem'> }).localStorage
   } catch {
     return undefined
   }

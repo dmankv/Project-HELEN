@@ -286,7 +286,7 @@ global.localStorage.getItem = originalGetItem
 const originalSetItem = global.localStorage.setItem
 global.localStorage.setItem = () => { throw new Error('storage write failed') }
 saveSidebarOpen(false)
-assert(true, 'storage write failure is ignored safely')
+assert(global.localStorage.getItem(SIDEBAR_OPEN_KEY) === 'true', 'storage write failure does not overwrite prior preference')
 global.localStorage.setItem = originalSetItem
 resetStore()
 
