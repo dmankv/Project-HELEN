@@ -70,6 +70,8 @@ VITE_HELEN_API_URL=http://localhost:3001 npm run dev
 | `HELEN_MODEL` | No | `gpt-4o-mini` / `claude-3-haiku-20240307` | Model name |
 | `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | CORS allowed origins |
 | `PORT` | No | `3001` | Server port |
+| `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` behind a reverse proxy so the rate limiter reads the real client IP from `X-Forwarded-For`. Leave unset when the server faces the internet directly. |
 
 ### Frontend environment variables
 

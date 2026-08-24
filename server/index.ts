@@ -57,6 +57,16 @@ const RATE_LIMIT_MAX = Number(process.env.HELEN_RATE_LIMIT ?? 60)
 const RATE_LIMIT_WINDOW_MS = 60_000
 /** Maximum response body size accepted from upstream LLM providers (1 MB) */
 const MAX_RESPONSE_BODY_BYTES = 1024 * 1024
+/**
+ * When HELEN_TRUST_PROXY=1 the server is assumed to sit behind a trusted
+ * reverse proxy (nginx, Vercel, Fly.io, Render, etc.) that sets the
+ * X-Forwarded-For header.  The rate limiter will use the first (left-most)
+ * value from that header as the client IP instead of the socket address.
+ *
+ * Leave unset (the default) when the server is exposed directly to the
+ * internet, to prevent IP-spoofing via a forged X-Forwarded-For header.
+ */
+const TRUST_PROXY = process.env.HELEN_TRUST_PROXY === '1'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -314,7 +324,15 @@ const server = http.createServer(async (req, res) => {
 
   // Rate limiting – apply to all endpoints except OPTIONS preflight
   if (req.method !== 'OPTIONS') {
-    const remoteIp = req.socket.remoteAddress ?? 'unknown'
+    let remoteIp = req.socket.remoteAddress ?? 'unknown'
+    if (TRUST_PROXY) {
+      const forwarded = normalizeHeader(req.headers['x-forwarded-for'])
+      if (forwarded) {
+        // X-Forwarded-For may be a comma-separated list; use the left-most entry
+        // (the original client IP as appended by the outermost trusted proxy).
+        remoteIp = forwarded.split(',')[0]?.trim() ?? remoteIp
+      }
+    }
     if (isRateLimited(remoteIp)) {
       res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '60', ...cors })
       res.end(JSON.stringify({ error: 'Too many requests. Please wait a moment.' }))

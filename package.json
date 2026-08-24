@@ -8,30 +8,35 @@
     "preview": "vite preview",
     "lint": "eslint src server",
     "test": "npx tsx tests/helen-eval.mjs",
+    "test:unit": "vitest run",
     "cli": "npx tsx src/cli/helen-cli.ts",
     "server:dev": "npm run dev --prefix server",
     "server:build": "npm run build --prefix server",
     "server:typecheck": "npm run typecheck --prefix server",
     "python:smoke": "python3 tests/defself_l_smoke.py",
-    "check:imports": "test -f src/main.tsx && test -f src/App.tsx && test -f src/components/HelenInterface.tsx && grep -q \"from './App'\" src/main.tsx && grep -q \"from './components/HelenInterface'\" src/App.tsx && grep -q \"helenResponseBrain\" src/components/HelenInterface.tsx && grep -q \"helenMemory\" src/components/HelenInterface.tsx && grep -q \"helenChatAPI\" src/components/HelenInterface.tsx",
+    "check:imports": "node tests/check-imports.mjs",
     "check:dist": "node tests/check-dist.mjs",
     "cli:typecheck": "node_modules/.bin/tsc --project tsconfig.cli.json --noEmit",
     "cli:smoke": "npx tsx tests/cli-smoke.mjs"
   },
   "dependencies": {
-    "axios": "^1.6.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^26.2.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9.39.5",
+    "jsdom": "^30.0.1",
     "tsx": "^4.23.12",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.67.0",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

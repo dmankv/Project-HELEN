@@ -78,8 +78,9 @@ function saveConversations(conversations: Conversation[]): void {
 function conversationTitle(messages: Message[]): string {
   const first = messages.find(m => m.role === 'user')
   if (!first) return 'New chat'
-  const words = first.content.trim().split(/\s+/).slice(0, 6).join(' ')
-  return words.length < first.content.trim().length ? words + '…' : words
+  const words = first.content.trim().split(/\s+/)
+  const clipped = words.slice(0, 6).join(' ')
+  return words.length > 6 ? clipped + '…' : clipped
 }
 
 let _idCounter = 0
@@ -380,11 +381,14 @@ export default function HelenInterface() {
   }
 
   const handleClear = () => {
+    abortRef.current?.abort()
     setMessages([])
     setActiveConvId(null)
     setLastIntent(undefined)
+    setIsThinking(false)
     setConversations([])
     setRatedMessages(new Set())
+    abortRef.current = null
     localStorage.removeItem(MESSAGES_KEY)
     localStorage.removeItem(CONVERSATIONS_KEY)
     learningSystem.clearHistory()
@@ -459,7 +463,10 @@ export default function HelenInterface() {
           <div className="analytics-panel" aria-label="Usage stats">
             <p className="analytics-title">Stats</p>
             <div className="analytics-grid">
-              <div className="stat-item">
+              <div
+                className="stat-item"
+                title="Total turns recorded across all sessions (resets when you use Clear All)"
+              >
                 <span className="stat-value">{insights.totalInteractions}</span>
                 <span className="stat-label">Turns</span>
               </div>
@@ -469,9 +476,30 @@ export default function HelenInterface() {
               </div>
             </div>
             {hasBackend() && (
-              <p className="backend-badge" title={usingBackend ? 'Responses from cloud model' : 'Using local brain'} aria-label={usingBackend ? 'Cloud mode active' : 'Local mode active'}>
+              <p
+                className="backend-badge"
+                title={
+                  messages.length === 0
+                    ? 'Cloud mode configured — will activate on first message'
+                    : usingBackend
+                      ? 'Responses from cloud model'
+                      : 'Using local brain'
+                }
+                aria-label={
+                  messages.length === 0
+                    ? 'Cloud mode configured'
+                    : usingBackend
+                      ? 'Cloud mode active'
+                      : 'Local mode active'
+                }
+              >
                 <span aria-hidden="true">{usingBackend ? '☁️' : '🖥️'}</span>
-                {' '}{usingBackend ? 'Cloud' : 'Local'}
+                {' '}
+                {usingBackend
+                  ? 'Cloud'
+                  : messages.length === 0
+                    ? 'Cloud (ready)'
+                    : 'Local'}
               </p>
             )}
           </div>
@@ -499,10 +527,10 @@ export default function HelenInterface() {
             type="button"
             className="clear-btn"
             onClick={handleClear}
-            aria-label="Clear conversation"
-            title="Clear conversation (durable memories are preserved)"
+            aria-label="Clear all conversations and history"
+            title="Clears all conversations and history (durable memories are preserved)"
           >
-            Clear
+            Clear All
           </button>
         </header>
 
