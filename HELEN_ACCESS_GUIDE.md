@@ -2,7 +2,7 @@
 
 ## Live site
 
-**GitHub Pages:** https://jackdeadicay-boop.github.io/somthing/
+**GitHub Pages:** https://dmankv.github.io/Project-HELEN/
 
 > If the page is blank, see the **Deployment** section below.
 
@@ -11,8 +11,8 @@
 ## Quick start (local development)
 
 ```bash
-git clone https://github.com/jackdeadicay-boop/somthing.git
-cd somthing
+git clone https://github.com/dmankv/Project-HELEN.git
+cd Project-HELEN
 npm ci --legacy-peer-deps
 npm run dev          # http://localhost:3000
 ```
@@ -81,4 +81,4 @@ will display a blank page (the raw `index.html` source instead of the Vite build
 
 ## Support
 
-- GitHub Issues: https://github.com/jackdeadicay-boop/somthing/issues
+- GitHub Issues: https://github.com/dmankv/Project-HELEN/issues
