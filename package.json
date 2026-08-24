@@ -8,9 +8,13 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "test": "npx tsx tests/helen-eval.mjs",
-    "server:dev": "npx tsx server/index.ts",
+    "cli": "npx tsx src/cli/helen-cli.ts",
+    "server:dev": "npm run dev --prefix server",
     "server:build": "npm run build --prefix server",
-    "server:typecheck": "npm run typecheck --prefix server"
+    "server:typecheck": "npm run typecheck --prefix server",
+    "python:smoke": "python3 tests/defself_l_smoke.py",
+    "check:imports": "test -f src/main.tsx && test -f src/App.tsx && test -f src/components/HelenInterface.tsx && grep -q \"from './App'\" src/main.tsx && grep -q \"from './components/HelenInterface'\" src/App.tsx && ! grep -R \"../services/helen.js\" src",
+    "check:dist": "test -f dist/index.html && test -f dist/favicon.svg && grep -q '/somthing/assets/' dist/index.html && ! grep -q '/src/main.tsx' dist/index.html"
   },
   "dependencies": {
     "axios": "^1.6.0",

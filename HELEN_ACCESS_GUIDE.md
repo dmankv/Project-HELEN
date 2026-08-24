@@ -20,6 +20,13 @@ npm run dev          # http://localhost:3000
 No environment variables are needed for local use. HELEN's built-in
 rule/template-based engine responds without any external API.
 
+CLI access (local terminal mode):
+
+```bash
+npm run cli
+npm run cli -- --message "hello"
+```
+
 ---
 
 ## How HELEN works
@@ -58,6 +65,7 @@ It persists in that browser profile until cleared and is not synced to any serve
 
 The repository also contains separate CLI/prototype files (`bin/helen.sh`, `bin/helen-cli.py`,
 `src/cli/helen-cli.ts`, `src/services/defself_l.py`) that are not part of the deployed web app path.
+`src/services/defself_l.py` is an experimental standalone prototype.
 
 ---
 
