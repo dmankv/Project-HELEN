@@ -192,7 +192,60 @@ Allowed preflight requests return `204`; disallowed preflight requests return `4
 
 ## Authentication deployment plan
 
-### Architecture
+### Option A — Managed auth via Supabase (recommended for GitHub Pages)
+
+Supabase provides email/password sign-up, sign-in, session persistence, password reset, and
+email verification from a browser-only SDK — no custom backend is required for the core auth flow.
+
+#### One-time Supabase setup
+
+1. Create a free project at https://supabase.com (free tier supports up to 50 000 MAUs).
+2. In the Supabase dashboard, go to **Authentication → URL Configuration** and set:
+   - **Site URL:** `https://dmankv.github.io/Project-HELEN/`
+   - **Redirect URLs** (add both):
+     ```
+     https://dmankv.github.io/Project-HELEN/#/verify-email
+     https://dmankv.github.io/Project-HELEN/#/reset-password
+     ```
+3. Copy two values from **Settings → API**:
+   - **Project URL** (`https://your-project-id.supabase.co`)
+   - **anon / public** key
+4. In the GitHub repository, go to **Settings → Secrets and variables → Actions → Variables** tab
+   and create:
+   - `VITE_SUPABASE_URL` = the project URL from step 3
+   - `VITE_SUPABASE_ANON_KEY` = the anon key from step 3
+5. Trigger a new Pages deployment (push to `main` or **Actions → Deploy to GitHub Pages → Run workflow**).
+
+Authentication is then live at `https://dmankv.github.io/Project-HELEN/#/login`.
+
+#### What the anon key is and is not
+
+The Supabase anon key is the **publishable browser key**; it is intentionally embedded in the
+built JavaScript. It is safe to embed because Supabase Row Level Security (RLS) policies on the
+database side control what an unauthenticated or user-scoped token can access.
+
+**Never embed** the Supabase service-role key, JWT secret, or any other private credential in the
+frontend build. Those values must remain in server-side environments only.
+
+#### Unconfigured behavior
+
+When `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` are absent (e.g. no Actions variables set):
+
+- The build succeeds normally.
+- The auth forms show: *"Managed authentication is not configured. Add
+  VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY as GitHub Actions variables and redeploy."*
+- The submit button is disabled; no broken requests are made.
+- The local Daemon chat continues to work as normal.
+
+#### CSP
+
+When `VITE_SUPABASE_URL` is set at build time, `vite.config.ts` automatically adds that
+Supabase project origin to the `connect-src` CSP directive in `dist/index.html` so the
+browser can reach the Supabase API.
+
+---
+
+### Option B — Self-hosted Node auth (optional fallback)
 
 1. **Frontend (GitHub Pages):**
    - Static React app (`/Project-HELEN/`).

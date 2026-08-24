@@ -4,8 +4,15 @@ import LoginView from './components/LoginView'
 import {
   getCurrentSession,
   hasAuthBackend,
+  hasAnyAuth,
   logoutUser,
 } from './services/daemonAuthAPI'
+import {
+  hasSupabaseConfig,
+  supabaseGetCurrentSession,
+  supabaseLogout,
+  supabaseOnAuthStateChange,
+} from './services/supabaseAuthAPI'
 import type { AuthUser } from './services/daemonAuthAPI'
 
 type Route =
@@ -55,9 +62,19 @@ function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  // Session restore on mount.
+  // Supabase is the primary path; falls back to the self-hosted Node API.
   useEffect(() => {
     let mounted = true
     async function initAuth() {
+      if (hasSupabaseConfig()) {
+        const user = await supabaseGetCurrentSession()
+        if (mounted) {
+          setCurrentUser(user)
+          setAuthReady(true)
+        }
+        return
+      }
       if (!hasAuthBackend()) {
         if (mounted) {
           setCurrentUser(null)
@@ -77,6 +94,26 @@ function App() {
     }
   }, [])
 
+  // Subscribe to Supabase auth state changes (e.g. email link callback).
+  useEffect(() => {
+    if (!hasSupabaseConfig()) return
+    const unsubscribe = supabaseOnAuthStateChange((user, event) => {
+      setCurrentUser(user)
+      // Only redirect to chat on a real SIGNED_IN event triggered by an
+      // email-link callback (the URL will contain the Supabase access_token
+      // fragment). Silent token refreshes must NOT interrupt the current page.
+      if (
+        event === 'SIGNED_IN' &&
+        user &&
+        typeof window !== 'undefined' &&
+        window.location.hash.includes('access_token=')
+      ) {
+        window.location.hash = '#/'
+      }
+    })
+    return unsubscribe
+  }, [])
+
   const navigate = useCallback((next: Route, routeToken = '') => {
     if (next === 'chat') {
       window.location.hash = '#/'
@@ -92,7 +129,11 @@ function App() {
   }, [navigate])
 
   const handleLogout = useCallback(async () => {
-    await logoutUser()
+    if (hasSupabaseConfig()) {
+      await supabaseLogout()
+    } else {
+      await logoutUser()
+    }
     setCurrentUser(null)
     navigate('chat')
   }, [navigate])
@@ -106,7 +147,8 @@ function App() {
       <LoginView
         mode={route}
         token={token}
-        hasBackend={hasAuthBackend()}
+        hasBackend={hasAnyAuth()}
+        isManagedAuth={hasSupabaseConfig()}
         onBackToChat={() => navigate('chat')}
         onNavigate={navigate}
         onAuthSuccess={handleAuthSuccess}

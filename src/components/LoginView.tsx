@@ -8,6 +8,13 @@ import {
   requestPasswordReset,
   requestVerification,
 } from '../services/daemonAuthAPI'
+import {
+  supabaseCompletePasswordReset,
+  supabaseLogin,
+  supabaseRegister,
+  supabaseRequestPasswordReset,
+  supabaseResendVerification,
+} from '../services/supabaseAuthAPI'
 import type { AuthUser } from '../services/daemonAuthAPI'
 
 type AuthRoute =
@@ -21,6 +28,8 @@ interface LoginViewProps {
   mode: AuthRoute
   token: string
   hasBackend: boolean
+  /** True when Supabase managed auth is the active provider. */
+  isManagedAuth?: boolean
   onBackToChat: () => void
   onNavigate: (route: AuthRoute | 'chat', token?: string) => void
   onAuthSuccess: (user: AuthUser) => void
@@ -34,6 +43,7 @@ export default function LoginView({
   mode,
   token,
   hasBackend,
+  isManagedAuth = false,
   onBackToChat,
   onNavigate,
   onAuthSuccess,
@@ -70,7 +80,9 @@ export default function LoginView({
   }, [mode])
 
   const backendWarning = !hasBackend
-    ? 'Authentication API is not configured. Set VITE_DAEMON_AUTH_API_URL (or VITE_DAEMON_API_URL) to enable login flows.'
+    ? isManagedAuth
+      ? 'Managed authentication is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY as GitHub Actions variables and redeploy.'
+      : 'Authentication is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (for managed auth) or VITE_DAEMON_AUTH_API_URL (for a self-hosted server) and redeploy.'
     : ''
 
   const withPending = useCallback(async (work: () => Promise<void>) => {
@@ -90,14 +102,16 @@ export default function LoginView({
   const onSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!hasBackend) {
-      setError('Authentication backend is not available.')
+      setError('Authentication is not available.')
       clearSensitive(setPassword, setPasswordConfirm)
       return
     }
 
     void withPending(async () => {
       if (mode === 'login') {
-        const result = await loginUser(email, password)
+        const result = isManagedAuth
+          ? await supabaseLogin(email, password)
+          : await loginUser(email, password)
         if (!result.ok || !result.user) {
           setError(result.message)
           return
@@ -108,7 +122,9 @@ export default function LoginView({
       }
 
       if (mode === 'register') {
-        const result = await registerUser(email, password, passwordConfirm)
+        const result = isManagedAuth
+          ? await supabaseRegister(email, password)
+          : await registerUser(email, password, passwordConfirm)
         if (!result.ok) {
           setError(result.message)
           return
@@ -118,12 +134,25 @@ export default function LoginView({
       }
 
       if (mode === 'forgot-password') {
-        const result = await requestPasswordReset(email)
+        const result = isManagedAuth
+          ? await supabaseRequestPasswordReset(email)
+          : await requestPasswordReset(email)
         setStatus(result.message)
         return
       }
 
       if (mode === 'reset-password') {
+        if (isManagedAuth) {
+          // For Supabase, the token is exchanged automatically via
+          // detectSessionInUrl; we just update the password.
+          const result = await supabaseCompletePasswordReset(password)
+          if (!result.ok) {
+            setError(result.message)
+            return
+          }
+          setStatus(result.message)
+          return
+        }
         if (!token) {
           setError('Missing reset token in URL.')
           return
@@ -138,26 +167,34 @@ export default function LoginView({
       }
 
       if (mode === 'verify-email') {
-        if (!token) {
-          setError('Missing verification token in URL.')
-          return
+        if (!isManagedAuth) {
+          if (!token) {
+            setError('Missing verification token in URL.')
+            return
+          }
+          const result = await completeVerification(token)
+          setStatus(result.message)
+        } else {
+          // Supabase verification is handled automatically via detectSessionInUrl
+          // and the onAuthStateChange listener.  Nothing extra to do here.
+          setStatus('Email verified. You can now sign in.')
         }
-        const result = await completeVerification(token)
-        setStatus(result.message)
       }
     })
-  }, [email, hasBackend, mode, onAuthSuccess, password, passwordConfirm, token, withPending])
+  }, [email, hasBackend, isManagedAuth, mode, onAuthSuccess, password, passwordConfirm, token, withPending])
 
   const onResendVerification = useCallback(() => {
     if (!hasBackend) {
-      setError('Authentication backend is not available.')
+      setError('Authentication is not available.')
       return
     }
     void withPending(async () => {
-      const result = await requestVerification(email)
+      const result = isManagedAuth
+        ? await supabaseResendVerification(email)
+        : await requestVerification(email)
       setStatus(result.message)
     })
-  }, [email, hasBackend, withPending])
+  }, [email, hasBackend, isManagedAuth, withPending])
 
   return (
     <main className="login-page">
@@ -189,14 +226,14 @@ export default function LoginView({
             </div>
           )}
 
-          {(mode === 'login' || mode === 'register' || mode === 'reset-password') && (
+          {(mode === 'login' || mode === 'reset-password' || mode === 'register') && (
             <div className="login-field">
               <label htmlFor="login-password">Password</label>
               <input
                 id="login-password"
                 type="password"
                 name="password"
-                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                autoComplete={mode === 'register' || mode === 'reset-password' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
@@ -207,7 +244,8 @@ export default function LoginView({
             </div>
           )}
 
-          {(mode === 'register' || mode === 'reset-password') && (
+          {/* Confirm password only needed for Node self-hosted auth */}
+          {!isManagedAuth && (mode === 'register' || mode === 'reset-password') && (
             <div className="login-field">
               <label htmlFor="login-password-confirm">Confirm password</label>
               <input
@@ -226,7 +264,11 @@ export default function LoginView({
           )}
 
           {mode === 'verify-email' && (
-            <p className="login-notice">Use the verification link from your email, then submit to complete verification.</p>
+            <p className="login-notice">
+              {isManagedAuth
+                ? 'Click the verification link in your email. Once verified, you will be signed in automatically.'
+                : 'Use the verification link from your email, then submit to complete verification.'}
+            </p>
           )}
 
           <button type="submit" className="login-submit-btn" disabled={pending || !hasBackend}>

@@ -35,6 +35,16 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Build
+        env:
+          # Supabase managed auth – set as Actions variables (publishable values only).
+          # See README for required provider dashboard setup.
+          # The build remains functional without these; users see an
+          # "authentication not configured" notice.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          # Optional self-hosted Daemon API (chat + legacy Node auth)
+          VITE_DAEMON_API_URL: ${{ vars.VITE_DAEMON_API_URL }}
+          VITE_DAEMON_AUTH_API_URL: ${{ vars.VITE_DAEMON_AUTH_API_URL }}
         run: npm run build
 
       - name: Lint

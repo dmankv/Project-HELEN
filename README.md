@@ -92,38 +92,52 @@ VITE_DAEMON_API_URL=http://localhost:3001 npm run dev
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `VITE_DAEMON_API_URL` | No | _(empty — uses local brain)_ | URL of Daemon API server |
-| `VITE_DAEMON_AUTH_API_URL` | No | `VITE_DAEMON_API_URL` | Optional explicit auth API URL |
+| `VITE_SUPABASE_URL` | No | _(empty)_ | Supabase project URL — enables managed auth on GitHub Pages (publishable) |
+| `VITE_SUPABASE_ANON_KEY` | No | _(empty)_ | Supabase anon/public key (publishable, protected by RLS) |
+| `VITE_DAEMON_API_URL` | No | _(empty — uses local brain)_ | URL of self-hosted Daemon API server (optional fallback) |
+| `VITE_DAEMON_AUTH_API_URL` | No | `VITE_DAEMON_API_URL` | Optional explicit auth API URL for self-hosted path |
 
 ---
 
-## Authentication architecture (production-oriented)
+## Authentication
 
-The frontend remains static (GitHub Pages). Authentication is handled by the separately hosted Node API:
+### Managed auth — Supabase (recommended for GitHub Pages)
 
-- `POST /api/auth/register` (generic response, no enumeration)
-- `POST /api/auth/verification/request`
-- `POST /api/auth/verify-email`
-- `POST /api/auth/login`
-- `POST /api/auth/logout`
-- `GET /api/auth/session`
-- `POST /api/auth/password-reset/request`
-- `POST /api/auth/password-reset/confirm`
-- `GET /api/auth/csrf`
+The easiest way to enable real account sign-up/sign-in on the static GitHub Pages site is
+**Supabase Auth**: no custom backend is needed for the core login/session flow.
 
-Security properties:
+**One-time Supabase setup:**
 
-- Passwords are hashed server-side using Node `scrypt` with per-password random salts.
-- Sessions are opaque server-managed IDs in `HttpOnly` cookies (`SameSite=Lax`, `Secure` in HTTPS deployments).
-- CSRF protection uses Origin allow-list checks + double-submit token (`X-CSRF-Token` + cookie).
-- Verification/reset tokens are random, hashed at rest, single-use, purpose-scoped, and expiration-bound.
-- Login/register/reset/verify endpoints are rate-limited.
-- Password reset revokes all existing sessions for that account.
-- Browser chat requires an allowed origin and active session; `DAEMON_API_TOKEN` is optional for non-browser clients only.
-- Auth data persists in `AUTH_DATA_FILE` (local/dev default) and must be placed on durable encrypted storage in production.
-- Development/test email delivery uses file outbox adapter (`AUTH_DEV_EMAIL_OUTBOX_FILE`).
+1. Create a free project at https://supabase.com.
+2. In **Authentication → URL Configuration**, add the **Site URL**:
+   ```
+   https://dmankv.github.io/Project-HELEN/
+   ```
+   and add the following **Redirect URLs** (allow list):
+   ```
+   https://dmankv.github.io/Project-HELEN/#/verify-email
+   https://dmankv.github.io/Project-HELEN/#/reset-password
+   ```
+3. Copy **Settings → API → Project URL** and **anon public** key.
+4. In the GitHub repository, go to **Settings → Secrets and variables → Actions → Variables** tab
+   and add:
+   - `VITE_SUPABASE_URL` = `https://your-project-id.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY` = `your-anon-public-key`
+5. Trigger a new deployment (push to `main` or run **Actions → Deploy to GitHub Pages → Run workflow**).
 
-> If you need managed production email/database providers, wire provider adapters via environment configuration before launch. This repository ships a safe local development/test adapter, not a hosted email service configuration.
+Authentication is then available at `https://dmankv.github.io/Project-HELEN/#/login`.
+
+> The anon key is intentionally public and safe to embed. Never embed the Supabase service-role key,
+> JWT secret, or any other private credential in the frontend build.
+
+**Unconfigured behaviour:** When `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are absent, auth
+forms show a clear "not configured" notice; the rest of the app (local Daemon chat) is unaffected.
+
+### Self-hosted auth (optional fallback)
+
+The `server/` Node API provides authentication endpoints for operators who want to run their own
+instance. Set `VITE_DAEMON_AUTH_API_URL` (or `VITE_DAEMON_API_URL`) to enable this path.
+See `DEPLOYMENT.md` for full details.
 
 ---
 

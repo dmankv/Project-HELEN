@@ -42,6 +42,35 @@ from a set of predefined templates. No seven-step AI pipeline is implemented in 
 
 ---
 
+## Authentication on GitHub Pages
+
+The static Pages site supports real account authentication via **Supabase** — a managed
+provider whose browser SDK requires no custom backend for sign-up, sign-in, session
+persistence, password reset, and email verification.
+
+### Quick setup (one-time)
+
+1. Create a free Supabase project at https://supabase.com.
+2. In **Authentication → URL Configuration**, set:
+   - **Site URL:** `https://dmankv.github.io/Project-HELEN/`
+   - **Redirect URLs:** `https://dmankv.github.io/Project-HELEN/#/verify-email`
+     and `https://dmankv.github.io/Project-HELEN/#/reset-password`
+3. Copy the **Project URL** and **anon public key** from **Settings → API**.
+4. In **GitHub → Settings → Secrets and variables → Actions → Variables**, add:
+   - `VITE_SUPABASE_URL` — the project URL
+   - `VITE_SUPABASE_ANON_KEY` — the anon key
+5. Trigger a new Pages build (push to `main`).
+
+Authentication flows are then available at `#/login`, `#/register`, `#/forgot-password`,
+`#/reset-password`, and `#/verify-email`.
+
+> **Without these variables:** auth forms display a clear "not configured" notice. The
+> rest of the app (local Daemon chat) continues to work normally — no broken requests.
+
+For full setup details see [DEPLOYMENT.md](./DEPLOYMENT.md).
+
+---
+
 ## Optional cloud API
 
 To connect Daemon to an LLM (OpenAI or Anthropic):

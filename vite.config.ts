@@ -16,6 +16,8 @@ function daemonCspPlugin() {
   const apiUrls = [
     process.env.VITE_DAEMON_API_URL ?? process.env.VITE_HELEN_API_URL,
     process.env.VITE_DAEMON_AUTH_API_URL ?? process.env.VITE_HELEN_AUTH_API_URL,
+    // Supabase managed auth – project URL only (no anon key in CSP).
+    process.env.VITE_SUPABASE_URL,
   ]
   const extraOrigins = new Set<string>()
 
