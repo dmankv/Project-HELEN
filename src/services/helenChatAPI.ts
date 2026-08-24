@@ -29,7 +29,6 @@ export interface APIFailure {
 }
 
 const BASE_URL: string = import.meta.env.VITE_HELEN_API_URL ?? ''
-const API_TOKEN: string = import.meta.env.VITE_HELEN_API_TOKEN ?? ''
 
 const API_TIMEOUT_MS = 8_000
 
@@ -54,10 +53,8 @@ export async function callChatAPI(
   try {
     const res = await fetch(`${BASE_URL}/api/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(API_TOKEN ? { 'X-HELEN-API-TOKEN': API_TOKEN } : {}),
-      },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages }),
       signal: controller.signal,
     })

@@ -44,8 +44,8 @@ requests to that URL. The server at that URL must be the separately hosted `serv
 
 ## Optional backend (`server/`)
 
-`server/index.ts` is a minimal Node.js HTTP gateway (no Express).
-It proxies `POST /api/chat` to OpenAI or Anthropic using server-side credentials.
+`server/index.ts` is a Node.js HTTP gateway (no Express).
+It proxies `POST /api/chat` to OpenAI/Anthropic and also serves authentication endpoints.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -54,9 +54,20 @@ It proxies `POST /api/chat` to OpenAI or Anthropic using server-side credentials
 | `ANTHROPIC_API_KEY` | When provider=anthropic | – | Anthropic secret key |
 | `HELEN_MODEL` | No | provider default | Override model name |
 | `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | Comma-separated allowed CORS origins |
-| `HELEN_API_TOKEN` | **Yes (cloud mode)** | – | Required shared token for `/api/chat` (`X-HELEN-API-TOKEN`) |
+| `HELEN_FRONTEND_URL` | No | `http://localhost:3000/Project-HELEN/` | Base URL used in verification/reset email links |
+| `HELEN_API_TOKEN` | No | – | Optional token for non-browser `/api/chat` clients; never expose it through Vite |
 | `PORT` | No | `3001` | Listening port |
+| `AUTH_DATA_FILE` | No | `.data/auth-store.json` | Persistent auth user/session/token store |
+| `AUTH_DEV_EMAIL_OUTBOX_FILE` | No | `.data/auth-email-outbox.jsonl` | Development/test email outbox adapter |
+| `AUTH_REQUIRE_HTTPS` | No | `true` in prod | Reject sensitive auth requests over non-HTTPS |
+| `AUTH_SECURE_COOKIES` | No | `true` in prod | Enables `Secure` cookies |
+| `AUTH_SESSION_TTL_MS` | No | `43200000` | Session lifetime |
+| `AUTH_VERIFY_TTL_MS` | No | `86400000` | Verification token lifetime |
+| `AUTH_RESET_TTL_MS` | No | `1800000` | Reset token lifetime |
+| `AUTH_RATE_LIMIT_MAX` | No | `20` | Auth rate-limit requests per IP per endpoint |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | No | `60000` | Auth rate-limit window |
 | `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `HELEN_RATE_LIMIT_WINDOW_MS` | No | `60000` | Chat rate-limit window |
 | `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` when deployed behind a reverse proxy (Vercel, Fly.io, nginx, etc.) so the rate limiter reads the real client IP from `X-Forwarded-For` instead of the proxy's socket address. **Leave unset when the server faces the internet directly** to prevent IP-spoofing. |
 
 Frontend variable (set at Vite build time):
@@ -64,7 +75,7 @@ Frontend variable (set at Vite build time):
 | Variable | Description |
 |----------|-------------|
 | `VITE_HELEN_API_URL` | Full URL to server (e.g. `https://your-server.example.com`). Omit to use local mode. |
-| `VITE_HELEN_API_TOKEN` | Token sent as `X-HELEN-API-TOKEN` when calling `/api/chat`. |
+| `VITE_HELEN_AUTH_API_URL` | Optional explicit auth API URL; defaults to `VITE_HELEN_API_URL`. |
 
 > **CSP note:** When `VITE_HELEN_API_URL` is set, `vite.config.ts` automatically adds that
 > server's origin to the `connect-src` directive of the built HTML's Content-Security-Policy,
@@ -155,15 +166,55 @@ Vite is configured with `base: '/Project-HELEN/'` to match this URL.
 ## CORS policy
 
 The optional server (`server/index.ts`) allows cross-origin requests **only** from origins
-listed in `HELEN_ALLOWED_ORIGINS`. Requests from unknown origins receive no
-`Access-Control-Allow-Origin` header. The server never echoes back an untrusted origin.
-Allowed CORS preflight requests return `204`; disallowed preflight requests return `403`.
+listed in `HELEN_ALLOWED_ORIGINS`. Requests from unknown origins are rejected for chat and auth.
+Allowed preflight requests return `204`; disallowed preflight requests return `403`.
 
-## API token policy
+---
 
-`POST /api/chat` additionally requires:
-- An allowed `Origin` header
-- `X-HELEN-API-TOKEN` matching `HELEN_API_TOKEN`
+## Authentication deployment plan
+
+### Architecture
+
+1. **Frontend (GitHub Pages):**
+   - Static React app (`/Project-HELEN/`).
+   - Uses hash routes for `/login`, `/register`, `/forgot-password`, `/reset-password`, `/verify-email`.
+   - Uses cookie-based auth via `credentials: include`; no auth secrets in browser storage.
+
+2. **API (separate Node host):**
+   - Hosts `/api/chat` and `/api/auth/*`.
+   - Enforces exact origin allow-list + CSRF token check for state-changing auth requests.
+   - Requires an active session for browser chat; `HELEN_API_TOKEN` is optional for non-browser clients.
+   - Stores users/sessions/tokens in `AUTH_DATA_FILE` with atomic writes.
+   - Hashes passwords with `scrypt`; never stores plaintext passwords.
+   - Uses opaque, server-managed `HttpOnly` session cookies.
+
+3. **Email adapter:**
+   - Current repository implementation writes verification/reset messages to local outbox file for development/testing.
+   - Production operator must integrate an actual SMTP/transactional email provider adapter before launch.
+
+### Required operator actions before production launch
+
+- Deploy `server/index.ts` to a Node host with HTTPS termination (Render/Railway/Fly/etc.).
+- Mount `AUTH_DATA_FILE` on durable, encrypted storage not checked into source control.
+- Configure `HELEN_ALLOWED_ORIGINS` to exact frontend origin(s), including `https://dmankv.github.io`.
+- Set `HELEN_FRONTEND_URL=https://dmankv.github.io/Project-HELEN/`.
+- Configure `AUTH_REQUIRE_HTTPS=true` and `AUTH_SECURE_COOKIES=true`.
+- Replace development email outbox behavior with real provider integration for user-facing emails.
+- Build frontend with `VITE_HELEN_AUTH_API_URL`/`VITE_HELEN_API_URL` pointing to the deployed API.
+- Do not expose `HELEN_API_TOKEN` through a `VITE_` build variable; Vite variables are public in the static bundle.
+
+### Threat model and limitations
+
+Covered:
+- Password hashing at rest, token hashing at rest, token expiry + single-use, session revocation on reset.
+- CSRF protections for cookie auth, exact allowed-origin CORS, and endpoint rate limiting.
+- Generic responses for registration/login/reset/verification to reduce account enumeration.
+
+Not fully covered by repository-only code:
+- No built-in managed database provisioning/migration system.
+- Development email adapter does not deliver real emails.
+- No MFA, device/session management UI, account lockout workflow, or centralized audit logging pipeline.
+- File-based auth store is suitable for local/dev and simple single-instance deployments; production at scale should migrate to a managed DB adapter.
 
 ---
 
@@ -179,7 +230,7 @@ To enable live evaluation, provision the following repository secrets in
 | Secret | Description |
 |--------|-------------|
 | `HELEN_EVAL_API_URL` | Base URL of the deployed server (e.g. `https://your-server.example.com`) |
-| `HELEN_EVAL_API_TOKEN` | Token sent as `X-HELEN-API-TOKEN` in evaluation requests |
+| `HELEN_EVAL_API_TOKEN` | Non-browser token sent as `X-HELEN-API-TOKEN` in evaluation requests |
 | `HELEN_EVAL_ORIGIN` | The allowed origin the evaluation runner presents to the server |
 
 All three secrets must be set for live evaluation to run.
@@ -192,15 +243,16 @@ When connecting the frontend to a hosted backend, follow these steps **in order*
 
 1. Deploy `server/` to a platform that supports Node.js (Render, Railway, Fly.io, etc.).
 2. Set the server's runtime environment variables:
-   - `HELEN_API_TOKEN` (required — server refuses to start without it)
    - `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (depending on provider)
    - `HELEN_ALLOWED_ORIGINS` — must include **exactly** the deployed GitHub Pages URL:
      `https://dmankv.github.io`
+   - `AUTH_DATA_FILE`, `HELEN_FRONTEND_URL`, `AUTH_REQUIRE_HTTPS=true`, and
+     `AUTH_SECURE_COOKIES=true`
+   - `HELEN_API_TOKEN` only when non-browser clients such as live evaluation need it
 3. Rebuild and redeploy the **frontend** with the build-time variables set:
    - `VITE_HELEN_API_URL` — the server base URL from step 1
-   - `VITE_HELEN_API_TOKEN` — must match `HELEN_API_TOKEN` from step 2
-   - Both variables must be set as **GitHub Actions secrets** (or environment variables in your
-     build environment) before running `npm run build`.
+   - `VITE_HELEN_AUTH_API_URL` — optional explicit auth API URL
+   - Do not set a `VITE_HELEN_API_TOKEN`; Vite values are readable by every browser user.
 
 > **Why a full rebuild is required:** `VITE_HELEN_API_URL` is baked into the `dist/` artifact
 > at build time by the Vite CSP plugin, which patches `connect-src` in `dist/index.html` to
@@ -208,8 +260,6 @@ When connecting the frontend to a hosted backend, follow these steps **in order*
 > at runtime, the browser will block every API call with a CSP violation. A rebuild and redeploy
 > via the `deploy.yml` workflow (triggered on push to `main`) is the correct path.
 
-4. After the deployment workflow succeeds, verify:
-   - `https://dmankv.github.io/Project-HELEN/` loads and shows the `☁️ Cloud (ready)` badge.
-   - Sending a message receives a response from the cloud model (badge changes to `☁️ Cloud`).
-   - If the badge shows `⚠️ Auth error`, the token mismatch between `VITE_HELEN_API_TOKEN`
-     and `HELEN_API_TOKEN` must be corrected and the frontend rebuilt.
+4. After the deployment workflow succeeds, register, verify, and log into an account before
+   sending cloud chat requests. Requests without an active session show `⚠️ Auth error` and
+   fall back to local responses.

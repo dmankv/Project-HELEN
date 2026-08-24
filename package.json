@@ -7,7 +7,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src server",
-    "test": "npx tsx tests/helen-eval.mjs",
+    "test": "npx tsx tests/helen-eval.mjs && npx tsx tests/auth-eval.mjs",
     "test:unit": "vitest run",
     "test:server": "node tests/server-api.mjs",
     "cli": "npx tsx src/cli/helen-cli.ts",

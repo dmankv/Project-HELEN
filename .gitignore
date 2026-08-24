@@ -14,8 +14,13 @@ dist-ssr
 
 # Environment
 .env
+.env.example.local
 .env.local
 .env.*.local
+
+# Local auth runtime data
+.data/
+server/.data/
 
 # IDE
 .vscode

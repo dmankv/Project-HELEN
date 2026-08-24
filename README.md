@@ -2,7 +2,10 @@
 
 Live site: https://dmankv.github.io/Project-HELEN/
 
-HELEN is a React/TypeScript chat interface with two operating modes:
+HELEN is a React/TypeScript chat interface with:
+
+- **Static GitHub Pages frontend** (`/Project-HELEN/`)
+- **Separately hosted Node.js API** for optional cloud chat and production-oriented authentication
 
 | Mode | When | Indicator |
 |---|---|---|
@@ -50,14 +53,14 @@ npm run cli -- --message "hello"
 
 ---
 
-## Backend (optional — enables cloud model responses)
+## Backend (optional chat, required for real auth)
 
 ```bash
 # Start the API gateway
-OPENAI_API_KEY=sk-... HELEN_API_TOKEN=change-me npm run server:dev
+OPENAI_API_KEY=sk-... npm run server:dev
 
 # Point the frontend at it
-VITE_HELEN_API_URL=http://localhost:3001 VITE_HELEN_API_TOKEN=change-me npm run dev
+VITE_HELEN_API_URL=http://localhost:3001 npm run dev
 ```
 
 ### Backend environment variables
@@ -69,9 +72,20 @@ VITE_HELEN_API_URL=http://localhost:3001 VITE_HELEN_API_TOKEN=change-me npm run 
 | `ANTHROPIC_API_KEY` | If anthropic | — | Anthropic secret key |
 | `HELEN_MODEL` | No | `gpt-4o-mini` / `claude-3-haiku-20240307` | Model name |
 | `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | CORS allowed origins |
-| `HELEN_API_TOKEN` | **Yes (cloud mode)** | — | Required token for `/api/chat` requests (`X-HELEN-API-TOKEN`) |
+| `HELEN_FRONTEND_URL` | No | `http://localhost:3000/Project-HELEN/` | Used for verify/reset email links |
+| `HELEN_API_TOKEN` | No | — | Optional token for non-browser `/api/chat` clients; never expose it through Vite |
 | `PORT` | No | `3001` | Server port |
+| `AUTH_DATA_FILE` | No | `.data/auth-store.json` | Persistent auth storage file (outside source control) |
+| `AUTH_DEV_EMAIL_OUTBOX_FILE` | No | `.data/auth-email-outbox.jsonl` | Development/test email outbox |
+| `AUTH_REQUIRE_HTTPS` | No | `true` in prod | Require HTTPS on sensitive auth endpoints |
+| `AUTH_SECURE_COOKIES` | No | `true` in prod | Sets `Secure` on auth cookies |
+| `AUTH_SESSION_TTL_MS` | No | `43200000` | Session lifetime (12h default) |
+| `AUTH_VERIFY_TTL_MS` | No | `86400000` | Email verification token TTL |
+| `AUTH_RESET_TTL_MS` | No | `1800000` | Password reset token TTL |
+| `AUTH_RATE_LIMIT_MAX` | No | `20` | Auth endpoint rate-limit max per window |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | No | `60000` | Auth endpoint rate-limit window |
 | `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `HELEN_RATE_LIMIT_WINDOW_MS` | No | `60000` | Chat rate-limit window |
 | `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` behind a reverse proxy so the rate limiter reads the real client IP from `X-Forwarded-For`. Leave unset when the server faces the internet directly. |
 
 ### Frontend environment variables
@@ -79,7 +93,37 @@ VITE_HELEN_API_URL=http://localhost:3001 VITE_HELEN_API_TOKEN=change-me npm run 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `VITE_HELEN_API_URL` | No | _(empty — uses local brain)_ | URL of HELEN API server |
-| `VITE_HELEN_API_TOKEN` | If using cloud mode | _(empty)_ | Token sent as `X-HELEN-API-TOKEN` to backend |
+| `VITE_HELEN_AUTH_API_URL` | No | `VITE_HELEN_API_URL` | Optional explicit auth API URL |
+
+---
+
+## Authentication architecture (production-oriented)
+
+The frontend remains static (GitHub Pages). Authentication is handled by the separately hosted Node API:
+
+- `POST /api/auth/register` (generic response, no enumeration)
+- `POST /api/auth/verification/request`
+- `POST /api/auth/verify-email`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/session`
+- `POST /api/auth/password-reset/request`
+- `POST /api/auth/password-reset/confirm`
+- `GET /api/auth/csrf`
+
+Security properties:
+
+- Passwords are hashed server-side using Node `scrypt` with per-password random salts.
+- Sessions are opaque server-managed IDs in `HttpOnly` cookies (`SameSite=Lax`, `Secure` in HTTPS deployments).
+- CSRF protection uses Origin allow-list checks + double-submit token (`X-CSRF-Token` + cookie).
+- Verification/reset tokens are random, hashed at rest, single-use, purpose-scoped, and expiration-bound.
+- Login/register/reset/verify endpoints are rate-limited.
+- Password reset revokes all existing sessions for that account.
+- Browser chat requires an allowed origin and active session; `HELEN_API_TOKEN` is optional for non-browser clients only.
+- Auth data persists in `AUTH_DATA_FILE` (local/dev default) and must be placed on durable encrypted storage in production.
+- Development/test email delivery uses file outbox adapter (`AUTH_DEV_EMAIL_OUTBOX_FILE`).
+
+> If you need managed production email/database providers, wire provider adapters via environment configuration before launch. This repository ships a safe local development/test adapter, not a hosted email service configuration.
 
 ---
 
@@ -110,7 +154,7 @@ HELEN_EVAL_LIVE=true npm test         # also runs live model tests (requires bac
 ### Frontend (GitHub Pages — current)
 
 The frontend builds as a static site and is deployed via the existing GitHub Actions workflow.
-Provider secrets never go to the browser. The `VITE_HELEN_API_URL` env var can be left unset for full
+No secrets go to the browser. The `VITE_HELEN_API_URL` env var can be left unset for full
 static operation, or set to a deployed server URL.
 
 ### Backend (serverless / Node)

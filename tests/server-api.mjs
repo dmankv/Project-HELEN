@@ -37,8 +37,11 @@ async function main() {
       PORT: String(port),
       HELEN_API_TOKEN: token,
       HELEN_RATE_LIMIT: '1',
+      HELEN_RATE_LIMIT_WINDOW_MS: '3600000',
       HELEN_TRUST_PROXY: '1',
       HELEN_ALLOWED_ORIGINS: origin,
+      OPENAI_API_KEY: '',
+      ANTHROPIC_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
@@ -47,23 +50,25 @@ async function main() {
   let ready = false
   const waitReady = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Server did not start in time')), 20000)
+    const onExit = code => {
+      if (!ready) {
+        clearTimeout(timeout)
+        reject(new Error('Server exited early with code ' + code))
+      }
+    }
     server.stdout.on('data', chunk => {
       const line = String(chunk)
       if (line.includes('Listening on')) {
         ready = true
         clearTimeout(timeout)
+        server.off('exit', onExit)
         resolve(undefined)
       }
     })
     server.stderr.on('data', chunk => {
       process.stderr.write(String(chunk))
     })
-    server.on('exit', code => {
-      if (!ready) {
-        clearTimeout(timeout)
-        reject(new Error('Server exited early with code ' + code))
-      }
-    })
+    server.on('exit', onExit)
   })
 
   try {
@@ -170,7 +175,6 @@ async function main() {
         messages: [{ role: 'user', content: 'hello again' }],
       }),
     })
-    // Same spoofed client IP + no delay: both requests should hit the same rate-limit window.
     check('Second request within window is rate limited', secondAuthorized.res.status === 429)
   } finally {
     try {

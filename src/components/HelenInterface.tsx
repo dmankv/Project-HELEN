@@ -159,9 +159,15 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 
 interface HelenInterfaceProps {
   onLoginClick?: () => void
+  onLogoutClick?: () => void
+  currentUser?: { email: string } | null
 }
 
-export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {}) {
+export default function HelenInterface({
+  onLoginClick,
+  onLogoutClick,
+  currentUser = null,
+}: HelenInterfaceProps = {}) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -282,7 +288,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
         }
         setUsingBackend(false)
         // User may have cancelled while awaiting the backend response
-        if (isAPIFailure(backendResult) && backendResult.reason === 'aborted') {
+        if (controller.signal.aborted || (isAPIFailure(backendResult) && backendResult.reason === 'aborted')) {
           setIsThinking(false)
           abortRef.current = null
           return
@@ -338,7 +344,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
             id: nextId(),
             role: 'assistant',
             content: authErrorThisTurn
-              ? 'The cloud backend rejected the request (authentication error). Check that VITE_HELEN_API_TOKEN is correctly configured. Using local mode for this response.'
+              ? 'The cloud backend rejected the request (authentication error). Sign in to use cloud chat. Using local mode for this response.'
               : 'The cloud backend is unreachable right now. I used local mode for this response.',
             timestamp: new Date().toISOString(),
           }
@@ -485,7 +491,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
                 className="backend-badge"
                 title={
                   authError
-                    ? 'Authentication error — check VITE_HELEN_API_TOKEN configuration'
+                    ? 'Authentication error — sign in to use cloud chat'
                     : messages.length === 0
                       ? 'Cloud mode configured — will activate on first message'
                       : usingBackend
@@ -547,15 +553,34 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
               Clear All
             </button>
             {onLoginClick && (
-              <button
-                type="button"
-                className="login-btn"
-                onClick={onLoginClick}
-                aria-label="Log in"
-                title="Log in"
-              >
-                Log in
-              </button>
+              currentUser ? (
+                <>
+                  <span className="account-label" aria-label={`Signed in as ${currentUser.email}`}>
+                    {currentUser.email}
+                  </span>
+                  {onLogoutClick && (
+                    <button
+                      type="button"
+                      className="login-btn"
+                      onClick={onLogoutClick}
+                      aria-label="Log out"
+                      title="Log out"
+                    >
+                      Log out
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="login-btn"
+                  onClick={onLoginClick}
+                  aria-label="Log in"
+                  title="Log in"
+                >
+                  Log in
+                </button>
+              )
             )}
           </div>
         </header>

@@ -29,9 +29,9 @@ jobs:
       - name: Validate live-eval configuration
         id: config
         run: |
-          if [ -z "${VITE_HELEN_API_URL}" ]; then
+          if [ -z "${VITE_HELEN_API_URL}" ] || [ -z "${HELEN_EVAL_API_TOKEN}" ] || [ -z "${HELEN_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping live evaluation: HELEN_EVAL_API_URL secret is not configured."
+            echo "Skipping live evaluation: required secrets are not configured."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
@@ -42,4 +42,4 @@ jobs:
 
       - name: Run live evaluation
         if: steps.config.outputs.configured == 'true'
-        run: npm test
+        run: npx tsx tests/helen-eval.mjs
