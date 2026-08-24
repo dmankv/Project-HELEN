@@ -47,12 +47,15 @@ function saveDurable(memories: DurableMemory[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// ID generator
+// ID generator – uses crypto.randomUUID when available to prevent collisions
+// across concurrent tabs; falls back to timestamp + random for older runtimes.
 // ---------------------------------------------------------------------------
 
-let _seq = 0
 function genId(): string {
-  return `mem-${Date.now()}-${++_seq}`
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `mem-${crypto.randomUUID()}`
+  }
+  return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
 }
 
 // ---------------------------------------------------------------------------

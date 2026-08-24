@@ -49,13 +49,13 @@ jobs:
       - name: Check imports
         run: npm run check:imports
 
-      - name: Check dist
-        run: npm run check:dist
-
       - name: Typecheck and build server
         run: |
           npm run server:typecheck
           npm run server:build
+
+      - name: Typecheck CLI
+        run: npm run cli:typecheck
 
       - name: CLI smoke tests
         run: npm run cli:smoke

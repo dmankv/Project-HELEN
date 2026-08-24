@@ -5,9 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "../node_modules/.bin/tsx index.ts",
-    "build": "../node_modules/.bin/tsc --project tsconfig.json",
-    "typecheck": "../node_modules/.bin/tsc --project tsconfig.json --noEmit",
+    "dev": "npx tsx index.ts",
+    "build": "npx tsc --project tsconfig.json",
+    "typecheck": "npx tsc --project tsconfig.json --noEmit",
     "start": "node dist/index.js"
   },
   "devDependencies": {
