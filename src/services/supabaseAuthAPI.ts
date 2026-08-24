@@ -186,15 +186,17 @@ export async function supabaseResendVerification(
 
 /**
  * Subscribe to auth state changes (sign-in / sign-out / token refresh).
+ * The callback receives the mapped AuthUser (or null on sign-out) and the
+ * raw Supabase event name so callers can distinguish sign-in from refresh.
  * Returns an unsubscribe function.
  */
 export function supabaseOnAuthStateChange(
-  callback: (user: AuthUser | null) => void,
+  callback: (user: AuthUser | null, event: string) => void,
 ): () => void {
   const client = getClient()
   if (!client) return () => undefined
-  const { data } = client.auth.onAuthStateChange((_event, session) => {
-    callback(session?.user ? toAuthUser(session.user) : null)
+  const { data } = client.auth.onAuthStateChange((event, session) => {
+    callback(session?.user ? toAuthUser(session.user) : null, event)
   })
   return () => data.subscription.unsubscribe()
 }

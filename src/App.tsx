@@ -97,11 +97,17 @@ function App() {
   // Subscribe to Supabase auth state changes (e.g. email link callback).
   useEffect(() => {
     if (!hasSupabaseConfig()) return
-    const unsubscribe = supabaseOnAuthStateChange((user) => {
+    const unsubscribe = supabaseOnAuthStateChange((user, event) => {
       setCurrentUser(user)
-      // After a successful email verification or password reset redirect,
-      // navigate to chat.
-      if (user) {
+      // Only redirect to chat on a real SIGNED_IN event triggered by an
+      // email-link callback (the URL will contain the Supabase access_token
+      // fragment). Silent token refreshes must NOT interrupt the current page.
+      if (
+        event === 'SIGNED_IN' &&
+        user &&
+        typeof window !== 'undefined' &&
+        window.location.hash.includes('access_token=')
+      ) {
         window.location.hash = '#/'
       }
     })

@@ -22,8 +22,7 @@ vi.mock('../src/services/supabaseAuthAPI', () => ({
   supabaseRequestPasswordReset: vi.fn(() => Promise.resolve({ ok: false, message: 'Supabase is not configured.' })),
   supabaseCompletePasswordReset: vi.fn(() => Promise.resolve({ ok: false, message: 'Supabase is not configured.' })),
   supabaseResendVerification: vi.fn(() => Promise.resolve({ ok: false, message: 'Supabase is not configured.' })),
-  supabaseOnAuthStateChange: vi.fn(() => () => undefined),
-}))
+  supabaseOnAuthStateChange: vi.fn(() => () => undefined),}))
 
 vi.mock('../src/services/daemonAuthAPI', () => ({
   hasAuthBackend: vi.fn(() => false),

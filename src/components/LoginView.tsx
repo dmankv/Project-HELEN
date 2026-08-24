@@ -226,33 +226,14 @@ export default function LoginView({
             </div>
           )}
 
-          {(mode === 'login' || mode === 'reset-password' || (!isManagedAuth && mode === 'register')) && (
+          {(mode === 'login' || mode === 'reset-password' || mode === 'register') && (
             <div className="login-field">
               <label htmlFor="login-password">Password</label>
               <input
                 id="login-password"
                 type="password"
                 name="password"
-                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                minLength={8}
-                maxLength={128}
-                disabled={pending}
-              />
-            </div>
-          )}
-
-          {/* Supabase register: show password field separately */}
-          {isManagedAuth && mode === 'register' && (
-            <div className="login-field">
-              <label htmlFor="login-password">Password</label>
-              <input
-                id="login-password"
-                type="password"
-                name="password"
-                autoComplete="new-password"
+                autoComplete={mode === 'register' || mode === 'reset-password' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
