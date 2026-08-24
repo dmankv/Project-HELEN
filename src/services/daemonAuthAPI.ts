@@ -26,11 +26,24 @@ function endpoint(path: string): string {
   return `${BASE_URL}${path}`
 }
 
+/** True when a self-hosted Node auth API URL is configured. */
 function hasAuthBackend(): boolean {
   return BASE_URL.length > 0
 }
 
 export { hasAuthBackend }
+
+/**
+ * True when any authentication method is available (Supabase managed auth or
+ * the self-hosted Node API).  Use this to show/hide auth UI.
+ */
+export function hasAnyAuth(): boolean {
+  // Avoid a circular import by checking the env var directly.  supabaseAuthAPI
+  // reads the same variable; this keeps the decision in one place per module.
+  const sbUrl = env.VITE_SUPABASE_URL ?? ''
+  const sbKey = env.VITE_SUPABASE_ANON_KEY ?? ''
+  return (sbUrl.length > 0 && sbKey.length > 0) || hasAuthBackend()
+}
 
 export async function getCsrfToken(force = false): Promise<string | null> {
   if (!hasAuthBackend()) return null
