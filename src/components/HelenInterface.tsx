@@ -361,73 +361,80 @@ export default function HelenInterface() {
 
   return (
     <div className="helen-app">
-      <nav className={'helen-sidebar ' + (sidebarOpen ? 'open' : 'closed')} aria-label="Conversation history">
-        <div className="sidebar-header">
-          {sidebarOpen && (
+      {sidebarOpen && (
+        <nav className="helen-sidebar" aria-label="Conversation history">
+          <div className="sidebar-header">
             <div className="helen-brand">
               <span className="helen-logo">🧠</span>
               <span>HELEN</span>
             </div>
-          )}
-          <button
-            type="button"
-            className="sidebar-toggle"
-            onClick={() => setSidebarOpen(o => !o)}
-            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          >
-            {sidebarOpen ? '◀' : '▶'}
-          </button>
-        </div>
-
-        {sidebarOpen && (
-          <>
-            <button type="button" className="new-chat-btn" onClick={handleNewChat}>
-              + New chat
+            <button
+              type="button"
+              className="sidebar-toggle"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close sidebar"
+            >
+              ◀
             </button>
+          </div>
 
-            <ul className="conversation-list">
-              {conversations.length === 0 ? (
-                <p className="no-conversations">No conversations yet</p>
-              ) : (
-                conversations.map(conv => (
-                  <li key={conv.id} className="conversation-list-item">
-                    <button
-                      type="button"
-                      className={'conversation-item ' + (conv.id === activeConvId ? 'active' : '')}
-                      onClick={() => handleSelectConversation(conv)}
-                      title={conv.title}
-                    >
-                      <span className="conv-icon">💬</span>
-                      <span className="conv-title">{conv.title}</span>
-                    </button>
-                  </li>
-                ))
-              )}
-            </ul>
+          <button type="button" className="new-chat-btn" onClick={handleNewChat}>
+            + New chat
+          </button>
 
-            <div className="analytics-panel" aria-label="Usage stats">
-              <p className="analytics-title">Stats</p>
-              <div className="analytics-grid">
-                <div className="stat-item">
-                  <span className="stat-value">{insights.totalInteractions}</span>
-                  <span className="stat-label">Turns</span>
-                </div>
-                <div className="stat-item">
-                  <span className="stat-value">{conversations.length}</span>
-                  <span className="stat-label">Chats</span>
-                </div>
+          <ul className="conversation-list">
+            {conversations.length === 0 ? (
+              <li className="no-conversations">No conversations yet</li>
+            ) : (
+              conversations.map(conv => (
+                <li key={conv.id} className="conversation-list-item">
+                  <button
+                    type="button"
+                    className={'conversation-item ' + (conv.id === activeConvId ? 'active' : '')}
+                    onClick={() => handleSelectConversation(conv)}
+                    title={conv.title}
+                  >
+                    <span className="conv-icon">💬</span>
+                    <span className="conv-title">{conv.title}</span>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+
+          <div className="analytics-panel" aria-label="Usage stats">
+            <p className="analytics-title">Stats</p>
+            <div className="analytics-grid">
+              <div className="stat-item">
+                <span className="stat-value">{insights.totalInteractions}</span>
+                <span className="stat-label">Turns</span>
               </div>
-              {hasBackend() && (
-                <p className="backend-badge" title={usingBackend ? 'Responses from cloud model' : 'Using local brain'}>
-                  {usingBackend ? '☁️ Cloud' : '🖥️ Local'}
-                </p>
-              )}
+              <div className="stat-item">
+                <span className="stat-value">{conversations.length}</span>
+                <span className="stat-label">Chats</span>
+              </div>
             </div>
-          </>
-        )}
-      </nav>
+            {hasBackend() && (
+              <p className="backend-badge" title={usingBackend ? 'Responses from cloud model' : 'Using local brain'}>
+                {usingBackend ? '☁️ Cloud' : '🖥️ Local'}
+              </p>
+            )}
+          </div>
+        </nav>
+      )}
 
       <main className="helen-main">
+        {!sidebarOpen && (
+          <button
+            type="button"
+            className="sidebar-reopen"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open sidebar"
+            title="Open sidebar"
+          >
+            ▶
+          </button>
+        )}
         <header className="helen-header">
           <div className="header-title">
             <span className="helen-logo-sm">🧠</span>

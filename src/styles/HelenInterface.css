@@ -17,25 +17,65 @@
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  position: relative;
 }
 
 /* ── Sidebar ─────────────────────────────────────────── */
 .helen-sidebar {
   display: flex;
   flex-direction: column;
+  width: 260px;
   background-color: var(--color-surface);
   border-right: 1px solid var(--color-border);
-  transition: width 0.25s ease;
   overflow: hidden;
   flex-shrink: 0;
+  animation: slideInLeft 0.25s ease;
 }
 
-.helen-sidebar.open {
-  width: 260px;
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
 }
 
-.helen-sidebar.closed {
-  width: 48px;
+@media (prefers-reduced-motion: reduce) {
+  .helen-sidebar { animation: none; }
+  .sidebar-reopen { transition: none; }
+}
+
+/* ── Reopen pop-out button ───────────────────────────── */
+.sidebar-reopen {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  left: 0;
+  z-index: 200;
+  background-color: var(--color-surface);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-left: none;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  line-height: 1;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  animation: slideInReopener 0.2s ease;
+}
+
+@keyframes slideInReopener {
+  from { transform: translateY(-50%) translateX(-100%); opacity: 0; }
+  to   { transform: translateY(-50%) translateX(0);     opacity: 1; }
+}
+
+.sidebar-reopen:hover {
+  background-color: var(--color-surface-light);
+  color: var(--color-text);
+  transform: translateY(-50%);
+}
+
+.sidebar-reopen:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .sidebar-header {
@@ -196,14 +236,7 @@
   letter-spacing: 0.05em;
 }
 
-/* ── Main Area ───────────────────────────────────────── */
-.helen-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
+/* ── Helen Header ────────────────────────────────────── */
 .helen-header {
   display: flex;
   align-items: center;
@@ -494,13 +527,13 @@
 
 /* ── Responsive ──────────────────────────────────────── */
 @media (max-width: 768px) {
-  .helen-sidebar.open {
+  .helen-sidebar {
     width: 220px;
   }
 }
 
 @media (max-width: 640px) {
-  .helen-sidebar.open {
+  .helen-sidebar {
     position: absolute;
     z-index: 100;
     height: 100%;
@@ -513,10 +546,6 @@
 
   .messages-container {
     padding: 1rem 0.75rem;
-  }
-
-  .helen-sidebar.closed {
-    width: 0;
   }
 }
 
