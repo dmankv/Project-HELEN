@@ -277,34 +277,104 @@ export async function updateLearningFeedback(
   return true
 }
 
+export async function listLearningInteractions(): Promise<CloudLearningInteraction[] | null> {
+  const client = getClient()
+  if (!client) return null
+  const { data, error } = await client
+    .from('learning_interactions')
+    .select('*')
+    .order('created_at', { ascending: true })
+  if (error) { console.warn('[daemon-persistence] listLearningInteractions:', error.message); return null }
+  return (data ?? []) as CloudLearningInteraction[]
+}
+
+// ---------------------------------------------------------------------------
+// Cloud memory deletion mirrors
+// ---------------------------------------------------------------------------
+
+/** Delete the most recently added cloud memory (mirrors forgetLast). */
+export async function deleteLastCloudMemory(): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+  const userId = await getCurrentUserId()
+  if (!userId) return false
+  const { data, error } = await client
+    .from('durable_memories')
+    .select('id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error || !data || data.length === 0) return false
+  const { error: delError } = await client.from('durable_memories').delete().eq('id', data[0].id)
+  if (delError) { console.warn('[daemon-persistence] deleteLastCloudMemory:', delError.message); return false }
+  return true
+}
+
+/** Delete cloud memories whose text contains phrase (mirrors forgetByText). */
+export async function deleteCloudMemoriesByText(phrase: string): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+  const userId = await getCurrentUserId()
+  if (!userId) return false
+  // Use ilike for case-insensitive text match
+  const { error } = await client
+    .from('durable_memories')
+    .delete()
+    .eq('user_id', userId)
+    .ilike('text', `%${phrase}%`)
+  if (error) { console.warn('[daemon-persistence] deleteCloudMemoriesByText:', error.message); return false }
+  return true
+}
+
+/** Delete all cloud memories for the authenticated user (mirrors forgetAll). */
+export async function deleteAllCloudMemories(): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+  const userId = await getCurrentUserId()
+  if (!userId) return false
+  const { error } = await client
+    .from('durable_memories')
+    .delete()
+    .eq('user_id', userId)
+  if (error) { console.warn('[daemon-persistence] deleteAllCloudMemories:', error.message); return false }
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // One-time local-to-cloud migration
 // Uploads current localStorage data to Supabase on first authenticated use.
-// Idempotent: tracks completion in localStorage; never re-uploads.
+// Idempotent: tracks completion in localStorage keyed by user UUID so that
+// signing in as a different account does not inherit another account's flag.
 // ---------------------------------------------------------------------------
 
-const MIGRATION_DONE_KEY = 'daemon_cloud_migration_done'
-
-export function isCloudMigrationDone(): boolean {
-  try { return localStorage.getItem(MIGRATION_DONE_KEY) === '1' } catch { return false }
+function migrationDoneKey(userId: string): string {
+  return `daemon_cloud_migration_done_${userId}`
 }
 
-function markCloudMigrationDone(): void {
-  try { localStorage.setItem(MIGRATION_DONE_KEY, '1') } catch { /* ignore */ }
+export function isCloudMigrationDone(userId?: string): boolean {
+  try {
+    const key = userId ? migrationDoneKey(userId) : 'daemon_cloud_migration_done'
+    return localStorage.getItem(key) === '1'
+  } catch { return false }
+}
+
+function markCloudMigrationDone(userId: string): void {
+  try { localStorage.setItem(migrationDoneKey(userId), '1') } catch { /* ignore */ }
 }
 
 /**
  * Migrate local durable memories to Supabase. Only runs once per browser
- * profile (tracked via localStorage flag). Errors are non-fatal.
+ * profile per user account (tracked via per-user localStorage flag).
+ * Errors are non-fatal.
  */
 export async function migrateLocalMemoriesToCloud(
   localMemories: Array<{ id: string; text: string; tags?: string[]; createdAt: string }>,
 ): Promise<void> {
-  if (isCloudMigrationDone()) return
   const client = getClient()
   if (!client) return
   const userId = await getCurrentUserId()
   if (!userId) return
+  if (isCloudMigrationDone(userId)) return
 
   // Check if user already has cloud memories (don't duplicate)
   const { data: existing } = await client
@@ -312,12 +382,58 @@ export async function migrateLocalMemoriesToCloud(
     .select('id')
     .limit(1)
   if (existing && existing.length > 0) {
-    markCloudMigrationDone()
+    markCloudMigrationDone(userId)
     return
   }
 
   for (const mem of localMemories) {
     await insertCloudMemory(mem)
   }
-  markCloudMigrationDone()
+  markCloudMigrationDone(userId)
+}
+
+// ---------------------------------------------------------------------------
+// Cloud hydration — restore all user data from Supabase after sign-in
+// ---------------------------------------------------------------------------
+
+export interface HydratedDaemonData {
+  conversations: CloudConversation[]
+  messagesByConversation: Record<string, CloudMessage[]>
+  memories: CloudDurableMemory[]
+  learningInteractions: CloudLearningInteraction[]
+}
+
+/**
+ * Load all user data from Supabase after sign-in. Returns null when
+ * unauthenticated or unconfigured. Partial failures return whatever data
+ * was successfully fetched.
+ */
+export async function hydrateFromCloud(): Promise<HydratedDaemonData | null> {
+  const client = getClient()
+  if (!client) return null
+  const userId = await getCurrentUserId()
+  if (!userId) return null
+
+  const [conversations, memories, learningInteractions] = await Promise.all([
+    listConversations(),
+    listCloudMemories(),
+    listLearningInteractions(),
+  ])
+
+  const messagesByConversation: Record<string, CloudMessage[]> = {}
+  if (conversations) {
+    await Promise.all(
+      conversations.map(async conv => {
+        const msgs = await listMessages(conv.id)
+        if (msgs) messagesByConversation[conv.id] = msgs
+      }),
+    )
+  }
+
+  return {
+    conversations: conversations ?? [],
+    messagesByConversation,
+    memories: memories ?? [],
+    learningInteractions: learningInteractions ?? [],
+  }
 }

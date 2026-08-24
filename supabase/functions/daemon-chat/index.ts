@@ -80,64 +80,29 @@ function corsHeaders(origin: string): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiting (server-side, durable)
+// Rate limiting (server-side, durable, atomic)
 // ---------------------------------------------------------------------------
 
 async function checkRateLimit(
   serviceClient: ReturnType<typeof createClient>,
   userId: string,
 ): Promise<{ allowed: boolean; remaining: number }> {
-  const now = Date.now()
+  const { data, error } = await serviceClient.rpc('increment_rate_limit', {
+    p_user_id: userId,
+    p_window_ms: RATE_LIMIT_WINDOW_MS,
+    p_max_count: RATE_LIMIT_MAX,
+  })
 
-  // Read existing row first
-  const { data: existing, error: selectError } = await serviceClient
-    .from('edge_rate_limits')
-    .select('request_count, window_start')
-    .eq('user_id', userId)
-    .maybeSingle<{ request_count: number; window_start: string }>()
-
-  if (selectError) {
-    console.warn('[daemon-chat] rate limit select failed:', selectError.message)
+  if (error) {
+    console.warn('[daemon-chat] rate limit rpc failed:', error.message)
+    // Fail open on RPC errors to avoid blocking all users on DB hiccup
     return { allowed: true, remaining: RATE_LIMIT_MAX }
   }
 
-  const nowIso = new Date(now).toISOString()
-
-  if (!existing) {
-    // First request for this user — insert a fresh row
-    await serviceClient
-      .from('edge_rate_limits')
-      .insert({ user_id: userId, request_count: 1, window_start: nowIso, updated_at: nowIso })
-    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 }
-  }
-
-  const windowStartTs = new Date(existing.window_start).getTime()
-
-  if (windowStartTs < now - RATE_LIMIT_WINDOW_MS) {
-    // Current window expired — reset counter to 1
-    await serviceClient
-      .from('edge_rate_limits')
-      .update({ request_count: 1, window_start: nowIso, updated_at: nowIso })
-      .eq('user_id', userId)
-    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 }
-  }
-
-  if (existing.request_count >= RATE_LIMIT_MAX) {
-    return { allowed: false, remaining: 0 }
-  }
-
-  // Increment atomically — use the current DB value to avoid races
-  const { error: updateError } = await serviceClient
-    .from('edge_rate_limits')
-    .update({ request_count: existing.request_count + 1, updated_at: nowIso })
-    .eq('user_id', userId)
-
-  if (updateError) {
-    console.warn('[daemon-chat] rate limit increment failed:', updateError.message)
-    return { allowed: true, remaining: RATE_LIMIT_MAX }
-  }
-
-  return { allowed: true, remaining: RATE_LIMIT_MAX - existing.request_count - 1 }
+  const row = Array.isArray(data) ? data[0] : data
+  const allowed = Boolean(row?.allowed ?? true)
+  const remaining = Number(row?.remaining ?? RATE_LIMIT_MAX)
+  return { allowed, remaining }
 }
 
 // ---------------------------------------------------------------------------
@@ -244,10 +209,15 @@ Deno.serve(async (req: Request) => {
   const requestOrigin = req.headers.get('origin')
   const allowedOrigin = getAllowedOrigin(requestOrigin)
 
-  // Always handle preflight
+  // Always handle preflight — reject disallowed origins explicitly
   if (req.method === 'OPTIONS') {
-    const origin = allowedOrigin ?? 'https://dmankv.github.io'
-    return new Response(null, { status: 204, headers: corsHeaders(origin) })
+    if (!allowedOrigin) {
+      return new Response(JSON.stringify({ error: 'CORS: origin not allowed' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return new Response(null, { status: 204, headers: corsHeaders(allowedOrigin) })
   }
 
   // Reject disallowed origins for credentialed requests

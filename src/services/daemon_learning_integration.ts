@@ -3,7 +3,7 @@
  * Bridges TypeScript implementation with Python learning algorithm
  */
 
-import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem } from './daemonStorageMigration'
+import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem, genUUID } from './daemonStorageMigration'
 
 export interface LearningMetadata {
   intent: string
@@ -220,7 +220,7 @@ export class DaemonLearningSystem {
   }
 
   private generateInteractionId(): string {
-    return `interaction-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
+    return genUUID()
   }
 }
 

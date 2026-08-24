@@ -1,4 +1,4 @@
-import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem } from './daemonStorageMigration'
+import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem, genUUID } from './daemonStorageMigration'
 
 /**
  * Daemon Memory Service
@@ -54,10 +54,7 @@ function saveDurable(memories: DurableMemory[]): void {
 // ---------------------------------------------------------------------------
 
 function genId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `mem-${crypto.randomUUID()}`
-  }
-  return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+  return genUUID()
 }
 
 // ---------------------------------------------------------------------------

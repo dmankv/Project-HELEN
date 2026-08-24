@@ -23,12 +23,16 @@ import {
   upsertConversation,
   insertMessage,
   insertCloudMemory,
+  deleteLastCloudMemory,
+  deleteCloudMemoriesByText,
+  deleteAllCloudMemories,
   updateLearningFeedback,
   insertLearningInteraction,
   migrateLocalMemoriesToCloud,
+  hydrateFromCloud,
 } from '../services/supabasePersistence'
 import type { SyncStatus } from '../services/supabasePersistence'
-import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem } from '../services/daemonStorageMigration'
+import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem, runLegacyIdMigration, genUUID } from '../services/daemonStorageMigration'
 import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
 import '../styles/DaemonInterface.css'
 
@@ -48,6 +52,10 @@ interface Conversation {
 
 const MESSAGES_KEY = 'daemon_messages'
 const CONVERSATIONS_KEY = 'daemon_conversations'
+
+// Run the one-time legacy-ID migration before any data is read from localStorage.
+// This is safe to call at module load; it exits early if already complete.
+runLegacyIdMigration()
 const MIN_THINKING_DELAY = 600
 const MAX_THINKING_DELAY = 1800
 
@@ -96,8 +104,11 @@ function conversationTitle(messages: Message[]): string {
   return words.length > 6 ? clipped + '…' : clipped
 }
 
-let _idCounter = 0
-const nextId = () => 'daemon-' + Date.now() + '-' + (++_idCounter)
+function newUUID(): string {
+  return genUUID()
+}
+
+const nextId = () => newUUID()
 
 // ---------------------------------------------------------------------------
 // Memory command parser
@@ -235,11 +246,40 @@ export default function DaemonInterface({
     }
   }, [currentUser])
 
-  // One-time local-to-cloud memory migration when user first signs in
+  // One-time local-to-cloud memory migration + cloud hydration when user first signs in
   useEffect(() => {
     if (!isPersistenceConfigured() || !currentUser) return
     const localMems = listMemories()
     void migrateLocalMemoriesToCloud(localMems)
+    // Hydrate cloud data into local state non-disruptively
+    void (async () => {
+      const hydrated = await hydrateFromCloud()
+      if (!hydrated) return
+      // Merge cloud conversations: add ones not already in local state
+      if (hydrated.conversations.length > 0) {
+        setConversations(prev => {
+          const existingIds = new Set(prev.map(c => c.id))
+          const newConvs = hydrated.conversations
+            .filter(cc => !existingIds.has(cc.id))
+            .map(cc => ({
+              id: cc.id,
+              title: cc.title,
+              messages: (hydrated.messagesByConversation[cc.id] ?? []).map(m => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                timestamp: m.created_at,
+              })),
+              createdAt: cc.created_at,
+            }))
+          if (newConvs.length === 0) return prev
+          const merged = [...newConvs, ...prev]
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          saveConversations(merged)
+          return merged
+        })
+      }
+    })()
   }, [currentUser])
 
   const handleSend = useCallback(async () => {
@@ -276,6 +316,16 @@ export default function DaemonInterface({
           const latest = mems[0]
           if (latest) {
             void insertCloudMemory({ id: latest.id, text: latest.text, tags: latest.tags, createdAt: latest.createdAt })
+          }
+        }
+        // Mirror memory deletions to cloud
+        if (isPersistenceConfigured() && currentUser) {
+          if (memCmd.type === 'forget-last') {
+            void deleteLastCloudMemory()
+          } else if (memCmd.type === 'forget-text') {
+            void deleteCloudMemoriesByText(memCmd.payload)
+          } else if (memCmd.type === 'forget-all') {
+            void deleteAllCloudMemories()
           }
         }
         const aiMsg: Message = {
@@ -327,10 +377,13 @@ export default function DaemonInterface({
           // Persist to Supabase
           void (async () => {
             try {
-              await upsertConversation({ id: convId, title: conversationTitle(updated), createdAt: new Date().toISOString() })
+              const convResult = await upsertConversation({ id: convId, title: conversationTitle(updated), createdAt: new Date().toISOString() })
+              if (!convResult) { setSyncStatus('error'); return }
               const pos = nextMessages.length
-              await insertMessage({ id: userMsg.id, conversationId: convId, role: 'user', content: userMsg.content, position: pos, createdAt: userMsg.timestamp })
-              await insertMessage({ id: aiMsg.id, conversationId: convId, role: 'assistant', content: aiMsg.content, position: pos + 1, createdAt: aiMsg.timestamp })
+              const r1 = await insertMessage({ id: userMsg.id, conversationId: convId, role: 'user', content: userMsg.content, position: pos, createdAt: userMsg.timestamp })
+              if (!r1) { setSyncStatus('error'); return }
+              const r2 = await insertMessage({ id: aiMsg.id, conversationId: convId, role: 'assistant', content: aiMsg.content, position: pos + 1, createdAt: aiMsg.timestamp })
+              if (!r2) { setSyncStatus('error'); return }
               setSyncStatus('synced')
             } catch { setSyncStatus('error') }
           })()
@@ -462,7 +515,7 @@ export default function DaemonInterface({
       setMessages(updated)
       saveMessages(updated)
 
-      // Persist learning interaction to Supabase when authenticated
+      // Persist learning interaction and conversation/messages to Supabase when authenticated
       if (isPersistenceConfigured() && currentUser) {
         void insertLearningInteraction({
           id: interactionRecord.id,
@@ -475,6 +528,19 @@ export default function DaemonInterface({
           planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
           createdAt: new Date().toISOString(),
         })
+        setSyncStatus('syncing')
+        void (async () => {
+          try {
+            const convResult = await upsertConversation({ id: convId, title: conversationTitle(updated), createdAt: new Date().toISOString() })
+            if (!convResult) { setSyncStatus('error'); return }
+            const pos = nextMessages.length
+            const r1 = await insertMessage({ id: userMsg.id, conversationId: convId, role: 'user', content: userMsg.content, position: pos, createdAt: userMsg.timestamp })
+            if (!r1) { setSyncStatus('error'); return }
+            const r2 = await insertMessage({ id: aiMsg.id, conversationId: convId, role: 'assistant', content: aiMsg.content, position: pos + 1, createdAt: aiMsg.timestamp })
+            if (!r2) { setSyncStatus('error'); return }
+            setSyncStatus('synced')
+          } catch { setSyncStatus('error') }
+        })()
       }
 
       setConversations(prev => {
