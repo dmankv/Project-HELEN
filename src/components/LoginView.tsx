@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import '../styles/LoginView.css'
 
 interface LoginViewProps {
@@ -6,14 +6,16 @@ interface LoginViewProps {
 }
 
 export default function LoginView({ onBackToChat }: LoginViewProps) {
+  const [submitted, setSubmitted] = useState(false)
+
   const handleSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     // Authentication is not configured. No credentials are stored or transmitted.
-    alert('Authentication is not configured yet.')
+    setSubmitted(true)
   }, [])
 
   return (
-    <div className="login-page" role="main">
+    <main className="login-page">
       <div className="login-card">
         <div className="login-header">
           <span className="helen-logo-sm" aria-hidden="true">🧠</span>
@@ -24,6 +26,12 @@ export default function LoginView({ onBackToChat }: LoginViewProps) {
           Authentication is not yet configured. This form is UI-only and does
           not store or transmit any credentials.
         </p>
+
+        {submitted && (
+          <p className="login-submitted-notice" role="status">
+            Authentication is not configured yet. No action was taken.
+          </p>
+        )}
 
         <form className="login-form" onSubmit={handleSubmit} noValidate>
           <div className="login-field">
@@ -64,6 +72,6 @@ export default function LoginView({ onBackToChat }: LoginViewProps) {
           ← Back to chat
         </button>
       </div>
-    </div>
+    </main>
   )
 }

@@ -39,6 +39,13 @@
   line-height: 1.5;
 }
 
+.login-submitted-notice {
+  font-size: 0.8rem;
+  color: var(--color-accent, #7c7cff);
+  margin: 0;
+  line-height: 1.5;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;
