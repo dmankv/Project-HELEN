@@ -36,9 +36,25 @@ const MOOD_PATTERNS: Array<{ mood: UserMood; pattern: RegExp }> = [
   { mood: 'excited', pattern: /\b(excited|awesome|great|amazing|love|fantastic|yay|can'?t wait|so good|so cool|thrilled|pumped|stoked)\b/i }
 ]
 
+// Intent patterns are listed in priority order — highest priority first.
+// detectIntent iterates in order and returns the first match, so intents
+// near the top beat intents further down when a message matches multiple
+// patterns.  The explicit priority tiers are:
+//   1. identity   – name/self questions; must win over acknowledge, answer, clarify
+//   2. greeting   – pure hellos at start of message
+//   3. humor      – joke requests
+//   4. coding     – technical / code requests
+//   5. smalltalk  – "how are you" type conversation
+//   6. clarify    – explicit clarification requests
+//   7. acknowledge – thanks / ok (lower than identity so "good, what's your name?" → identity)
+//   8. suggest    – recommendation questions
+//   9. follow-up  – references to prior conversation
 const INTENT_PATTERNS: Array<{ intent: ResponseIntent; pattern: RegExp }> = [
+  {
+    intent: 'identity',
+    pattern: /\b(who are you|what are you|are you (a |an )?(real |actual )?(ai|bot|robot|human|person)|tell me about yourself|introduce yourself|what('s| is) your name|what do (i|we) call you|tell me your name|(^|\?)\s*your name\b)/i,
+  },
   { intent: 'greeting', pattern: /^(hey|hi|hello|howdy|yo|sup|hiya|good morning|good afternoon|good evening|what's up|whats up)\b/i },
-  { intent: 'identity', pattern: /\b(who are you|what are you|are you (a |an )?(real |actual )?(ai|bot|robot|human|person)|tell me about yourself|introduce yourself)\b/i },
   { intent: 'humor', pattern: /\b(joke|funny|make me (laugh|smile)|tell me something (funny|hilarious)|lol|haha|hehe|rofl|lmao|😂|😄|tease|banter|witty|pun)\b/i },
   { intent: 'coding', pattern: /\b(write|code|function|script|program|snippet|debug|fix|implement|class|method|algorithm|loop|array|object|variable|import|export|compile|run|test)\b/i },
   { intent: 'smalltalk', pattern: /\b(how are you|how('s| is) it going|what's new|hows your day|how was your day|feeling today)\b/i },
