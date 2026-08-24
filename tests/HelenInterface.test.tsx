@@ -23,7 +23,7 @@ vi.mock('../src/services/helenResponseBrain', () => ({
 vi.mock('../src/services/helenChatAPI', () => ({
   callChatAPI: vi.fn(() => Promise.resolve(null)),
   hasBackend: vi.fn(() => false),
-  isAPIFailure: vi.fn((result: unknown) => result !== null && typeof result === 'object'),
+  isAPIFailure: vi.fn((result: unknown) => result !== null && typeof result === 'object' && 'reason' in (result as object)),
 }))
 
 vi.mock('../src/services/helenMemory', () => ({

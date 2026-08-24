@@ -213,6 +213,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
     const convId = activeConvId ?? nextId()
     if (!activeConvId) setActiveConvId(convId)
     let backendFailedThisTurn = false
+    let authErrorThisTurn = false
 
     try {
       // Check for memory command first
@@ -288,6 +289,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
         }
         if (isAPIFailure(backendResult) && backendResult.reason === 'auth') {
           setAuthError(true)
+          authErrorThisTurn = true
         }
         backendFailedThisTurn = true
       }
@@ -335,7 +337,7 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
         ? {
             id: nextId(),
             role: 'assistant',
-            content: authError
+            content: authErrorThisTurn
               ? 'The cloud backend rejected the request (authentication error). Check that VITE_HELEN_API_TOKEN is correctly configured. Using local mode for this response.'
               : 'The cloud backend is unreachable right now. I used local mode for this response.',
             timestamp: new Date().toISOString(),
