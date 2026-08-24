@@ -1,7 +1,7 @@
 export type UserMood = 'neutral' | 'frustrated' | 'excited' | 'confused' | 'urgent' | 'sad'
 
 export type ResponseIntent = 'answer' | 'clarify' | 'follow-up' | 'acknowledge' | 'suggest'
-  | 'greeting' | 'identity' | 'coding' | 'coding-followup' | 'smalltalk' | 'humor' | 'refusal'
+  | 'greeting' | 'identity' | 'coding' | 'coding-followup' | 'smalltalk' | 'humor' | 'uncertain'
   | 'prompt-injection'
 
 export interface MemorySnippet {
@@ -121,7 +121,7 @@ const CANNED_ANSWERS: Record<ResponseIntent, string[]> = {
     "Interesting! I'd love to give you a solid answer — what angle are you coming from?",
     "Let me help with that — what's the most important part you need answered first?",
   ],
-  refusal: [
+  uncertain: [
     "Honestly, I'm not sure about that one — I don't want to guess and give you something wrong. Could you rephrase or ask a different way?",
     "That's outside what I can help with confidently right now, but I don't want to make something up. Is there another angle I can try?",
     "I want to be upfront — I'm not confident I have a good answer for that. Is there a related question I can actually help with?",
@@ -257,11 +257,11 @@ export function detectIntent(input: string, lastIntent?: ResponseIntent): Respon
     if (rule.pattern.test(input)) return rule.intent
   }
 
-  // Heuristic: only fire refusal for extremely vague fragments (≤2 meaningful words,
+  // Heuristic: only fire uncertain for extremely vague fragments (≤2 meaningful words,
   // ends with ?, and contains no word longer than 3 chars — e.g. "why?" or "huh?").
   // Short but substantive questions ("What is AI?", "How?") are left to reach 'answer'.
   const words = input.trim().split(/\s+/)
-  if (words.length <= 2 && /\?/.test(input) && !words.some(w => /[a-z]{4,}/i.test(w))) return 'refusal'
+  if (words.length <= 2 && /\?/.test(input) && !words.some(w => /[a-z]{4,}/i.test(w))) return 'uncertain'
 
   if (/\?$/.test(input.trim())) return 'answer'
   return 'answer'
@@ -328,9 +328,9 @@ export function generateHumanLikeResponse(baseResponse: string, context: Respons
     return pick(CANNED_ANSWERS.humor)
   }
 
-  // 3. Refusal/uncertainty — honest fallback.
-  if (intent === 'refusal') {
-    return pick(CANNED_ANSWERS.refusal)
+  // 3. Uncertain/vague query — honest "I don't know" fallback.
+  if (intent === 'uncertain') {
+    return pick(CANNED_ANSWERS.uncertain)
   }
 
   // 3b. Prompt-injection attempt — acknowledge and stay in character.

@@ -86,6 +86,7 @@ assert(detectIntent('Tell me a joke') === 'humor', 'humor intent')
 assert(detectIntent('Write a Python function') === 'coding', 'coding intent')
 assert(detectIntent('How are you doing today?') === 'smalltalk', 'smalltalk intent')
 assert(detectIntent('Thanks for that') === 'acknowledge', 'acknowledge intent')
+assert(detectIntent('why?') === 'uncertain', 'vague question → uncertain intent')
 
 // Name / identity variants (regression: must all resolve to 'identity', not 'acknowledge' or 'answer')
 section('Intent detection – name/identity variants')
