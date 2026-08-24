@@ -50,7 +50,8 @@ To connect HELEN to an LLM (OpenAI or Anthropic):
 2. Set the required server environment variables (see `DEPLOYMENT.md`).
 3. Build the frontend with:
    ```bash
-   VITE_HELEN_API_URL=https://your-server.example.com npm run build
+   VITE_HELEN_API_URL=https://your-server.example.com \
+   npm run build
    ```
 4. Deploy `dist/` to GitHub Pages (or any static host).
 

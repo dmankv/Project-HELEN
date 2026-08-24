@@ -18,6 +18,7 @@ import {
   saveMemory,
   listMemories,
   forgetLast,
+  forgetById,
   forgetByText,
   forgetAll,
   retrieveRelevant,
@@ -28,6 +29,7 @@ import {
   loadSidebarOpen,
   saveSidebarOpen,
 } from '../src/components/sidebarPreference.js'
+import learningSystem from '../src/services/helen_learning_integration.js'
 
 // ---------------------------------------------------------------------------
 // Mini test framework
@@ -231,6 +233,11 @@ const removedByText = forgetByText('alpha')
 assert(removedByText.length === 1, 'forgetByText removes matching memory')
 assert(listMemories().length === 1, 'one memory remaining')
 
+const beta = listMemories().find(m => m.text === 'beta memory')
+assert(Boolean(beta), 'beta memory exists before forgetById')
+assert(forgetById(beta.id) === true, 'forgetById removes exact id')
+assert(forgetById('missing-id') === false, 'forgetById returns false for unknown id')
+
 forgetAll()
 assert(listMemories().length === 0, 'forgetAll clears all memories')
 
@@ -292,7 +299,29 @@ global.localStorage.setItem = originalSetItem
 resetStore()
 
 // ---------------------------------------------------------------------------
-// 10. Refusal / safety patterns (static checks on response brain)
+// 10. Learning integration helpers
+// ---------------------------------------------------------------------------
+section('Learning integration helpers')
+learningSystem.clearHistory()
+const rec = learningSystem.recordInteraction('test input', 'test output', {
+  intent: 'answer',
+  confidence: 0.75,
+  ambiguity: 0.2,
+  memoryUsed: 0,
+  planComplexity: 'simple',
+  timestamp: new Date(),
+})
+assert(Boolean(rec?.id), 'recordInteraction returns an interaction id')
+const pending = learningSystem.getPendingLearning()
+assert(pending.some(i => i.id === rec.id), 'getPendingLearning includes unrated interaction')
+const exported = learningSystem.exportLearningData()
+assertContains(exported, 'test input', 'exportLearningData includes interaction payload')
+learningSystem.processFeedback(rec.id, 'helpful')
+assert(learningSystem.getPendingLearning().every(i => i.id !== rec.id), 'rated interaction removed from pending list')
+learningSystem.clearHistory()
+
+// ---------------------------------------------------------------------------
+// 11. Refusal / safety patterns (static checks on response brain)
 // ---------------------------------------------------------------------------
 section('Refusal / safety (static)')
 // The local brain should handle "identity" without claiming humanity
@@ -305,7 +334,7 @@ assert(identity2.length > 0, 'returns a non-empty identity response')
 assertNotContains(identity2, 'yes, i am human', 'does not play-act as human')
 
 // ---------------------------------------------------------------------------
-// 11. Repetition check
+// 12. Repetition check
 // ---------------------------------------------------------------------------
 section('Repetition check')
 const responses = new Set()
@@ -319,7 +348,7 @@ for (let i = 0; i < 6; i++) {
 assert(responses.size >= 2, 'greeting responses have variation (≥2 unique in 6 tries)')
 
 // ---------------------------------------------------------------------------
-// 12. CLI regression tests (spawn subprocess, non-interactive only)
+// 13. CLI regression tests (spawn subprocess, non-interactive only)
 // ---------------------------------------------------------------------------
 section('CLI regression – one-shot --message')
 {
@@ -382,7 +411,7 @@ section('CLI regression – one-shot --message')
 }
 
 // ---------------------------------------------------------------------------
-// 13. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
+// 14. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
 // ---------------------------------------------------------------------------
 section('Live model tests')
 if (process.env.HELEN_EVAL_LIVE !== 'true') {
@@ -392,9 +421,14 @@ if (process.env.HELEN_EVAL_LIVE !== 'true') {
   console.log('  Running live tests against ' + apiUrl)
 
   async function liveChatRequest(messages) {
+    const token = process.env.HELEN_EVAL_API_TOKEN
+    const origin = process.env.HELEN_EVAL_ORIGIN
+    const headers = { 'Content-Type': 'application/json' }
+    if (token) headers['X-HELEN-API-TOKEN'] = token
+    if (origin) headers.Origin = origin
     const res = await fetch(apiUrl + '/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ messages }),
     })
     if (!res.ok) throw new Error('HTTP ' + res.status)
@@ -420,7 +454,7 @@ if (process.env.HELEN_EVAL_LIVE !== 'true') {
 }
 
 // ---------------------------------------------------------------------------
-// 14. Sidebar source-level assertions
+// 15. Sidebar source-level assertions
 //     Checks that the TSX source reflects the correct conditional render logic
 //     without requiring a DOM environment.
 // ---------------------------------------------------------------------------

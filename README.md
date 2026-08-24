@@ -73,6 +73,7 @@ VITE_HELEN_API_URL=http://localhost:3001 npm run dev
 | `HELEN_MODEL` | No | `gpt-4o-mini` / `claude-3-haiku-20240307` | Model name |
 | `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | CORS allowed origins |
 | `HELEN_FRONTEND_URL` | No | `http://localhost:3000/Project-HELEN/` | Used for verify/reset email links |
+| `HELEN_API_TOKEN` | No | — | Optional token for non-browser `/api/chat` clients; never expose it through Vite |
 | `PORT` | No | `3001` | Server port |
 | `AUTH_DATA_FILE` | No | `.data/auth-store.json` | Persistent auth storage file (outside source control) |
 | `AUTH_DEV_EMAIL_OUTBOX_FILE` | No | `.data/auth-email-outbox.jsonl` | Development/test email outbox |
@@ -84,6 +85,7 @@ VITE_HELEN_API_URL=http://localhost:3001 npm run dev
 | `AUTH_RATE_LIMIT_MAX` | No | `20` | Auth endpoint rate-limit max per window |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | No | `60000` | Auth endpoint rate-limit window |
 | `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `HELEN_RATE_LIMIT_WINDOW_MS` | No | `60000` | Chat rate-limit window |
 | `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` behind a reverse proxy so the rate limiter reads the real client IP from `X-Forwarded-For`. Leave unset when the server faces the internet directly. |
 
 ### Frontend environment variables
@@ -117,6 +119,7 @@ Security properties:
 - Verification/reset tokens are random, hashed at rest, single-use, purpose-scoped, and expiration-bound.
 - Login/register/reset/verify endpoints are rate-limited.
 - Password reset revokes all existing sessions for that account.
+- Browser chat requires an allowed origin and active session; `HELEN_API_TOKEN` is optional for non-browser clients only.
 - Auth data persists in `AUTH_DATA_FILE` (local/dev default) and must be placed on durable encrypted storage in production.
 - Development/test email delivery uses file outbox adapter (`AUTH_DEV_EMAIL_OUTBOX_FILE`).
 
@@ -172,7 +175,7 @@ These files are **not** used by the deployed React/Vite website:
 
 - `src/cli/helen-cli.ts` (supported local CLI, run with `npm run cli`)
 - `bin/helen.sh` / `bin/helen-cli.py` (wrappers for the same TypeScript CLI)
-- `src/services/defself_l.py` (experimental standalone Python prototype)
+- `src/experimental/defself_l.py` (experimental standalone Python prototype)
 
 The CLI intentionally uses local, in-process logic and does not import browser-only services.
 The Python prototype is not part of the web build/deploy/runtime path.

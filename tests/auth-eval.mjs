@@ -32,6 +32,7 @@ process.env.AUTH_SECURE_COOKIES = 'false'
 process.env.HELEN_ALLOWED_ORIGINS = 'http://localhost:3000'
 process.env.AUTH_RATE_LIMIT_MAX = '5'
 process.env.AUTH_RATE_LIMIT_WINDOW_MS = '60000'
+process.env.OPENAI_API_KEY = ''
 
 const { default: server } = await import('../server/index.ts')
 server.listen(Number(process.env.PORT))
@@ -127,6 +128,13 @@ section('CSRF + origin checks')
     body: JSON.stringify({ email: 'a@example.com', password: 'Password123!', passwordConfirm: 'Password123!' }),
   })
   assert(badOrigin.status === 403, 'state-changing endpoint rejects disallowed origin')
+
+  const unauthenticatedChat = await request('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  assert(unauthenticatedChat.res.status === 401, 'chat rejects a request without a session or API token')
 }
 
 section('Registration + verification flow')
@@ -172,6 +180,13 @@ section('Login success/failure + session/logout')
 
   const session = await request('/api/auth/session')
   assert(session.res.status === 200 && session.body?.authenticated === true, 'session endpoint validates active login')
+
+  const authenticatedChat = await request('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  assert(authenticatedChat.res.status === 502, 'chat accepts an authenticated session before provider handling')
 
   const logout = await csrfRequest('/api/auth/logout', {})
   assert(logout.res.status === 200, 'logout succeeds')

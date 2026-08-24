@@ -18,6 +18,7 @@ const HELEN_MODEL_DEFAULTS: Record<string, string> = {
   anthropic: 'claude-3-haiku-20240307',
 }
 const MODEL = process.env.HELEN_MODEL ?? HELEN_MODEL_DEFAULTS[PROVIDER] ?? 'gpt-4o-mini'
+const API_TOKEN = process.env.HELEN_API_TOKEN ?? ''
 
 const ALLOWED_ORIGINS = (
   process.env.HELEN_ALLOWED_ORIGINS ??
@@ -50,6 +51,7 @@ const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 20)
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000)
 
 const CHAT_RATE_LIMIT_MAX = Number(process.env.HELEN_RATE_LIMIT ?? 60)
+const CHAT_RATE_LIMIT_WINDOW_MS = Number(process.env.HELEN_RATE_LIMIT_WINDOW_MS ?? 60_000)
 
 const AUTH_DATA_FILE = process.env.AUTH_DATA_FILE
   ? path.resolve(process.env.AUTH_DATA_FILE)
@@ -252,28 +254,54 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Credentials': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-CSRF-Token',
+      'Access-Control-Allow-Headers': 'Content-Type, X-CSRF-Token, X-HELEN-API-TOKEN',
       Vary: 'Origin',
     }
   }
   return {}
 }
 
+function isAllowedOrigin(origin: string | undefined): boolean {
+  return Boolean(origin && ALLOWED_ORIGINS.includes(origin))
+}
+
+function hasValidApiToken(req: http.IncomingMessage): boolean {
+  const token = normalizeHeader(req.headers['x-helen-api-token']) ?? ''
+  return API_TOKEN.length > 0 && token.length > 0 && timingSafeEqualString(token, API_TOKEN)
+}
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
-    let total = 0
+    let totalBytes = 0
+    let finished = false
+
+    const fail = (message: string) => {
+      if (finished) return
+      finished = true
+      reject(new Error(message))
+    }
+
     req.on('data', chunk => {
+      if (finished) return
       const buf = chunk as Buffer
-      total += buf.length
-      if (total > MAX_BODY_BYTES) {
-        req.destroy(new Error('Request body too large'))
+      totalBytes += buf.length
+      if (totalBytes > MAX_BODY_BYTES) {
+        fail('Request body too large')
         return
       }
       chunks.push(buf)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
+    req.on('end', () => {
+      if (finished) return
+      finished = true
+      resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', err => {
+      if (finished) return
+      finished = true
+      reject(err)
+    })
   })
 }
 
@@ -455,6 +483,13 @@ class DevEmailAdapter {
 
 const authStore = new AuthStore(AUTH_DATA_FILE)
 const emailAdapter = new DevEmailAdapter()
+
+function hasActiveSession(cookies: ParsedCookies): boolean {
+  const sid = cookies[AUTH_COOKIE_NAME]
+  if (!sid) return false
+  const session = authStore.findActiveSession(sid)
+  return Boolean(session && authStore.findUserById(session.userId))
+}
 
 // ---------------------------------------------------------------------------
 // Rate limiting (chat + auth)
@@ -729,7 +764,7 @@ const server = http.createServer(async (req, res) => {
       res.end()
       return
     }
-    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       res.writeHead(204, defaultHeaders)
       res.end()
       return
@@ -742,10 +777,10 @@ const server = http.createServer(async (req, res) => {
   if (method !== 'OPTIONS') {
     const remoteIp = requestIp(req)
     if (requestUrl.startsWith('/api/chat')) {
-      if (isRateLimited(chatRateCounts, remoteIp, CHAT_RATE_LIMIT_MAX, 60_000)) {
+      if (isRateLimited(chatRateCounts, remoteIp, CHAT_RATE_LIMIT_MAX, CHAT_RATE_LIMIT_WINDOW_MS)) {
         res.writeHead(429, {
           'Content-Type': 'application/json',
-          'Retry-After': '60',
+          'Retry-After': String(Math.ceil(CHAT_RATE_LIMIT_WINDOW_MS / 1000)),
           ...defaultHeaders,
         })
         res.end(JSON.stringify({ error: 'Too many requests. Please wait a moment.' }))
@@ -761,6 +796,17 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (parsedUrl.pathname === '/api/chat' && method === 'POST') {
+    if (!isAllowedOrigin(origin)) {
+      res.writeHead(403, { 'Content-Type': 'application/json', ...securityHeaders() })
+      res.end(JSON.stringify({ error: 'Origin is not allowed.' }))
+      return
+    }
+    if (!hasValidApiToken(req) && !hasActiveSession(cookies)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', ...defaultHeaders })
+      res.end(JSON.stringify({ error: 'Unauthorized.' }))
+      return
+    }
+
     let chatReq: ChatRequest
     try {
       const body = await readBody(req)

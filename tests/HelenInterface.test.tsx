@@ -6,7 +6,7 @@
  * deterministic and fast.
  */
 
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,7 @@ vi.mock('../src/services/helenResponseBrain', () => ({
 vi.mock('../src/services/helenChatAPI', () => ({
   callChatAPI: vi.fn(() => Promise.resolve(null)),
   hasBackend: vi.fn(() => false),
+  isAPIFailure: vi.fn((result: unknown) => result !== null && typeof result === 'object' && 'reason' in (result as object)),
 }))
 
 vi.mock('../src/services/helenMemory', () => ({
@@ -57,6 +58,7 @@ vi.mock('../src/services/helen_learning_integration', () => ({
 // Import the component after mocks are registered.
 import HelenInterface from '../src/components/HelenInterface'
 import { saveMemory, listMemories, forgetAll } from '../src/services/helenMemory'
+import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/helenChatAPI'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -125,6 +127,25 @@ describe('HelenInterface', () => {
     expect(input.value).toBe('')
   })
 
+  it('falls back to local mode when backend is configured but unavailable', async () => {
+    vi.mocked(hasBackend).mockReturnValue(true)
+    vi.mocked(callChatAPI).mockResolvedValue(null)
+
+    render(<HelenInterface />)
+    const input = screen.getByPlaceholderText(/Message HELEN/i)
+    fireEvent.change(input, { target: { value: 'Please help' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(
+      () => expect(screen.getByText(/I used local mode for this response/i)).toBeInTheDocument(),
+      WAIT_OPTS,
+    )
+    await waitFor(
+      () => expect(screen.getByText('Test response from local brain.')).toBeInTheDocument(),
+      WAIT_OPTS,
+    )
+  }, 10000)
+
   // ── Memory commands ───────────────────────────────────────────────────────
 
   it('remember command calls saveMemory and echoes confirmation', async () => {
@@ -170,13 +191,25 @@ describe('HelenInterface', () => {
     expect(screen.getByText(/Hello, I'm HELEN/i)).toBeInTheDocument()
   }, 8000)
 
+  it('Clear All remains safe when localStorage removeItem fails', () => {
+    const originalRemoveItem = localStorage.removeItem
+    localStorage.removeItem = vi.fn(() => { throw new Error('blocked') })
+    render(<HelenInterface />)
+    expect(() => {
+      fireEvent.click(screen.getByRole('button', { name: /Clear all conversations/i }))
+    }).not.toThrow()
+    localStorage.removeItem = originalRemoveItem
+  })
+
   // ── Enter key ─────────────────────────────────────────────────────────────
 
-  it('pressing Enter submits the message', () => {
+  it('pressing Enter submits the message', async () => {
     render(<HelenInterface />)
     const input = screen.getByPlaceholderText(/Message HELEN/i)
     fireEvent.change(input, { target: { value: 'test Enter key' } })
-    fireEvent.keyDown(input, { key: 'Enter', shiftKey: false })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: false })
+    })
     expect(screen.getByText('test Enter key')).toBeInTheDocument()
   })
 

@@ -15,7 +15,7 @@ import {
   retrieveRelevant,
   formatMemoriesForContext,
 } from '../services/helenMemory'
-import { callChatAPI, hasBackend } from '../services/helenChatAPI'
+import { callChatAPI, hasBackend, isAPIFailure } from '../services/helenChatAPI'
 import type { APIMessage } from '../services/helenChatAPI'
 import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
 import '../styles/HelenInterface.css'
@@ -176,6 +176,7 @@ export default function HelenInterface({
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const [usingBackend, setUsingBackend] = useState(false)
+  const [authError, setAuthError] = useState(false)
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -217,6 +218,8 @@ export default function HelenInterface({
 
     const convId = activeConvId ?? nextId()
     if (!activeConvId) setActiveConvId(convId)
+    let backendFailedThisTurn = false
+    let authErrorThisTurn = false
 
     try {
       // Check for memory command first
@@ -255,13 +258,14 @@ export default function HelenInterface({
 
       if (hasBackend()) {
         const apiHistory = buildAPIHistory(nextMessages)
-        const backendResponse = await callChatAPI(apiHistory, controller.signal)
-        if (backendResponse !== null) {
+        const backendResult = await callChatAPI(apiHistory, controller.signal)
+        if (typeof backendResult === 'string') {
           setUsingBackend(true)
+          setAuthError(false)
           const aiMsg: Message = {
             id: nextId(),
             role: 'assistant',
-            content: backendResponse,
+            content: backendResult,
             timestamp: new Date().toISOString(),
           }
           const updated = [...nextMessages, aiMsg]
@@ -284,37 +288,16 @@ export default function HelenInterface({
         }
         setUsingBackend(false)
         // User may have cancelled while awaiting the backend response
-        if (controller.signal.aborted) {
+        if (controller.signal.aborted || (isAPIFailure(backendResult) && backendResult.reason === 'aborted')) {
           setIsThinking(false)
           abortRef.current = null
           return
         }
-        // Backend was configured but unreachable — notify user and stop
-        {
-          const errMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: 'The cloud backend is unreachable right now. Falling back to local mode for this message.',
-            timestamp: new Date().toISOString(),
-          }
-          const updated = [...nextMessages, errMsg]
-          setMessages(updated)
-          saveMessages(updated)
-          setConversations(prev => {
-            const existing = prev.find(c => c.id === convId)
-            const updatedConv: Conversation = existing
-              ? { ...existing, messages: updated }
-              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-            const updatedList = existing
-              ? prev.map(c => (c.id === convId ? updatedConv : c))
-              : [updatedConv, ...prev]
-            saveConversations(updatedList)
-            return updatedList
-          })
-          setIsThinking(false)
-          abortRef.current = null
-          return
+        if (isAPIFailure(backendResult) && backendResult.reason === 'auth') {
+          setAuthError(true)
+          authErrorThisTurn = true
         }
+        backendFailedThisTurn = true
       }
 
       // Local brain fallback
@@ -356,10 +339,19 @@ export default function HelenInterface({
         content: response,
         timestamp: new Date().toISOString(),
       }
-
+      const fallbackMsg: Message | null = backendFailedThisTurn
+        ? {
+            id: nextId(),
+            role: 'assistant',
+            content: authErrorThisTurn
+              ? 'The cloud backend rejected the request (authentication error). Sign in to use cloud chat. Using local mode for this response.'
+              : 'The cloud backend is unreachable right now. I used local mode for this response.',
+            timestamp: new Date().toISOString(),
+          }
+        : null
       msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
 
-      const updated = [...nextMessages, aiMsg]
+      const updated = fallbackMsg ? [...nextMessages, fallbackMsg, aiMsg] : [...nextMessages, aiMsg]
       setMessages(updated)
       saveMessages(updated)
       setConversations(prev => {
@@ -404,8 +396,12 @@ export default function HelenInterface({
     setConversations([])
     setRatedMessages(new Set())
     abortRef.current = null
-    localStorage.removeItem(MESSAGES_KEY)
-    localStorage.removeItem(CONVERSATIONS_KEY)
+    try {
+      localStorage.removeItem(MESSAGES_KEY)
+      localStorage.removeItem(CONVERSATIONS_KEY)
+    } catch {
+      // best-effort only; UI state is already reset in-memory
+    }
     learningSystem.clearHistory()
     // Durable memories are intentionally preserved. Use "forget all memories" to erase them.
   }
@@ -494,29 +490,35 @@ export default function HelenInterface({
               <p
                 className="backend-badge"
                 title={
-                  messages.length === 0
-                    ? 'Cloud mode configured — will activate on first message'
-                    : usingBackend
-                      ? 'Responses from cloud model'
-                      : 'Using local brain'
+                  authError
+                    ? 'Authentication error — sign in to use cloud chat'
+                    : messages.length === 0
+                      ? 'Cloud mode configured — will activate on first message'
+                      : usingBackend
+                        ? 'Responses from cloud model'
+                        : 'Using local brain'
                 }
                 aria-label={
-                  messages.length === 0
-                    ? 'Cloud mode configured'
-                    : usingBackend
-                      ? 'Cloud mode active'
-                      : 'Local mode active'
+                  authError
+                    ? 'Cloud auth error'
+                    : messages.length === 0
+                      ? 'Cloud mode configured'
+                      : usingBackend
+                        ? 'Cloud mode active'
+                        : 'Local mode active'
                 }
               >
                 <span aria-hidden="true">
-                  {usingBackend || messages.length === 0 ? '☁️' : '🖥️'}
+                  {authError ? '⚠️' : usingBackend || messages.length === 0 ? '☁️' : '🖥️'}
                 </span>
                 {' '}
-                {usingBackend
-                  ? 'Cloud'
-                  : messages.length === 0
-                    ? 'Cloud (ready)'
-                    : 'Local'}
+                {authError
+                  ? 'Auth error'
+                  : usingBackend
+                    ? 'Cloud'
+                    : messages.length === 0
+                      ? 'Cloud (ready)'
+                      : 'Local'}
               </p>
             )}
           </div>
