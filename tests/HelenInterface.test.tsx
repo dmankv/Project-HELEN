@@ -62,16 +62,6 @@ import { saveMemory, listMemories, forgetAll } from '../src/services/helenMemory
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Override thinkingDelay so it returns immediately — avoids 600-1800 ms waits.
-vi.mock('../src/components/HelenInterface', async () => {
-  const mod = await vi.importActual<typeof import('../src/components/HelenInterface')>(
-    '../src/components/HelenInterface',
-  )
-  return mod
-})
-
-// Patch global Math.random so thinkingDelay always returns MIN (600 ms).
-// Tests use waitFor with a generous timeout so even 600 ms is fine.
 beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()

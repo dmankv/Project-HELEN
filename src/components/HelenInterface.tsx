@@ -493,7 +493,9 @@ export default function HelenInterface() {
                       : 'Local mode active'
                 }
               >
-                <span aria-hidden="true">{usingBackend ? '☁️' : '🖥️'}</span>
+                <span aria-hidden="true">
+                  {usingBackend || messages.length === 0 ? '☁️' : '🖥️'}
+                </span>
                 {' '}
                 {usingBackend
                   ? 'Cloud'
