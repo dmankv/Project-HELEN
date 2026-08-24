@@ -21,15 +21,20 @@ The authoritative frontend implementation follows this import chain:
 index.html
   └─ src/main.tsx
        └─ src/App.tsx
-            └─ src/components/HelenInterface.tsx
-                 └─ src/services/helenResponseBrain.ts  (local rule engine)
-                 └─ src/services/helenChatAPI.ts        (optional cloud API)
-                 └─ src/services/helenMemory.ts         (browser localStorage)
-                 └─ src/styles/HelenInterface.css
+            ├─ src/components/HelenInterface.tsx
+            │    └─ src/services/helenResponseBrain.ts  (local rule engine)
+            │    └─ src/services/helenChatAPI.ts        (optional cloud API)
+            │    └─ src/services/helenMemory.ts         (browser localStorage)
+            │    └─ src/styles/HelenInterface.css
+            ├─ src/components/LoginView.tsx
+            └─ src/viewRouting.ts
 ```
 
 `HelenInterface.tsx` is the sole active web chat component.
 Some older CLI/non-web files still exist and are documented below as separate entrypoints.
+
+The header includes a **Log in** button that opens a separate login view (`#/login`).
+This form is currently UI-only and does **not** authenticate or send credentials to the chat API.
 
 ---
 

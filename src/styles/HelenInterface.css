@@ -240,6 +240,12 @@
   flex-shrink: 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .sidebar-toggle-inline {
   background: none;
   color: var(--color-text-secondary);
@@ -607,6 +613,30 @@
   box-shadow: none;
 }
 
+/* ── Login Button ────────────────────────────────────── */
+.login-btn {
+  padding: 0.35rem 0.75rem;
+  background-color: var(--color-surface-light);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.login-btn:hover:not(:disabled) {
+  background-color: var(--color-primary);
+  color: #fff;
+  transform: none;
+  box-shadow: none;
+}
+
+.login-btn:focus-visible,
+.clear-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* ── Responsive: mobile input ────────────────────────── */
 @media (max-width: 640px) {
   .input-area {
@@ -615,6 +645,14 @@
 
   .helen-input {
     font-size: 0.95rem;
+  }
+
+  .helen-header {
+    padding: 0 0.75rem;
+  }
+
+  .header-actions {
+    gap: 0.35rem;
   }
 }
 
