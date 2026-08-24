@@ -376,6 +376,53 @@ if (process.env.HELEN_EVAL_LIVE !== 'true') {
 }
 
 // ---------------------------------------------------------------------------
+// 13. Sidebar source-level assertions
+//     Checks that the TSX source reflects the correct conditional render logic
+//     without requiring a DOM environment.
+// ---------------------------------------------------------------------------
+section('Sidebar source-level assertions')
+{
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const url = await import('node:url')
+  const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
+  const src = fs.readFileSync(
+    path.resolve(__dirname, '../src/components/HelenInterface.tsx'),
+    'utf8',
+  )
+
+  // Sidebar nav must be conditionally rendered (wrapped in sidebarOpen check)
+  assert(
+    src.includes('{sidebarOpen && (') && src.includes('<nav className="helen-sidebar"'),
+    'sidebar nav is conditionally rendered when sidebarOpen is true',
+  )
+
+  // No static always-rendered nav with both open/closed classes
+  assert(
+    !src.includes("'helen-sidebar ' + (sidebarOpen"),
+    'sidebar does not use open/closed class toggling on always-rendered element',
+  )
+
+  // Reopen button rendered only when sidebar is closed
+  assert(
+    src.includes('{!sidebarOpen && (') && src.includes('className="sidebar-reopen"'),
+    'reopen button is conditionally rendered when sidebar is closed',
+  )
+
+  // Close button accessible label
+  assert(
+    src.includes('aria-label="Close sidebar"'),
+    'close button has aria-label "Close sidebar"',
+  )
+
+  // Open button accessible label
+  assert(
+    src.includes('aria-label="Open sidebar"'),
+    'reopen button has aria-label "Open sidebar"',
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log('\n════════════════════════════════════')
