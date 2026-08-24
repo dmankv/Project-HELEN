@@ -126,9 +126,9 @@ The workflow (`.github/workflows/deploy.yml`):
 6. Uploads `dist/` as a Pages artifact.
 7. Deploys via `actions/deploy-pages`.
 
-The live URL is: `https://jackdeadicay-boop.github.io/somthing/`
+The live URL is: `https://dmankv.github.io/Project-HELEN/`
 
-Vite is configured with `base: '/somthing/'` to match this URL.
+Vite is configured with `base: '/Project-HELEN/'` to match this URL.
 
 ---
 

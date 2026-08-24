@@ -1,6 +1,6 @@
 # HELEN — Adaptive AI Assistant
 
-Live site: https://jackdeadicay-boop.github.io/somthing/
+Live site: https://dmankv.github.io/Project-HELEN/
 
 HELEN is a React/TypeScript chat interface with two operating modes:
 
@@ -42,7 +42,7 @@ This form is currently UI-only and does **not** authenticate or send credentials
 
 ```bash
 npm ci --legacy-peer-deps
-npm run dev          # frontend at http://localhost:3000/somthing/
+npm run dev          # frontend at http://localhost:3000/Project-HELEN/
 ```
 
 CLI (local terminal mode):
