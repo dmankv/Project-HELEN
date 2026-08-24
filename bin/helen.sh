@@ -1,24 +1,26 @@
 #!/bin/bash
 # HELEN CLI Runner Script
-# Simple bash script to run HELEN from the command line
+# Runs HELEN from any working directory by resolving the repo root from the
+# script location rather than the caller's current directory.
 
-echo "Starting HELEN Terminal Interface..."
-echo ""
+set -euo pipefail
 
-cd "$(dirname "$0")"/.. || exit 1
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install Node.js 18 or higher."
+# Validate required executables.
+for exe in node npm npx; do
+  if ! command -v "$exe" &>/dev/null; then
+    echo "❌ '$exe' not found. Please install Node.js (v18+) and npm." >&2
     exit 1
+  fi
+done
+
+if [ ! -d "$REPO_ROOT/node_modules" ]; then
+  echo "Installing dependencies..."
+  npm ci --legacy-peer-deps --prefix "$REPO_ROOT"
 fi
 
-if [ ! -d "node_modules" ]; then
-    echo "Installing dependencies..."
-    npm ci --legacy-peer-deps
-fi
-
-echo ""
-echo "🤖 Welcome to HELEN - Terminal Interface"
-echo ""
-
-npx tsx src/cli/helen-cli.ts "$@"
+# Execute the TypeScript CLI, forwarding all arguments.
+# Use 'exec' so the child process replaces the shell and its exit code is
+# returned directly to the caller (interactive and scripted use both work).
+exec npx --prefix "$REPO_ROOT" tsx "$REPO_ROOT/src/cli/helen-cli.ts" "$@"

@@ -1,8 +1,0 @@
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "lint": "eslint src --ext ts,tsx",
-    "cli": "npx tsx src/cli/helen-cli.ts",
-    "cli:python": "python3 bin/helen-cli.py"
-  }

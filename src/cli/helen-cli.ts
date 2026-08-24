@@ -150,6 +150,12 @@ function parseMessageArg(argv: string[]): string | undefined {
       }
       return value
     }
+    // Reject unrecognised long flags (--*).
+    if (arg.startsWith('--')) {
+      console.error(`Unknown option: ${arg}`)
+      console.error('Run with --help for usage.')
+      process.exit(1)
+    }
   }
   return undefined
 }

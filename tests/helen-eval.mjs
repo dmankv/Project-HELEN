@@ -275,7 +275,62 @@ for (let i = 0; i < 6; i++) {
 assert(responses.size >= 2, 'greeting responses have variation (≥2 unique in 6 tries)')
 
 // ---------------------------------------------------------------------------
-// 11. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
+// 11. CLI regression tests (spawn subprocess, non-interactive only)
+// ---------------------------------------------------------------------------
+section('CLI regression – one-shot --message')
+{
+  const { spawnSync } = await import('node:child_process')
+  const path = await import('node:path')
+  const url = await import('node:url')
+  const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
+  const repoRoot = path.resolve(__dirname, '..')
+  const cliPath = path.join(repoRoot, 'src', 'cli', 'helen-cli.ts')
+
+  // --message one-shot
+  const oneShot = spawnSync(
+    'npx', ['tsx', cliPath, '--message', 'What is your name?'],
+    { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 },
+  )
+  assert(oneShot.status === 0, 'CLI --message exits 0')
+  assertContains(oneShot.stdout, 'HELEN', 'CLI --message response names HELEN')
+
+  // stdin mode
+  const stdinMode = spawnSync(
+    'npx', ['tsx', cliPath],
+    { cwd: repoRoot, encoding: 'utf8', input: 'hello', timeout: 30_000 },
+  )
+  assert(stdinMode.status === 0, 'CLI stdin mode exits 0')
+  assert(stdinMode.stdout.trim().length > 0, 'CLI stdin mode produces output')
+
+  // unknown flag rejection
+  const unknown = spawnSync(
+    'npx', ['tsx', cliPath, '--bogus-flag'],
+    { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 },
+  )
+  assert(unknown.status !== 0, 'CLI unknown flag exits non-zero')
+  assertContains(unknown.stderr, 'Unknown option', 'CLI unknown flag error message')
+
+  // wrapper from non-root cwd (shell wrapper)
+  const shellWrapper = path.join(repoRoot, 'bin', 'helen.sh')
+  const wrapperResult = spawnSync(
+    'bash', [shellWrapper, '--message', 'hello'],
+    { cwd: '/tmp', encoding: 'utf8', timeout: 30_000 },
+  )
+  assert(wrapperResult.status === 0, 'shell wrapper from /tmp exits 0')
+  assert(wrapperResult.stdout.trim().length > 0, 'shell wrapper from /tmp produces output')
+
+  // Python wrapper from non-root cwd
+  const pyWrapper = path.join(repoRoot, 'bin', 'helen-cli.py')
+  const pyResult = spawnSync(
+    'python3', [pyWrapper, '--message', 'hello'],
+    { cwd: '/tmp', encoding: 'utf8', timeout: 30_000 },
+  )
+  assert(pyResult.status === 0, 'python wrapper from /tmp exits 0')
+  assert(pyResult.stdout.trim().length > 0, 'python wrapper from /tmp produces output')
+}
+
+// ---------------------------------------------------------------------------
+// 12. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
 // ---------------------------------------------------------------------------
 section('Live model tests')
 if (process.env.HELEN_EVAL_LIVE !== 'true') {
