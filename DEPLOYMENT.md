@@ -1,8 +1,8 @@
-# HELEN – System Architecture & Deployment
+# Daemon – System Architecture & Deployment
 
 ## Overview
 
-HELEN is a React/TypeScript chat interface deployed as a **static site on GitHub Pages**.
+Daemon is a React/TypeScript chat interface deployed as a **static site on GitHub Pages**.
 The frontend includes a built-in rule/template-based response engine that works with no backend.
 An optional Node.js API proxy (`server/`) can be separately hosted to route requests to an LLM
 provider (OpenAI or Anthropic) without exposing API keys in the browser.
@@ -15,16 +15,16 @@ provider (OpenAI or Anthropic) without exposing API keys in the browser.
 index.html
   └─ src/main.tsx          (React root mount)
        └─ src/App.tsx       (top-level component shell)
-            └─ src/components/HelenInterface.tsx   (chat UI)
-                 └─ src/services/helenResponseBrain.ts  (local rule engine)
-                 └─ src/services/helenChatAPI.ts        (optional cloud API)
+            └─ src/components/DaemonInterface.tsx   (chat UI)
+                 └─ src/services/daemonResponseBrain.ts  (local rule engine)
+                 └─ src/services/daemonChatAPI.ts        (optional cloud API)
 ```
 
 ### Local mode (default)
-`helenResponseBrain.ts` produces responses entirely in the browser – no network call is made.
+`daemonResponseBrain.ts` produces responses entirely in the browser – no network call is made.
 
 ### Cloud API mode (optional)
-When the environment variable `VITE_HELEN_API_URL` is set at build time, `helenChatAPI.ts` sends
+When the environment variable `VITE_DAEMON_API_URL` is set at build time, `daemonChatAPI.ts` sends
 requests to that URL. The server at that URL must be the separately hosted `server/` gateway.
 
 ---
@@ -35,10 +35,10 @@ requests to that URL. The server at that URL must be the separately hosted `serv
 |------|---------|
 | `src/main.tsx` | React root (`ReactDOM.createRoot`) |
 | `src/App.tsx` | App shell |
-| `src/components/HelenInterface.tsx` | Chat UI, message list, input |
-| `src/services/helenResponseBrain.ts` | Rule/template-based local response engine |
-| `src/services/helenChatAPI.ts` | HTTP client for optional cloud API |
-| `src/services/helenMemory.ts` | In-browser durable memory persisted in localStorage until cleared |
+| `src/components/DaemonInterface.tsx` | Chat UI, message list, input |
+| `src/services/daemonResponseBrain.ts` | Rule/template-based local response engine |
+| `src/services/daemonChatAPI.ts` | HTTP client for optional cloud API |
+| `src/services/daemonMemory.ts` | In-browser durable memory persisted in localStorage until cleared |
 
 ---
 
@@ -49,13 +49,13 @@ It proxies `POST /api/chat` to OpenAI/Anthropic and also serves authentication e
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HELEN_PROVIDER` | No | `openai` | `openai` or `anthropic` |
+| `DAEMON_PROVIDER` | No | `openai` | `openai` or `anthropic` |
 | `OPENAI_API_KEY` | When provider=openai | – | OpenAI secret key |
 | `ANTHROPIC_API_KEY` | When provider=anthropic | – | Anthropic secret key |
-| `HELEN_MODEL` | No | provider default | Override model name |
-| `HELEN_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | Comma-separated allowed CORS origins |
-| `HELEN_FRONTEND_URL` | No | `http://localhost:3000/Project-HELEN/` | Base URL used in verification/reset email links |
-| `HELEN_API_TOKEN` | No | – | Optional token for non-browser `/api/chat` clients; never expose it through Vite |
+| `DAEMON_MODEL` | No | provider default | Override model name |
+| `DAEMON_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:4173` | Comma-separated allowed CORS origins |
+| `DAEMON_FRONTEND_URL` | No | `http://localhost:3000/Project-HELEN/` | Base URL used in verification/reset email links |
+| `DAEMON_API_TOKEN` | No | – | Optional token for non-browser `/api/chat` clients; never expose it through Vite |
 | `PORT` | No | `3001` | Listening port |
 | `AUTH_DATA_FILE` | No | `.data/auth-store.json` | Persistent auth user/session/token store |
 | `AUTH_DEV_EMAIL_OUTBOX_FILE` | No | `.data/auth-email-outbox.jsonl` | Development/test email outbox adapter |
@@ -66,22 +66,41 @@ It proxies `POST /api/chat` to OpenAI/Anthropic and also serves authentication e
 | `AUTH_RESET_TTL_MS` | No | `1800000` | Reset token lifetime |
 | `AUTH_RATE_LIMIT_MAX` | No | `20` | Auth rate-limit requests per IP per endpoint |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | No | `60000` | Auth rate-limit window |
-| `HELEN_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
-| `HELEN_RATE_LIMIT_WINDOW_MS` | No | `60000` | Chat rate-limit window |
-| `HELEN_TRUST_PROXY` | No | _(unset)_ | Set to `1` when deployed behind a reverse proxy (Vercel, Fly.io, nginx, etc.) so the rate limiter reads the real client IP from `X-Forwarded-For` instead of the proxy's socket address. **Leave unset when the server faces the internet directly** to prevent IP-spoofing. |
+| `DAEMON_RATE_LIMIT` | No | `60` | Max requests per IP per minute |
+| `DAEMON_RATE_LIMIT_WINDOW_MS` | No | `60000` | Chat rate-limit window |
+| `DAEMON_TRUST_PROXY` | No | _(unset)_ | Set to `1` when deployed behind a reverse proxy (Vercel, Fly.io, nginx, etc.) so the rate limiter reads the real client IP from `X-Forwarded-For` instead of the proxy's socket address. **Leave unset when the server faces the internet directly** to prevent IP-spoofing. |
 
 Frontend variable (set at Vite build time):
 
 | Variable | Description |
 |----------|-------------|
-| `VITE_HELEN_API_URL` | Full URL to server (e.g. `https://your-server.example.com`). Omit to use local mode. |
-| `VITE_HELEN_AUTH_API_URL` | Optional explicit auth API URL; defaults to `VITE_HELEN_API_URL`. |
+| `VITE_DAEMON_API_URL` | Full URL to server (e.g. `https://your-server.example.com`). Omit to use local mode. |
+| `VITE_DAEMON_AUTH_API_URL` | Optional explicit auth API URL; defaults to `VITE_DAEMON_API_URL`. |
 
-> **CSP note:** When `VITE_HELEN_API_URL` is set, `vite.config.ts` automatically adds that
+> **CSP note:** When `VITE_DAEMON_API_URL` is set, `vite.config.ts` automatically adds that
 > server's origin to the `connect-src` directive of the built HTML's Content-Security-Policy,
 > allowing the browser to reach the backend.  If you patch or replace `dist/index.html` after
 > the build, ensure `connect-src` includes your server's origin — otherwise every API call
 > will be blocked by the browser with a CSP violation.
+
+### HELEN → Daemon migration compatibility
+
+New deployments should use the `DAEMON_*` and `VITE_DAEMON_*` names above. During the
+transition, the server accepts legacy `HELEN_*` configuration variables and the legacy
+`X-HELEN-API-TOKEN` header when their Daemon equivalents are absent. The frontend and CSP
+plugin likewise fall back to `VITE_HELEN_API_URL` and `VITE_HELEN_AUTH_API_URL`, so an
+existing build configuration keeps connecting while it is updated.
+
+Browser state is migrated once from `helen_messages`, `helen_conversations`,
+`helen_sidebar_open`, `helen_durable_memories`, and `helen_learning_data` to their
+`daemon_*` equivalents. Existing default `helen_session` and `helen_csrf` cookies are
+accepted once and reissued as `daemon_session` and `daemon_csrf`; custom
+`AUTH_COOKIE_NAME` and `AUTH_CSRF_COOKIE_NAME` values remain unchanged.
+
+`AUTH_DATA_FILE` and `AUTH_DEV_EMAIL_OUTBOX_FILE` are identity-neutral settings. Keep
+their existing values during the upgrade so user records, sessions, and development email
+outbox data remain available. The `/var/lib/daemon/` paths in `.env.example` are examples
+for new deployments, not automatic moves of existing `/var/lib/helen/` data.
 
 **GitHub Pages cannot host the server.** GitHub Pages is static-only. The server must be
 separately deployed to a platform that supports running Node.js (Render, Railway, Fly.io, etc.).
@@ -156,7 +175,7 @@ Vite is configured with `base: '/Project-HELEN/'` to match this URL.
 ## GitHub Pages limitations
 
 - **Static files only.** No server-side code or API keys.
-- The HELEN cloud API must be hosted elsewhere if desired.
+- The Daemon cloud API must be hosted elsewhere if desired.
 - All data (conversation history) is stored in the user's browser (`localStorage`).
 - No analytics dashboard, no server-side memory – these are not deployed.
 - `src/experimental/defself_l.py` is an experimental standalone prototype and is not used by Pages.
@@ -166,7 +185,7 @@ Vite is configured with `base: '/Project-HELEN/'` to match this URL.
 ## CORS policy
 
 The optional server (`server/index.ts`) allows cross-origin requests **only** from origins
-listed in `HELEN_ALLOWED_ORIGINS`. Requests from unknown origins are rejected for chat and auth.
+listed in `DAEMON_ALLOWED_ORIGINS`. Requests from unknown origins are rejected for chat and auth.
 Allowed preflight requests return `204`; disallowed preflight requests return `403`.
 
 ---
@@ -183,7 +202,7 @@ Allowed preflight requests return `204`; disallowed preflight requests return `4
 2. **API (separate Node host):**
    - Hosts `/api/chat` and `/api/auth/*`.
    - Enforces exact origin allow-list + CSRF token check for state-changing auth requests.
-   - Requires an active session for browser chat; `HELEN_API_TOKEN` is optional for non-browser clients.
+   - Requires an active session for browser chat; `DAEMON_API_TOKEN` is optional for non-browser clients.
    - Stores users/sessions/tokens in `AUTH_DATA_FILE` with atomic writes.
    - Hashes passwords with `scrypt`; never stores plaintext passwords.
    - Uses opaque, server-managed `HttpOnly` session cookies.
@@ -196,12 +215,12 @@ Allowed preflight requests return `204`; disallowed preflight requests return `4
 
 - Deploy `server/index.ts` to a Node host with HTTPS termination (Render/Railway/Fly/etc.).
 - Mount `AUTH_DATA_FILE` on durable, encrypted storage not checked into source control.
-- Configure `HELEN_ALLOWED_ORIGINS` to exact frontend origin(s), including `https://dmankv.github.io`.
-- Set `HELEN_FRONTEND_URL=https://dmankv.github.io/Project-HELEN/`.
+- Configure `DAEMON_ALLOWED_ORIGINS` to exact frontend origin(s), including `https://dmankv.github.io`.
+- Set `DAEMON_FRONTEND_URL=https://dmankv.github.io/Project-HELEN/`.
 - Configure `AUTH_REQUIRE_HTTPS=true` and `AUTH_SECURE_COOKIES=true`.
 - Replace development email outbox behavior with real provider integration for user-facing emails.
-- Build frontend with `VITE_HELEN_AUTH_API_URL`/`VITE_HELEN_API_URL` pointing to the deployed API.
-- Do not expose `HELEN_API_TOKEN` through a `VITE_` build variable; Vite variables are public in the static bundle.
+- Build frontend with `VITE_DAEMON_AUTH_API_URL`/`VITE_DAEMON_API_URL` pointing to the deployed API.
+- Do not expose `DAEMON_API_TOKEN` through a `VITE_` build variable; Vite variables are public in the static bundle.
 
 ### Threat model and limitations
 
@@ -229,9 +248,9 @@ To enable live evaluation, provision the following repository secrets in
 
 | Secret | Description |
 |--------|-------------|
-| `HELEN_EVAL_API_URL` | Base URL of the deployed server (e.g. `https://your-server.example.com`) |
-| `HELEN_EVAL_API_TOKEN` | Non-browser token sent as `X-HELEN-API-TOKEN` in evaluation requests |
-| `HELEN_EVAL_ORIGIN` | The allowed origin the evaluation runner presents to the server |
+| `DAEMON_EVAL_API_URL` | Base URL of the deployed server (e.g. `https://your-server.example.com`) |
+| `DAEMON_EVAL_API_TOKEN` | Non-browser token sent as `X-DAEMON-API-TOKEN` in evaluation requests |
+| `DAEMON_EVAL_ORIGIN` | The allowed origin the evaluation runner presents to the server |
 
 All three secrets must be set for live evaluation to run.
 
@@ -244,17 +263,17 @@ When connecting the frontend to a hosted backend, follow these steps **in order*
 1. Deploy `server/` to a platform that supports Node.js (Render, Railway, Fly.io, etc.).
 2. Set the server's runtime environment variables:
    - `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (depending on provider)
-   - `HELEN_ALLOWED_ORIGINS` — must include **exactly** the deployed GitHub Pages URL:
+   - `DAEMON_ALLOWED_ORIGINS` — must include **exactly** the deployed GitHub Pages URL:
      `https://dmankv.github.io`
-   - `AUTH_DATA_FILE`, `HELEN_FRONTEND_URL`, `AUTH_REQUIRE_HTTPS=true`, and
+   - `AUTH_DATA_FILE`, `DAEMON_FRONTEND_URL`, `AUTH_REQUIRE_HTTPS=true`, and
      `AUTH_SECURE_COOKIES=true`
-   - `HELEN_API_TOKEN` only when non-browser clients such as live evaluation need it
+   - `DAEMON_API_TOKEN` only when non-browser clients such as live evaluation need it
 3. Rebuild and redeploy the **frontend** with the build-time variables set:
-   - `VITE_HELEN_API_URL` — the server base URL from step 1
-   - `VITE_HELEN_AUTH_API_URL` — optional explicit auth API URL
-   - Do not set a `VITE_HELEN_API_TOKEN`; Vite values are readable by every browser user.
+   - `VITE_DAEMON_API_URL` — the server base URL from step 1
+   - `VITE_DAEMON_AUTH_API_URL` — optional explicit auth API URL
+   - Do not set a `VITE_DAEMON_API_TOKEN`; Vite values are readable by every browser user.
 
-> **Why a full rebuild is required:** `VITE_HELEN_API_URL` is baked into the `dist/` artifact
+> **Why a full rebuild is required:** `VITE_DAEMON_API_URL` is baked into the `dist/` artifact
 > at build time by the Vite CSP plugin, which patches `connect-src` in `dist/index.html` to
 > include the backend origin. If you deploy the existing `dist/` artifact and then set env vars
 > at runtime, the browser will block every API call with a CSP violation. A rebuild and redeploy

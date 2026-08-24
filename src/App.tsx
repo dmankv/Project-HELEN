@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import HelenInterface from './components/HelenInterface'
+import DaemonInterface from './components/DaemonInterface'
 import LoginView from './components/LoginView'
 import {
   getCurrentSession,
   hasAuthBackend,
   logoutUser,
-} from './services/helenAuthAPI'
-import type { AuthUser } from './services/helenAuthAPI'
+} from './services/daemonAuthAPI'
+import type { AuthUser } from './services/daemonAuthAPI'
 
 type Route =
   | 'chat'
@@ -115,7 +115,7 @@ function App() {
   }
 
   return (
-    <HelenInterface
+    <DaemonInterface
       currentUser={currentUser}
       onLoginClick={() => navigate('login')}
       onLogoutClick={currentUser ? handleLogout : undefined}

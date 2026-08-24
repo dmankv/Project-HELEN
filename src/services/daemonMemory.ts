@@ -1,3 +1,5 @@
+import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem } from './daemonStorageMigration'
+
 /**
  * Daemon Memory Service
  *
@@ -33,7 +35,7 @@ const DURABLE_KEY = 'daemon_durable_memories'
 
 function loadDurable(): DurableMemory[] {
   try {
-    const raw = localStorage.getItem(DURABLE_KEY)
+    const raw = loadMigratedStorageItem(DURABLE_KEY, LEGACY_STORAGE_KEYS.durableMemories)
     return raw ? (JSON.parse(raw) as DurableMemory[]) : []
   } catch {
     return []

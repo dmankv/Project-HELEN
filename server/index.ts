@@ -9,34 +9,44 @@ import { URL, fileURLToPath } from 'node:url'
 // Shared configuration
 // ---------------------------------------------------------------------------
 
+/**
+ * Prefer the Daemon configuration namespace while preserving existing HELEN_*
+ * deployment settings during the identity migration.
+ */
+function daemonEnv(suffix: string): string | undefined {
+  return process.env[`DAEMON_${suffix}`] ?? process.env[`HELEN_${suffix}`]
+}
+
 const PORT = Number(process.env.PORT ?? 3001)
-const PROVIDER = (process.env.HELEN_PROVIDER ?? 'openai').toLowerCase()
+const PROVIDER = (daemonEnv('PROVIDER') ?? 'openai').toLowerCase()
 const OPENAI_KEY = process.env.OPENAI_API_KEY ?? ''
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY ?? ''
-const HELEN_MODEL_DEFAULTS: Record<string, string> = {
+const DAEMON_MODEL_DEFAULTS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   anthropic: 'claude-3-haiku-20240307',
 }
-const MODEL = process.env.HELEN_MODEL ?? HELEN_MODEL_DEFAULTS[PROVIDER] ?? 'gpt-4o-mini'
-const API_TOKEN = process.env.HELEN_API_TOKEN ?? ''
+const MODEL = daemonEnv('MODEL') ?? DAEMON_MODEL_DEFAULTS[PROVIDER] ?? 'gpt-4o-mini'
+const API_TOKEN = daemonEnv('API_TOKEN') ?? ''
 
 const ALLOWED_ORIGINS = (
-  process.env.HELEN_ALLOWED_ORIGINS ??
+  daemonEnv('ALLOWED_ORIGINS') ??
   'http://localhost:3000,http://localhost:4173,https://dmankv.github.io'
 )
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
 
-const FRONTEND_BASE_URL = process.env.HELEN_FRONTEND_URL ?? 'http://localhost:3000/Project-HELEN/'
+const FRONTEND_BASE_URL = daemonEnv('FRONTEND_URL') ?? 'http://localhost:3000/Project-HELEN/'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const MAX_BODY_BYTES = 64 * 1024
 const MAX_RESPONSE_BODY_BYTES = 1024 * 1024
 const MAX_HISTORY_TURNS = 20
 
-const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? 'helen_session'
-const CSRF_COOKIE_NAME = process.env.AUTH_CSRF_COOKIE_NAME ?? 'helen_csrf'
+const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? 'daemon_session'
+const CSRF_COOKIE_NAME = process.env.AUTH_CSRF_COOKIE_NAME ?? 'daemon_csrf'
+const LEGACY_AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME === undefined ? 'helen_session' : undefined
+const LEGACY_CSRF_COOKIE_NAME = process.env.AUTH_CSRF_COOKIE_NAME === undefined ? 'helen_csrf' : undefined
 const AUTH_SESSION_TTL_MS = Number(process.env.AUTH_SESSION_TTL_MS ?? 1000 * 60 * 60 * 12)
 const AUTH_VERIFY_TTL_MS = Number(process.env.AUTH_VERIFY_TTL_MS ?? 1000 * 60 * 60 * 24)
 const AUTH_RESET_TTL_MS = Number(process.env.AUTH_RESET_TTL_MS ?? 1000 * 60 * 30)
@@ -50,8 +60,8 @@ const AUTH_SECURE_COOKIES =
 const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 20)
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000)
 
-const CHAT_RATE_LIMIT_MAX = Number(process.env.HELEN_RATE_LIMIT ?? 60)
-const CHAT_RATE_LIMIT_WINDOW_MS = Number(process.env.HELEN_RATE_LIMIT_WINDOW_MS ?? 60_000)
+const CHAT_RATE_LIMIT_MAX = Number(daemonEnv('RATE_LIMIT') ?? 60)
+const CHAT_RATE_LIMIT_WINDOW_MS = Number(daemonEnv('RATE_LIMIT_WINDOW_MS') ?? 60_000)
 
 const AUTH_DATA_FILE = process.env.AUTH_DATA_FILE
   ? path.resolve(process.env.AUTH_DATA_FILE)
@@ -61,7 +71,7 @@ const AUTH_OUTBOX_FILE = process.env.AUTH_DEV_EMAIL_OUTBOX_FILE
   : path.resolve(path.dirname(AUTH_DATA_FILE), 'auth-email-outbox.jsonl')
 
 /**
- * When HELEN_TRUST_PROXY=1 the server is assumed to sit behind a trusted
+ * When DAEMON_TRUST_PROXY=1 the server is assumed to sit behind a trusted
  * reverse proxy (nginx, Vercel, Fly.io, Render, etc.) that sets the
  * X-Forwarded-For header.  The rate limiter will use the first (left-most)
  * value from that header as the client IP instead of the socket address.
@@ -69,7 +79,7 @@ const AUTH_OUTBOX_FILE = process.env.AUTH_DEV_EMAIL_OUTBOX_FILE
  * Leave unset (the default) when the server is exposed directly to the
  * internet, to prevent IP-spoofing via a forged X-Forwarded-For header.
  */
-const TRUST_PROXY = process.env.HELEN_TRUST_PROXY === '1'
+const TRUST_PROXY = daemonEnv('TRUST_PROXY') === '1'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -234,6 +244,34 @@ function setCookies(res: http.ServerResponse, cookies: string[]): void {
   res.setHeader('Set-Cookie', cookies)
 }
 
+function currentOrLegacyCookie(
+  cookies: ParsedCookies,
+  currentName: string,
+  legacyName: string | undefined,
+): string | undefined {
+  return cookies[currentName] ?? (legacyName ? cookies[legacyName] : undefined)
+}
+
+function usesLegacyCookie(
+  cookies: ParsedCookies,
+  currentName: string,
+  legacyName: string | undefined,
+): boolean {
+  return Boolean(legacyName && !cookies[currentName] && cookies[legacyName])
+}
+
+function expireCookie(name: string | undefined, httpOnly: boolean): string[] {
+  if (!name) return []
+  return [
+    serializeCookie(name, '', {
+      httpOnly,
+      secure: AUTH_SECURE_COOKIES,
+      sameSite: 'Lax',
+      maxAgeSeconds: 0,
+    }),
+  ]
+}
+
 function parseJson<T>(body: string): T {
   return JSON.parse(body) as T
 }
@@ -254,7 +292,7 @@ function corsHeaders(origin: string | undefined): Record<string, string> {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Credentials': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-CSRF-Token, X-HELEN-API-TOKEN',
+      'Access-Control-Allow-Headers': 'Content-Type, X-CSRF-Token, X-DAEMON-API-TOKEN, X-HELEN-API-TOKEN',
       Vary: 'Origin',
     }
   }
@@ -266,7 +304,9 @@ function isAllowedOrigin(origin: string | undefined): boolean {
 }
 
 function hasValidApiToken(req: http.IncomingMessage): boolean {
-  const token = normalizeHeader(req.headers['x-helen-api-token']) ?? ''
+  const token = normalizeHeader(req.headers['x-daemon-api-token'])
+    || normalizeHeader(req.headers['x-helen-api-token'])
+    || ''
   return API_TOKEN.length > 0 && token.length > 0 && timingSafeEqualString(token, API_TOKEN)
 }
 
@@ -485,7 +525,7 @@ const authStore = new AuthStore(AUTH_DATA_FILE)
 const emailAdapter = new DevEmailAdapter()
 
 function hasActiveSession(cookies: ParsedCookies): boolean {
-  const sid = cookies[AUTH_COOKIE_NAME]
+  const sid = currentOrLegacyCookie(cookies, AUTH_COOKIE_NAME, LEGACY_AUTH_COOKIE_NAME)
   if (!sid) return false
   const session = authStore.findActiveSession(sid)
   return Boolean(session && authStore.findUserById(session.userId))
@@ -608,7 +648,7 @@ function requireHttpsForSensitive(
 }
 
 function ensureCsrfToken(cookies: ParsedCookies): string {
-  const existing = cookies[CSRF_COOKIE_NAME]
+  const existing = currentOrLegacyCookie(cookies, CSRF_COOKIE_NAME, LEGACY_CSRF_COOKIE_NAME)
   if (existing && existing.length >= 32 && existing.length <= 256) return existing
   return randomId(24)
 }
@@ -620,7 +660,7 @@ function requireCsrf(
   cookies: ParsedCookies,
 ): boolean {
   const sent = normalizeHeader(req.headers['x-csrf-token']) ?? ''
-  const cookie = cookies[CSRF_COOKIE_NAME] ?? ''
+  const cookie = currentOrLegacyCookie(cookies, CSRF_COOKIE_NAME, LEGACY_CSRF_COOKIE_NAME) ?? ''
   if (!sent || !cookie || sent.length > 256 || cookie.length > 256 || !timingSafeEqualString(sent, cookie)) {
     res.writeHead(403, { 'Content-Type': 'application/json', ...cors, ...securityHeaders() })
     res.end(JSON.stringify({ error: 'CSRF validation failed.' }))
@@ -637,7 +677,7 @@ function authRateKey(req: http.IncomingMessage, scope: string): string {
 // Chat provider adapter
 // ---------------------------------------------------------------------------
 
-const HELEN_SYSTEM_PROMPT = `You are HELEN, a helpful, honest, and thoughtful AI assistant.
+const DAEMON_SYSTEM_PROMPT = `You are Daemon, a helpful, honest, and thoughtful AI assistant.
 You are NOT a human. You are an AI. Never claim or imply otherwise.
 You are warm, curious, and direct. You acknowledge uncertainty.
 You refuse requests that are harmful, illegal, or unethical, and explain why briefly.`
@@ -705,7 +745,7 @@ async function callOpenAI(messages: ChatMessage[]): Promise<string> {
   if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not set')
   const payload = {
     model: MODEL,
-    messages: [{ role: 'system', content: HELEN_SYSTEM_PROMPT }, ...messages],
+    messages: [{ role: 'system', content: DAEMON_SYSTEM_PROMPT }, ...messages],
     max_tokens: 1024,
   }
   const result = await httpsPost(
@@ -722,7 +762,7 @@ async function callAnthropic(messages: ChatMessage[]): Promise<string> {
   if (!ANTHROPIC_KEY) throw new Error('ANTHROPIC_API_KEY is not set')
   const payload = {
     model: MODEL,
-    system: HELEN_SYSTEM_PROMPT,
+    system: DAEMON_SYSTEM_PROMPT,
     messages: messages.filter(m => m.role !== 'system'),
     max_tokens: 1024,
   }
@@ -831,6 +871,7 @@ const server = http.createServer(async (req, res) => {
   if (parsedUrl.pathname === '/api/auth/csrf' && method === 'GET') {
     if (!requireAllowedOrigin(req, res, cors)) return
     const csrfToken = ensureCsrfToken(cookies)
+    const migratingLegacyCsrf = usesLegacyCookie(cookies, CSRF_COOKIE_NAME, LEGACY_CSRF_COOKIE_NAME)
     setCookies(res, [
       serializeCookie(CSRF_COOKIE_NAME, csrfToken, {
         httpOnly: false,
@@ -838,6 +879,7 @@ const server = http.createServer(async (req, res) => {
         sameSite: 'Lax',
         maxAgeSeconds: Math.floor(AUTH_SESSION_TTL_MS / 1000),
       }),
+      ...(migratingLegacyCsrf ? expireCookie(LEGACY_CSRF_COOKIE_NAME, false) : []),
     ])
     res.writeHead(200, { 'Content-Type': 'application/json', ...defaultHeaders })
     res.end(JSON.stringify({ csrfToken }))
@@ -847,7 +889,9 @@ const server = http.createServer(async (req, res) => {
   if (parsedUrl.pathname === '/api/auth/session' && method === 'GET') {
     if (!requireAllowedOrigin(req, res, cors)) return
     const csrfToken = ensureCsrfToken(cookies)
-    const sid = cookies[AUTH_COOKIE_NAME]
+    const sid = currentOrLegacyCookie(cookies, AUTH_COOKIE_NAME, LEGACY_AUTH_COOKIE_NAME)
+    const migratingLegacySession = usesLegacyCookie(cookies, AUTH_COOKIE_NAME, LEGACY_AUTH_COOKIE_NAME)
+    const migratingLegacyCsrf = usesLegacyCookie(cookies, CSRF_COOKIE_NAME, LEGACY_CSRF_COOKIE_NAME)
     if (!sid) {
       setCookies(res, [
         serializeCookie(CSRF_COOKIE_NAME, csrfToken, {
@@ -856,6 +900,7 @@ const server = http.createServer(async (req, res) => {
           sameSite: 'Lax',
           maxAgeSeconds: Math.floor(AUTH_SESSION_TTL_MS / 1000),
         }),
+        ...(migratingLegacyCsrf ? expireCookie(LEGACY_CSRF_COOKIE_NAME, false) : []),
       ])
       res.writeHead(200, { 'Content-Type': 'application/json', ...defaultHeaders })
       res.end(JSON.stringify({ authenticated: false }))
@@ -866,31 +911,41 @@ const server = http.createServer(async (req, res) => {
     const user = session ? authStore.findUserById(session.userId) : null
     if (!session || !user) {
       setCookies(res, [
-        serializeCookie(AUTH_COOKIE_NAME, '', {
-          httpOnly: true,
-          secure: AUTH_SECURE_COOKIES,
-          sameSite: 'Lax',
-          maxAgeSeconds: 0,
-        }),
+        ...expireCookie(AUTH_COOKIE_NAME, true),
+        ...expireCookie(LEGACY_AUTH_COOKIE_NAME, true),
         serializeCookie(CSRF_COOKIE_NAME, csrfToken, {
           httpOnly: false,
           secure: AUTH_SECURE_COOKIES,
           sameSite: 'Lax',
           maxAgeSeconds: Math.floor(AUTH_SESSION_TTL_MS / 1000),
         }),
+        ...(migratingLegacyCsrf ? expireCookie(LEGACY_CSRF_COOKIE_NAME, false) : []),
       ])
       res.writeHead(200, { 'Content-Type': 'application/json', ...defaultHeaders })
       res.end(JSON.stringify({ authenticated: false }))
       return
     }
 
+    const sessionMaxAgeSeconds = Math.max(0, Math.floor((Date.parse(session.expiresAt) - Date.now()) / 1000))
     setCookies(res, [
+      ...(migratingLegacySession
+        ? [
+            serializeCookie(AUTH_COOKIE_NAME, session.id, {
+              httpOnly: true,
+              secure: AUTH_SECURE_COOKIES,
+              sameSite: 'Lax',
+              maxAgeSeconds: sessionMaxAgeSeconds,
+            }),
+            ...expireCookie(LEGACY_AUTH_COOKIE_NAME, true),
+          ]
+        : []),
       serializeCookie(CSRF_COOKIE_NAME, csrfToken, {
         httpOnly: false,
         secure: AUTH_SECURE_COOKIES,
         sameSite: 'Lax',
         maxAgeSeconds: Math.floor(AUTH_SESSION_TTL_MS / 1000),
       }),
+      ...(migratingLegacyCsrf ? expireCookie(LEGACY_CSRF_COOKIE_NAME, false) : []),
     ])
     res.writeHead(200, { 'Content-Type': 'application/json', ...defaultHeaders })
     res.end(JSON.stringify({ authenticated: true, user: toSafeUser(user) }))
@@ -972,7 +1027,7 @@ const server = http.createServer(async (req, res) => {
         authStore.createToken(user.id, 'verify-email', rawToken, AUTH_VERIFY_TTL_MS)
         emailAdapter.send({
           to: user.email,
-          subject: 'Verify your HELEN account',
+          subject: 'Verify your Daemon account',
           template: 'verify-email',
           token: rawToken,
           link: buildTokenLink('verify-email', rawToken),
@@ -1001,7 +1056,7 @@ const server = http.createServer(async (req, res) => {
           authStore.createToken(user.id, 'verify-email', rawToken, AUTH_VERIFY_TTL_MS)
           emailAdapter.send({
             to: user.email,
-            subject: 'Verify your HELEN account',
+            subject: 'Verify your Daemon account',
             template: 'verify-email',
             token: rawToken,
             link: buildTokenLink('verify-email', rawToken),
@@ -1073,6 +1128,8 @@ const server = http.createServer(async (req, res) => {
           sameSite: 'Lax',
           maxAgeSeconds: Math.floor(AUTH_SESSION_TTL_MS / 1000),
         }),
+        ...expireCookie(LEGACY_AUTH_COOKIE_NAME, true),
+        ...expireCookie(LEGACY_CSRF_COOKIE_NAME, false),
       ])
 
       res.writeHead(200, { 'Content-Type': 'application/json', ...defaultHeaders })
@@ -1081,22 +1138,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsedUrl.pathname === '/api/auth/logout') {
-      const sid = cookies[AUTH_COOKIE_NAME]
+      const sid = currentOrLegacyCookie(cookies, AUTH_COOKIE_NAME, LEGACY_AUTH_COOKIE_NAME)
       if (sid) authStore.revokeSession(sid)
       const csrfToken = randomId(24)
       setCookies(res, [
-        serializeCookie(AUTH_COOKIE_NAME, '', {
-          httpOnly: true,
-          secure: AUTH_SECURE_COOKIES,
-          sameSite: 'Lax',
-          maxAgeSeconds: 0,
-        }),
+        ...expireCookie(AUTH_COOKIE_NAME, true),
+        ...expireCookie(LEGACY_AUTH_COOKIE_NAME, true),
         serializeCookie(CSRF_COOKIE_NAME, csrfToken, {
           httpOnly: false,
           secure: AUTH_SECURE_COOKIES,
           sameSite: 'Lax',
           maxAgeSeconds: Math.floor(AUTH_SESSION_TTL_MS / 1000),
         }),
+        ...expireCookie(LEGACY_CSRF_COOKIE_NAME, false),
       ])
       res.writeHead(200, { 'Content-Type': 'application/json', ...defaultHeaders })
       res.end(JSON.stringify({ ok: true }))
@@ -1113,7 +1167,7 @@ const server = http.createServer(async (req, res) => {
           authStore.createToken(user.id, 'password-reset', rawToken, AUTH_RESET_TTL_MS)
           emailAdapter.send({
             to: user.email,
-            subject: 'Reset your HELEN password',
+            subject: 'Reset your Daemon password',
             template: 'password-reset',
             token: rawToken,
             link: buildTokenLink('reset-password', rawToken),
@@ -1156,12 +1210,8 @@ const server = http.createServer(async (req, res) => {
       authStore.revokeAllSessionsForUser(record.userId)
 
       setCookies(res, [
-        serializeCookie(AUTH_COOKIE_NAME, '', {
-          httpOnly: true,
-          secure: AUTH_SECURE_COOKIES,
-          sameSite: 'Lax',
-          maxAgeSeconds: 0,
-        }),
+        ...expireCookie(AUTH_COOKIE_NAME, true),
+        ...expireCookie(LEGACY_AUTH_COOKIE_NAME, true),
       ])
 
       res.writeHead(200, { 'Content-Type': 'application/json', ...defaultHeaders })
@@ -1178,21 +1228,21 @@ export default server
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   server.listen(PORT, () => {
-    console.log(`[helen-api] Listening on http://localhost:${PORT}`)
-    console.log(`[helen-api] Provider: ${PROVIDER}  Model: ${MODEL}`)
+    console.log(`[daemon-api] Listening on http://localhost:${PORT}`)
+    console.log(`[daemon-api] Provider: ${PROVIDER}  Model: ${MODEL}`)
   })
 
   function shutdown(signal: string): void {
-    console.log(`[helen-api] ${signal} received – shutting down gracefully`)
+    console.log(`[daemon-api] ${signal} received – shutting down gracefully`)
     server.close(err => {
       if (err) {
-        console.error('[helen-api] Error during shutdown:', err.message)
+        console.error('[daemon-api] Error during shutdown:', err.message)
         process.exit(1)
       }
       process.exit(0)
     })
     setTimeout(() => {
-      console.error('[helen-api] Shutdown timed out – forcing exit')
+      console.error('[daemon-api] Shutdown timed out – forcing exit')
       process.exit(1)
     }, 10_000).unref()
   }

@@ -3,6 +3,8 @@
  * Bridges TypeScript implementation with Python learning algorithm
  */
 
+import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem } from './daemonStorageMigration'
+
 export interface LearningMetadata {
   intent: string
   confidence: number
@@ -49,7 +51,7 @@ const MAX_HISTORY = 200 // bound history to keep UI responsive
 
 function loadFromStorage(): { history: InteractionRecord[]; stats: StoredStats } {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = loadMigratedStorageItem(STORAGE_KEY, LEGACY_STORAGE_KEYS.learningData)
     if (!raw) return { history: [], stats: { totalInteractions: 0, successfulResponses: 0, learningCycles: 0, policyVersion: 1 } }
     const parsed = JSON.parse(raw) as { history: StoredRecord[]; stats: StoredStats }
     const history: InteractionRecord[] = (parsed.history || []).map(r => ({

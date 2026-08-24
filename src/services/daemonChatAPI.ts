@@ -1,11 +1,11 @@
 /**
- * HELEN Chat API Client
+ * Daemon Chat API Client
  *
- * Calls the configured backend when VITE_HELEN_API_URL is set.
+ * Calls the configured backend when VITE_DAEMON_API_URL is set.
  * Falls back to null (caller uses local brain) when not configured or on error.
  *
  * Environment variable (frontend):
- *   VITE_HELEN_API_URL   e.g. https://api.example.com
+ *   VITE_DAEMON_API_URL   e.g. https://api.example.com
  *                        Leave unset to always use the local brain.
  */
 
@@ -28,7 +28,8 @@ export interface APIFailure {
   status?: number
 }
 
-const BASE_URL: string = import.meta.env.VITE_HELEN_API_URL ?? ''
+const env = (import.meta as { env?: Record<string, string> }).env ?? {}
+const BASE_URL: string = env.VITE_DAEMON_API_URL ?? env.VITE_HELEN_API_URL ?? ''
 
 const API_TIMEOUT_MS = 8_000
 
@@ -63,10 +64,10 @@ export async function callChatAPI(
 
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
-        console.error(`[helen-api] Auth error: ${res.status}`)
+        console.error(`[daemon-api] Auth error: ${res.status}`)
         return { reason: 'auth', status: res.status }
       }
-      console.warn(`[helen-api] Request failed: ${res.status}`)
+      console.warn(`[daemon-api] Request failed: ${res.status}`)
       return { reason: 'error', status: res.status }
     }
 
@@ -75,10 +76,10 @@ export async function callChatAPI(
   } catch (err) {
     clearTimeout(timeoutId)
     if ((err as Error).name === 'AbortError') {
-      console.warn('[helen-api] Request aborted')
+      console.warn('[daemon-api] Request aborted')
       return { reason: 'aborted' }
     }
-    console.warn('[helen-api] Request error:', (err as Error).message)
+    console.warn('[daemon-api] Request error:', (err as Error).message)
     return { reason: 'error' }
   }
 }

@@ -10,7 +10,11 @@ interface SessionResponse {
 }
 
 const env = (import.meta as { env?: Record<string, string> }).env ?? {}
-const BASE_URL = env.VITE_HELEN_AUTH_API_URL ?? env.VITE_HELEN_API_URL ?? ''
+const BASE_URL = env.VITE_DAEMON_AUTH_API_URL
+  ?? env.VITE_DAEMON_API_URL
+  ?? env.VITE_HELEN_AUTH_API_URL
+  ?? env.VITE_HELEN_API_URL
+  ?? ''
 
 let csrfTokenCache: string | null = null
 

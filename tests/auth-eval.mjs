@@ -20,7 +20,7 @@ function section(name) {
   console.log('\n── ' + name + ' ──')
 }
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'helen-auth-'))
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-auth-'))
 const authFile = path.join(tempRoot, 'auth-store.json')
 const outboxFile = path.join(tempRoot, 'email-outbox.jsonl')
 
@@ -29,7 +29,7 @@ process.env.AUTH_DATA_FILE = authFile
 process.env.AUTH_DEV_EMAIL_OUTBOX_FILE = outboxFile
 process.env.AUTH_REQUIRE_HTTPS = 'false'
 process.env.AUTH_SECURE_COOKIES = 'false'
-process.env.HELEN_ALLOWED_ORIGINS = 'http://localhost:3000'
+process.env.DAEMON_ALLOWED_ORIGINS = 'http://localhost:3000'
 process.env.AUTH_RATE_LIMIT_MAX = '5'
 process.env.AUTH_RATE_LIMIT_WINDOW_MS = '60000'
 process.env.OPENAI_API_KEY = ''
@@ -83,7 +83,7 @@ async function request(pathname, options = {}) {
 }
 
 async function csrfRequest(pathname, payload) {
-  const csrf = cookieJar.get('helen_csrf') ?? ''
+  const csrf = cookieJar.get('daemon_csrf') ?? ''
   return request(pathname, {
     method: 'POST',
     headers: {
@@ -122,7 +122,7 @@ section('CSRF + origin checks')
     headers: {
       Origin: 'http://evil.example.com',
       'Content-Type': 'application/json',
-      'X-CSRF-Token': cookieJar.get('helen_csrf') ?? '',
+      'X-CSRF-Token': cookieJar.get('daemon_csrf') ?? '',
       Cookie: cookieHeader(),
     },
     body: JSON.stringify({ email: 'a@example.com', password: 'Password123!', passwordConfirm: 'Password123!' }),
@@ -180,6 +180,19 @@ section('Login success/failure + session/logout')
 
   const session = await request('/api/auth/session')
   assert(session.res.status === 200 && session.body?.authenticated === true, 'session endpoint validates active login')
+
+  const legacySessionId = cookieJar.get('daemon_session') ?? ''
+  const legacyCsrfToken = cookieJar.get('daemon_csrf') ?? ''
+  cookieJar.delete('daemon_session')
+  cookieJar.delete('daemon_csrf')
+  cookieJar.set('helen_session', legacySessionId)
+  cookieJar.set('helen_csrf', legacyCsrfToken)
+  const migratedSession = await request('/api/auth/session')
+  assert(migratedSession.body?.authenticated === true, 'legacy session cookie remains authenticated during migration')
+  assert(cookieJar.get('daemon_session') === legacySessionId, 'legacy session is reissued under daemon cookie name')
+  assert(cookieJar.get('daemon_csrf') === legacyCsrfToken, 'legacy CSRF token is reissued under daemon cookie name')
+  assert(cookieJar.get('helen_session') === '', 'legacy session cookie is expired after migration')
+  assert(cookieJar.get('helen_csrf') === '', 'legacy CSRF cookie is expired after migration')
 
   const authenticatedChat = await request('/api/chat', {
     method: 'POST',

@@ -1,4 +1,4 @@
-# HELEN – Access Guide
+# Daemon – Access Guide
 
 ## Live site
 
@@ -17,7 +17,7 @@ npm ci --legacy-peer-deps
 npm run dev          # http://localhost:3000
 ```
 
-No environment variables are needed for local use. HELEN's built-in
+No environment variables are needed for local use. Daemon's built-in
 rule/template-based engine responds without any external API.
 
 CLI access (local terminal mode):
@@ -29,12 +29,12 @@ npm run cli -- --message "hello"
 
 ---
 
-## How HELEN works
+## How Daemon works
 
-The browser loads `index.html` → `src/main.tsx` → `src/App.tsx` → `src/components/HelenInterface.tsx`.
+The browser loads `index.html` → `src/main.tsx` → `src/App.tsx` → `src/components/DaemonInterface.tsx`.
 
-All chat responses are generated locally by `src/services/helenResponseBrain.ts`
-unless `VITE_HELEN_API_URL` is set at build time, in which case requests are forwarded to the
+All chat responses are generated locally by `src/services/daemonResponseBrain.ts`
+unless `VITE_DAEMON_API_URL` is set at build time, in which case requests are forwarded to the
 separately hosted `server/` API proxy.
 
 **The current response engine is rule/template-based**, not an LLM. Responses are pattern-matched
@@ -44,13 +44,13 @@ from a set of predefined templates. No seven-step AI pipeline is implemented in 
 
 ## Optional cloud API
 
-To connect HELEN to an LLM (OpenAI or Anthropic):
+To connect Daemon to an LLM (OpenAI or Anthropic):
 
 1. Deploy `server/index.ts` to a Node.js-capable host (not GitHub Pages).
 2. Set the required server environment variables (see `DEPLOYMENT.md`).
 3. Build the frontend with:
    ```bash
-   VITE_HELEN_API_URL=https://your-server.example.com \
+   VITE_DAEMON_API_URL=https://your-server.example.com \
    npm run build
    ```
 4. Deploy `dist/` to GitHub Pages (or any static host).
@@ -61,11 +61,11 @@ API keys are **only** stored on the server; they are never sent to the browser.
 
 ## Memory
 
-Conversation history is stored in browser `localStorage` by `src/services/helenMemory.ts`.
+Conversation history is stored in browser `localStorage` by `src/services/daemonMemory.ts`.
 It persists in that browser profile until cleared and is not synced to any server.
 
-The repository also contains separate CLI/prototype files (`bin/helen.sh`, `bin/helen-cli.py`,
-`src/cli/helen-cli.ts`, `src/experimental/defself_l.py`) that are not part of the deployed web app path.
+The repository also contains separate CLI/prototype files (`bin/daemon.sh`, `bin/daemon-cli.py`,
+`src/cli/daemon-cli.ts`, `src/experimental/defself_l.py`) that are not part of the deployed web app path.
 `src/experimental/defself_l.py` is an experimental standalone prototype.
 
 ---

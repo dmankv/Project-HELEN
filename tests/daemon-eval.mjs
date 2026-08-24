@@ -1,11 +1,11 @@
 /**
- * HELEN Evaluation Suite
+ * Daemon Evaluation Suite
  *
  * Two test categories:
  *   1. Static unit tests – no network, no API keys required.
- *      Run locally: node tests/helen-eval.mjs
- *   2. Live model tests – require HELEN_EVAL_LIVE=true and a configured backend.
- *      Skipped by default in CI unless HELEN_EVAL_LIVE=true is set.
+ *      Run locally: node tests/daemon-eval.mjs
+ *   2. Live model tests – require DAEMON_EVAL_LIVE=true and a configured backend.
+ *      Skipped by default in CI unless DAEMON_EVAL_LIVE=true is set.
  *
  * Assertions:
  *   - assert(condition, label) – hard assertion (exits non-zero on failure)
@@ -13,7 +13,7 @@
  *   - assertNotContains(text, phrase, label) – response must NOT contain phrase
  */
 
-import { detectMood, detectIntent, generateHumanLikeResponse } from '../src/services/helenResponseBrain.js'
+import { detectMood, detectIntent, generateHumanLikeResponse } from '../src/services/daemonResponseBrain.js'
 import {
   saveMemory,
   listMemories,
@@ -23,13 +23,13 @@ import {
   forgetAll,
   retrieveRelevant,
   formatMemoriesForContext,
-} from '../src/services/helenMemory.js'
+} from '../src/services/daemonMemory.js'
 import {
   SIDEBAR_OPEN_KEY,
   loadSidebarOpen,
   saveSidebarOpen,
 } from '../src/components/sidebarPreference.js'
-import learningSystem from '../src/services/helen_learning_integration.js'
+import learningSystem, { DaemonLearningSystem } from '../src/services/daemon_learning_integration.js'
 
 // ---------------------------------------------------------------------------
 // Mini test framework
@@ -143,12 +143,16 @@ const nameInputs = [
   'what do I call you?',
   'tell me your name',
   'your name',
+  'who are you?',
+  'what are you?',
+  'introduce yourself',
+  'WHAT IS YOUR NAME?',
 ]
 for (const q of nameInputs) {
   const intent = detectIntent(q)
   assert(intent === 'identity', `detectIntent("${q}") → identity`)
   const resp = generateHumanLikeResponse(q, { userMessage: q, mood: 'neutral', intent })
-  assertContains(resp, 'HELEN', `response to "${q}" names HELEN`)
+  assertContains(resp, 'My name is Daemon', `response to "${q}" identifies Daemon by name`)
   assertNotContains(resp, 'yes, i am a human', `response to "${q}" does not claim humanity`)
 }
 
@@ -157,7 +161,7 @@ const mixedMsg = 'good thank you, but what do I call you? your name?'
 const mixedIntent = detectIntent(mixedMsg)
 assert(mixedIntent === 'identity', 'mixed message intent → identity')
 const mixedResp = generateHumanLikeResponse(mixedMsg, { userMessage: mixedMsg, mood: 'neutral', intent: mixedIntent })
-assertContains(mixedResp, 'HELEN', 'mixed message response names HELEN')
+assertContains(mixedResp, 'My name is Daemon', 'mixed message response identifies Daemon by name')
 assertNotContains(mixedResp, 'could you give me a little more context', 'mixed message does not fall back to generic clarification')
 
 // ---------------------------------------------------------------------------
@@ -186,7 +190,7 @@ const gratIntent = detectIntent('Thanks for that')
 assert(gratIntent === 'acknowledge', 'gratitude → acknowledge intent')
 const gratResp = generateHumanLikeResponse('Thanks for that', { userMessage: 'Thanks for that', mood: 'neutral', intent: gratIntent })
 assert(gratResp.length > 0, 'non-empty acknowledge response')
-assertNotContains(gratResp, 'HELEN', 'acknowledge response does not unexpectedly introduce HELEN')
+assertNotContains(gratResp, 'Daemon', 'acknowledge response does not unexpectedly introduce Daemon')
 
 // ---------------------------------------------------------------------------
 // 4c. Follow-up conversation
@@ -242,7 +246,60 @@ forgetAll()
 assert(listMemories().length === 0, 'forgetAll clears all memories')
 
 // ---------------------------------------------------------------------------
-// 7. Memory: formatMemoriesForContext
+// 7. Legacy browser storage migration
+// ---------------------------------------------------------------------------
+section('Legacy browser storage migration')
+resetStore()
+
+const legacyMemories = [{
+  id: 'legacy-memory',
+  text: 'Legacy durable memory',
+  createdAt: '2026-08-24T00:00:00.000Z',
+}]
+_store.helen_durable_memories = JSON.stringify(legacyMemories)
+assert(listMemories()[0]?.text === 'Legacy durable memory', 'legacy durable memories remain readable')
+assert(_store.daemon_durable_memories === JSON.stringify(legacyMemories), 'legacy durable memories migrate to daemon key')
+assert(!_store.helen_durable_memories, 'legacy durable memory key is removed after migration')
+
+const legacyLearningData = {
+  history: [{
+    id: 'legacy-learning',
+    input: 'legacy input',
+    response: 'legacy response',
+    metadata: {
+      intent: 'answer',
+      confidence: 0.8,
+      ambiguity: 0.1,
+      memoryUsed: 0,
+      planComplexity: 'simple',
+      timestamp: '2026-08-24T00:00:00.000Z',
+    },
+  }],
+  stats: {
+    totalInteractions: 1,
+    successfulResponses: 0,
+    learningCycles: 0,
+    policyVersion: 1,
+  },
+}
+_store.helen_learning_data = JSON.stringify(legacyLearningData)
+const migratedLearningSystem = new DaemonLearningSystem()
+assert(migratedLearningSystem.getLearningInsights().totalInteractions === 1, 'legacy learning history remains readable')
+assert(_store.daemon_learning_data === JSON.stringify(legacyLearningData), 'legacy learning history migrates to daemon key')
+assert(!_store.helen_learning_data, 'legacy learning key is removed after migration')
+
+global.localStorage.setItem('helen_sidebar_open', 'false')
+assert(loadSidebarOpen() === false, 'legacy sidebar preference remains readable')
+assert(global.localStorage.getItem(SIDEBAR_OPEN_KEY) === 'false', 'legacy sidebar preference migrates to daemon key')
+assert(global.localStorage.getItem('helen_sidebar_open') === null, 'legacy sidebar key is removed after migration')
+
+global.localStorage.setItem(SIDEBAR_OPEN_KEY, 'true')
+global.localStorage.setItem('helen_sidebar_open', 'false')
+assert(loadSidebarOpen() === true, 'daemon sidebar preference takes precedence over legacy value')
+resetStore()
+
+// ---------------------------------------------------------------------------
+// 8. Memory: formatMemoriesForContext
 // ---------------------------------------------------------------------------
 section('Memory: format for context')
 forgetAll()
@@ -253,19 +310,19 @@ assertContains(formatted, 'Likes tea', 'contains first memory')
 assertContains(formatted, 'Works in finance', 'contains second memory')
 
 // ---------------------------------------------------------------------------
-// 8. Clear-chat semantics
+// 9. Clear-chat semantics
 // ---------------------------------------------------------------------------
 section('Clear-chat semantics')
 forgetAll()
 saveMemory('persistent memory')
 // Simulate clear-chat: removes conversation storage but NOT durable memories
-delete _store['helen_messages']
-delete _store['helen_conversations']
+delete _store['daemon_messages']
+delete _store['daemon_conversations']
 assert(listMemories().length === 1, 'durable memory survives clear-chat simulation')
 forgetAll()
 
 // ---------------------------------------------------------------------------
-// 9. Sidebar preference persistence helpers
+// 10. Sidebar preference persistence helpers
 // ---------------------------------------------------------------------------
 section('Sidebar preference persistence')
 resetStore()
@@ -299,7 +356,7 @@ global.localStorage.setItem = originalSetItem
 resetStore()
 
 // ---------------------------------------------------------------------------
-// 10. Learning integration helpers
+// 11. Learning integration helpers
 // ---------------------------------------------------------------------------
 section('Learning integration helpers')
 learningSystem.clearHistory()
@@ -321,7 +378,7 @@ assert(learningSystem.getPendingLearning().every(i => i.id !== rec.id), 'rated i
 learningSystem.clearHistory()
 
 // ---------------------------------------------------------------------------
-// 11. Refusal / safety patterns (static checks on response brain)
+// 12. Refusal / safety patterns (static checks on response brain)
 // ---------------------------------------------------------------------------
 section('Refusal / safety (static)')
 // The local brain should handle "identity" without claiming humanity
@@ -334,7 +391,7 @@ assert(identity2.length > 0, 'returns a non-empty identity response')
 assertNotContains(identity2, 'yes, i am human', 'does not play-act as human')
 
 // ---------------------------------------------------------------------------
-// 12. Repetition check
+// 13. Repetition check
 // ---------------------------------------------------------------------------
 section('Repetition check')
 const responses = new Set()
@@ -348,7 +405,7 @@ for (let i = 0; i < 6; i++) {
 assert(responses.size >= 2, 'greeting responses have variation (≥2 unique in 6 tries)')
 
 // ---------------------------------------------------------------------------
-// 13. CLI regression tests (spawn subprocess, non-interactive only)
+// 14. CLI regression tests (spawn subprocess, non-interactive only)
 // ---------------------------------------------------------------------------
 section('CLI regression – one-shot --message')
 {
@@ -357,7 +414,7 @@ section('CLI regression – one-shot --message')
   const url = await import('node:url')
   const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
   const repoRoot = path.resolve(__dirname, '..')
-  const cliPath = path.join(repoRoot, 'src', 'cli', 'helen-cli.ts')
+  const cliPath = path.join(repoRoot, 'src', 'cli', 'daemon-cli.ts')
 
   // --message one-shot
   const oneShot = spawnSync(
@@ -365,7 +422,7 @@ section('CLI regression – one-shot --message')
     { cwd: repoRoot, encoding: 'utf8', timeout: 30_000 },
   )
   assert(oneShot.status === 0, 'CLI --message exits 0')
-  assertContains(oneShot.stdout, 'HELEN', 'CLI --message response names HELEN')
+  assertContains(oneShot.stdout, 'Daemon', 'CLI --message response names Daemon')
 
   // stdin mode
   const stdinMode = spawnSync(
@@ -392,7 +449,7 @@ section('CLI regression – one-shot --message')
   assertContains(unknown.stderr, 'Unknown option', 'CLI unknown flag error message')
 
   // wrapper from non-root cwd (shell wrapper)
-  const shellWrapper = path.join(repoRoot, 'bin', 'helen.sh')
+  const shellWrapper = path.join(repoRoot, 'bin', 'daemon.sh')
   const wrapperResult = spawnSync(
     'bash', [shellWrapper, '--message', 'hello'],
     { cwd: '/tmp', encoding: 'utf8', timeout: 30_000 },
@@ -401,7 +458,7 @@ section('CLI regression – one-shot --message')
   assert(wrapperResult.stdout.trim().length > 0, 'shell wrapper from /tmp produces output')
 
   // Python wrapper from non-root cwd
-  const pyWrapper = path.join(repoRoot, 'bin', 'helen-cli.py')
+  const pyWrapper = path.join(repoRoot, 'bin', 'daemon-cli.py')
   const pyResult = spawnSync(
     'python3', [pyWrapper, '--message', 'hello'],
     { cwd: '/tmp', encoding: 'utf8', timeout: 30_000 },
@@ -411,20 +468,20 @@ section('CLI regression – one-shot --message')
 }
 
 // ---------------------------------------------------------------------------
-// 14. Live model tests (skipped unless HELEN_EVAL_LIVE=true)
+// 15. Live model tests (skipped unless DAEMON_EVAL_LIVE=true)
 // ---------------------------------------------------------------------------
 section('Live model tests')
-if (process.env.HELEN_EVAL_LIVE !== 'true') {
-  console.log('  ⏭️  Skipped (set HELEN_EVAL_LIVE=true to run)')
+if (process.env.DAEMON_EVAL_LIVE !== 'true') {
+  console.log('  ⏭️  Skipped (set DAEMON_EVAL_LIVE=true to run)')
 } else {
-  const apiUrl = process.env.VITE_HELEN_API_URL ?? 'http://localhost:3001'
+  const apiUrl = process.env.VITE_DAEMON_API_URL ?? 'http://localhost:3001'
   console.log('  Running live tests against ' + apiUrl)
 
   async function liveChatRequest(messages) {
-    const token = process.env.HELEN_EVAL_API_TOKEN
-    const origin = process.env.HELEN_EVAL_ORIGIN
+    const token = process.env.DAEMON_EVAL_API_TOKEN
+    const origin = process.env.DAEMON_EVAL_ORIGIN
     const headers = { 'Content-Type': 'application/json' }
-    if (token) headers['X-HELEN-API-TOKEN'] = token
+    if (token) headers['X-DAEMON-API-TOKEN'] = token
     if (origin) headers.Origin = origin
     const res = await fetch(apiUrl + '/api/chat', {
       method: 'POST',
@@ -454,7 +511,7 @@ if (process.env.HELEN_EVAL_LIVE !== 'true') {
 }
 
 // ---------------------------------------------------------------------------
-// 15. Sidebar source-level assertions
+// 16. Sidebar source-level assertions
 //     Checks that the TSX source reflects the correct conditional render logic
 //     without requiring a DOM environment.
 // ---------------------------------------------------------------------------
@@ -465,19 +522,19 @@ section('Sidebar source-level assertions')
   const url = await import('node:url')
   const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
   const src = fs.readFileSync(
-    path.resolve(__dirname, '../src/components/HelenInterface.tsx'),
+    path.resolve(__dirname, '../src/components/DaemonInterface.tsx'),
     'utf8',
   )
 
   // Sidebar nav must be conditionally rendered (wrapped in sidebarOpen check)
   assert(
-    src.includes('{sidebarOpen && (') && src.includes('<nav className="helen-sidebar"'),
+    src.includes('{sidebarOpen && (') && src.includes('<nav className="daemon-sidebar"'),
     'sidebar nav is conditionally rendered when sidebarOpen is true',
   )
 
   // No static always-rendered nav with both open/closed classes
   assert(
-    !src.includes("'helen-sidebar ' + (sidebarOpen"),
+    !src.includes("'daemon-sidebar ' + (sidebarOpen"),
     'sidebar does not use open/closed class toggling on always-rendered element',
   )
 
@@ -511,7 +568,7 @@ section('Sidebar source-level assertions')
 }
 
 // ---------------------------------------------------------------------------
-// 15. Auth route/source wiring assertions
+// 17. Auth route/source wiring assertions
 // ---------------------------------------------------------------------------
 section('Auth route/source wiring')
 {
@@ -521,12 +578,12 @@ section('Auth route/source wiring')
   const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
   const appSrc = fs.readFileSync(path.resolve(__dirname, '../src/App.tsx'), 'utf8')
   const loginSrc = fs.readFileSync(path.resolve(__dirname, '../src/components/LoginView.tsx'), 'utf8')
-  const apiSrc = fs.readFileSync(path.resolve(__dirname, '../src/services/helenAuthAPI.ts'), 'utf8')
+  const apiSrc = fs.readFileSync(path.resolve(__dirname, '../src/services/daemonAuthAPI.ts'), 'utf8')
 
   assert(appSrc.includes("'login'") && appSrc.includes("'register'") && appSrc.includes("'forgot-password'"), 'App includes auth hash routes')
   assert(appSrc.includes("'reset-password'") && appSrc.includes("'verify-email'"), 'App includes reset and verify hash routes')
   assert(appSrc.includes('getCurrentSession') && appSrc.includes('logoutUser'), 'App initializes auth state and supports logout')
-  assert(appSrc.includes('currentUser') && appSrc.includes('onLogoutClick'), 'App passes auth props to HelenInterface')
+  assert(appSrc.includes('currentUser') && appSrc.includes('onLogoutClick'), 'App passes auth props to DaemonInterface')
 
   assert(loginSrc.includes('autoComplete="email"'), 'LoginView email field has autocomplete=email')
   assert(loginSrc.includes('autoComplete="current-password"') || loginSrc.includes("'current-password'"), 'LoginView password field supports current-password autocomplete')

@@ -30,19 +30,30 @@ async function request(pathname, options = {}) {
 
 async function main() {
   console.log('\n── server api checks ──')
+  const serverEnv = {
+    ...process.env,
+    PORT: String(port),
+    HELEN_API_TOKEN: token,
+    HELEN_RATE_LIMIT: '1',
+    HELEN_RATE_LIMIT_WINDOW_MS: '3600000',
+    HELEN_TRUST_PROXY: '1',
+    HELEN_ALLOWED_ORIGINS: origin,
+    OPENAI_API_KEY: '',
+    ANTHROPIC_API_KEY: '',
+  }
+  for (const key of [
+    'DAEMON_API_TOKEN',
+    'DAEMON_RATE_LIMIT',
+    'DAEMON_RATE_LIMIT_WINDOW_MS',
+    'DAEMON_TRUST_PROXY',
+    'DAEMON_ALLOWED_ORIGINS',
+  ]) {
+    delete serverEnv[key]
+  }
+
   const server = spawn('npx', ['tsx', 'server/index.ts'], {
     cwd: repoRoot,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      HELEN_API_TOKEN: token,
-      HELEN_RATE_LIMIT: '1',
-      HELEN_RATE_LIMIT_WINDOW_MS: '3600000',
-      HELEN_TRUST_PROXY: '1',
-      HELEN_ALLOWED_ORIGINS: origin,
-      OPENAI_API_KEY: '',
-      ANTHROPIC_API_KEY: '',
-    },
+    env: serverEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })
@@ -90,6 +101,9 @@ async function main() {
       'Allowed preflight includes ACAO header',
       preflightAllowed.res.headers.get('access-control-allow-origin') === origin,
     )
+    const allowedHeaders = preflightAllowed.res.headers.get('access-control-allow-headers') ?? ''
+    check('Allowed preflight includes Daemon API token header', allowedHeaders.includes('X-DAEMON-API-TOKEN'))
+    check('Allowed preflight includes legacy API token header', allowedHeaders.includes('X-HELEN-API-TOKEN'))
 
     const preflightDenied = await request('/api/chat', {
       method: 'OPTIONS',
@@ -105,7 +119,7 @@ async function main() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-HELEN-API-TOKEN': token,
+        'X-DAEMON-API-TOKEN': token,
         'X-Forwarded-For': '10.0.0.3',
       },
       body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
@@ -128,7 +142,7 @@ async function main() {
       headers: {
         Origin: origin,
         'Content-Type': 'application/json',
-        'X-HELEN-API-TOKEN': token,
+        'X-DAEMON-API-TOKEN': token,
         'X-Forwarded-For': '10.0.0.5',
       },
       body: JSON.stringify({ nope: true }),
@@ -140,7 +154,7 @@ async function main() {
       headers: {
         Origin: origin,
         'Content-Type': 'application/json',
-        'X-HELEN-API-TOKEN': token,
+        'X-DAEMON-API-TOKEN': token,
         'X-Forwarded-For': '10.0.0.6',
       },
       body: JSON.stringify({
@@ -149,7 +163,7 @@ async function main() {
     })
     check('POST /api/chat oversized payload returns 400', oversized.res.status === 400)
 
-    const firstAuthorized = await request('/api/chat', {
+    const legacyHeaderAuthorized = await request('/api/chat', {
       method: 'POST',
       headers: {
         Origin: origin,
@@ -161,14 +175,14 @@ async function main() {
         messages: [{ role: 'user', content: 'hello world' }],
       }),
     })
-    check('First authorized request reaches provider layer (expected 502)', firstAuthorized.res.status === 502)
+    check('Legacy token header reaches provider layer (expected 502)', legacyHeaderAuthorized.res.status === 502)
 
     const secondAuthorized = await request('/api/chat', {
       method: 'POST',
       headers: {
         Origin: origin,
         'Content-Type': 'application/json',
-        'X-HELEN-API-TOKEN': token,
+        'X-DAEMON-API-TOKEN': token,
         'X-Forwarded-For': '10.0.0.7',
       },
       body: JSON.stringify({
