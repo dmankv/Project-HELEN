@@ -13,7 +13,7 @@
     "server:build": "npm run build --prefix server",
     "server:typecheck": "npm run typecheck --prefix server",
     "python:smoke": "python3 tests/defself_l_smoke.py",
-    "check:imports": "test -f src/main.tsx && test -f src/App.tsx && test -f src/components/HelenInterface.tsx && grep -q \"from './App'\" src/main.tsx && grep -q \"from './components/HelenInterface'\" src/App.tsx && grep -q \"helenResponseBrain\" src/components/HelenInterface.tsx && grep -q \"helenMemory\" src/components/HelenInterface.tsx && grep -q \"helenChatAPI\" src/components/HelenInterface.tsx",
+    "check:imports": "test -f src/main.tsx && test -f src/App.tsx && test -f src/components/HelenInterface.tsx && test -f src/components/LoginView.tsx && grep -q \"from './App'\" src/main.tsx && grep -q \"from './components/HelenInterface'\" src/App.tsx && grep -q \"from './components/LoginView'\" src/App.tsx && grep -q \"helenResponseBrain\" src/components/HelenInterface.tsx && grep -q \"helenMemory\" src/components/HelenInterface.tsx && grep -q \"helenChatAPI\" src/components/HelenInterface.tsx",
     "check:dist": "node tests/check-dist.mjs",
     "cli:typecheck": "node_modules/.bin/tsc --project tsconfig.cli.json --noEmit",
     "cli:smoke": "npx tsx tests/cli-smoke.mjs"
