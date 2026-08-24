@@ -218,6 +218,50 @@ email verification from a browser-only SDK — no custom backend is required for
 
 Authentication is then live at `https://dmankv.github.io/Project-HELEN/#/login`.
 
+#### Initial admin bootstrap + RBAC migration (required)
+
+Apply the migration below in Supabase Dashboard SQL Editor (or another provider-side privileged context):
+
+```
+supabase/migrations/20260824143000_managed_auth_rbac.sql
+```
+
+What it enforces:
+- `public.profiles` table keyed by `auth.users.id`.
+- `role` constrained to `user` or `admin`.
+- automatic profile creation trigger on new auth users.
+- RLS enabled with own-row read/update policies only.
+- trigger guard that blocks role/id changes unless the request context is `service_role`.
+
+Bootstrap first admin (provider-side SQL only; never from browser code):
+
+```sql
+update public.profiles
+set role = 'admin'
+where id = (
+  select id
+  from auth.users
+  where lower(email) = lower('<admin-email>')
+);
+```
+
+Revoke/demote admin:
+
+```sql
+update public.profiles
+set role = 'user'
+where id = (
+  select id
+  from auth.users
+  where lower(email) = lower('<user-email>')
+);
+```
+
+Emergency recovery (no admins left):
+1. Open Supabase Dashboard SQL Editor as project owner/admin.
+2. Verify the target account UUID/email in `auth.users`.
+3. Re-run the bootstrap promotion query above for a trusted operator account.
+
 #### What the anon key is and is not
 
 The Supabase anon key is the **publishable browser key**; it is intentionally embedded in the
@@ -236,6 +280,7 @@ When `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` are absent (e.g. no Actions
   VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY as GitHub Actions variables and redeploy."*
 - The submit button is disabled; no broken requests are made.
 - The local Daemon chat continues to work as normal.
+- The app does not expose admin write operations from the static client; it only renders account role status.
 
 #### CSP
 

@@ -161,7 +161,7 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 interface DaemonInterfaceProps {
   onLoginClick?: () => void
   onLogoutClick?: () => void
-  currentUser?: { email: string } | null
+  currentUser?: { email: string; role?: 'user' | 'admin' | null } | null
 }
 
 export default function DaemonInterface({
@@ -169,6 +169,11 @@ export default function DaemonInterface({
   onLogoutClick,
   currentUser = null,
 }: DaemonInterfaceProps = {}) {
+  const currentUserRoleLabel = currentUser?.role === 'admin'
+    ? 'Admin'
+    : currentUser?.role === 'user'
+      ? 'User'
+      : 'Unknown'
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -558,6 +563,12 @@ export default function DaemonInterface({
                 <>
                   <span className="account-label" aria-label={`Signed in as ${currentUser.email}`}>
                     {currentUser.email}
+                  </span>
+                  <span
+                    className="account-role-label"
+                    aria-label={`Account role ${currentUserRoleLabel.toLowerCase()}`}
+                  >
+                    Role: {currentUserRoleLabel}
                   </span>
                   {onLogoutClick && (
                     <button

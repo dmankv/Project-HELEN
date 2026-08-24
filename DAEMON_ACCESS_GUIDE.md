@@ -60,12 +60,25 @@ persistence, password reset, and email verification.
    - `VITE_SUPABASE_URL` — the project URL
    - `VITE_SUPABASE_ANON_KEY` — the anon key
 5. Trigger a new Pages build (push to `main`).
+6. In Supabase Dashboard SQL Editor, apply:
+   - `supabase/migrations/20260824143000_managed_auth_rbac.sql`
+7. Bootstrap first admin in Supabase SQL Editor (provider-side only):
+   ```sql
+   update public.profiles
+   set role = 'admin'
+   where id = (
+     select id from auth.users where lower(email) = lower('<admin-email>')
+   );
+   ```
 
 Authentication flows are then available at `#/login`, `#/register`, `#/forgot-password`,
 `#/reset-password`, and `#/verify-email`.
 
 > **Without these variables:** auth forms display a clear "not configured" notice. The
 > rest of the app (local Daemon chat) continues to work normally — no broken requests.
+>
+> The static client never stores privileged keys and cannot self-promote to admin; role changes
+> require provider-side privileged SQL.
 
 For full setup details see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
