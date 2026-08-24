@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src --ext ts,tsx",
+    "lint": "eslint src",
     "test": "npx tsx tests/helen-eval.mjs",
     "cli": "npx tsx src/cli/helen-cli.ts",
     "server:dev": "npm run dev --prefix server",
@@ -27,8 +27,10 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "eslint": "^9.39.5",
     "tsx": "^4.23.12",
     "typescript": "^5.0.0",
+    "typescript-eslint": "^8.67.0",
     "vite": "^8.2.2"
   }
 }
