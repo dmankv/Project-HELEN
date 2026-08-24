@@ -13,6 +13,27 @@ The frontend is always functional without a backend.
 
 ---
 
+## Production frontend path
+
+The authoritative frontend implementation follows this import chain:
+
+```
+index.html
+  └─ src/main.tsx
+       └─ src/App.tsx
+            └─ src/components/HelenInterface.tsx
+                 └─ src/services/helenResponseBrain.ts  (local rule engine)
+                 └─ src/services/helenChatAPI.ts        (optional cloud API)
+                 └─ src/services/helenMemory.ts         (browser localStorage)
+                 └─ src/styles/HelenInterface.css
+```
+
+Legacy duplicate frontend files (`ChatInterface.tsx`, `Message.tsx`, `MessageInput.tsx`,
+`MessageList.tsx`, `helen-standalone.html`, and their associated CSS) have been removed.
+`HelenInterface.tsx` is the sole active chat component.
+
+---
+
 ## Quick start (local)
 
 ```bash

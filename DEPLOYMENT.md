@@ -34,11 +34,8 @@ requests to that URL. The server at that URL must be the separately hosted `serv
 | File | Purpose |
 |------|---------|
 | `src/main.tsx` | React root (`ReactDOM.createRoot`) |
-| `src/App.tsx` | App shell, theme toggle |
+| `src/App.tsx` | App shell |
 | `src/components/HelenInterface.tsx` | Chat UI, message list, input |
-| `src/components/Message.tsx` | Single message bubble |
-| `src/components/MessageList.tsx` | Scrollable message list |
-| `src/components/MessageInput.tsx` | Text input area |
 | `src/services/helenResponseBrain.ts` | Rule/template-based local response engine |
 | `src/services/helenChatAPI.ts` | HTTP client for optional cloud API |
 | `src/services/helenMemory.ts` | In-browser session memory (localStorage) |
