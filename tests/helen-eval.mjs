@@ -476,6 +476,33 @@ section('Sidebar source-level assertions')
 }
 
 // ---------------------------------------------------------------------------
+// 15. Auth route/source wiring assertions
+// ---------------------------------------------------------------------------
+section('Auth route/source wiring')
+{
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const url = await import('node:url')
+  const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
+  const appSrc = fs.readFileSync(path.resolve(__dirname, '../src/App.tsx'), 'utf8')
+  const loginSrc = fs.readFileSync(path.resolve(__dirname, '../src/components/LoginView.tsx'), 'utf8')
+  const apiSrc = fs.readFileSync(path.resolve(__dirname, '../src/services/helenAuthAPI.ts'), 'utf8')
+
+  assert(appSrc.includes("'login'") && appSrc.includes("'register'") && appSrc.includes("'forgot-password'"), 'App includes auth hash routes')
+  assert(appSrc.includes("'reset-password'") && appSrc.includes("'verify-email'"), 'App includes reset and verify hash routes')
+  assert(appSrc.includes('getCurrentSession') && appSrc.includes('logoutUser'), 'App initializes auth state and supports logout')
+  assert(appSrc.includes('currentUser') && appSrc.includes('onLogoutClick'), 'App passes auth props to HelenInterface')
+
+  assert(loginSrc.includes('autoComplete="email"'), 'LoginView email field has autocomplete=email')
+  assert(loginSrc.includes('autoComplete="current-password"') || loginSrc.includes("'current-password'"), 'LoginView password field supports current-password autocomplete')
+  assert(loginSrc.includes('autoComplete="new-password"'), 'LoginView supports new-password autocomplete')
+  assert(loginSrc.includes('disabled={pending') || loginSrc.includes('disabled={pending || !hasBackend}'), 'LoginView exposes pending disabled states')
+
+  assert(apiSrc.includes("credentials: 'include'"), 'Auth API client uses cookie credentials mode')
+  assert(apiSrc.includes("'X-CSRF-Token'"), 'Auth API client sends CSRF header')
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log('\n════════════════════════════════════')

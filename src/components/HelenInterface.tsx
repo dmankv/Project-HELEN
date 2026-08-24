@@ -158,9 +158,15 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 
 interface HelenInterfaceProps {
   onLoginClick?: () => void
+  onLogoutClick?: () => void
+  currentUser?: { email: string } | null
 }
 
-export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {}) {
+export default function HelenInterface({
+  onLoginClick,
+  onLogoutClick,
+  currentUser = null,
+}: HelenInterfaceProps = {}) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages())
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -515,15 +521,34 @@ export default function HelenInterface({ onLoginClick }: HelenInterfaceProps = {
               Clear
             </button>
             {onLoginClick && (
-              <button
-                type="button"
-                className="login-btn"
-                onClick={onLoginClick}
-                aria-label="Log in"
-                title="Log in"
-              >
-                Log in
-              </button>
+              currentUser ? (
+                <>
+                  <span className="account-label" aria-label={`Signed in as ${currentUser.email}`}>
+                    {currentUser.email}
+                  </span>
+                  {onLogoutClick && (
+                    <button
+                      type="button"
+                      className="login-btn"
+                      onClick={onLogoutClick}
+                      aria-label="Log out"
+                      title="Log out"
+                    >
+                      Log out
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="login-btn"
+                  onClick={onLoginClick}
+                  aria-label="Log in"
+                  title="Log in"
+                >
+                  Log in
+                </button>
+              )
             )}
           </div>
         </header>

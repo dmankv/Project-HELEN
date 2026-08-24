@@ -30,6 +30,8 @@
 
 .login-title {
   flex: 1;
+  font-size: 1.1rem;
+  margin: 0;
 }
 
 .login-notice {
@@ -42,6 +44,13 @@
 .login-submitted-notice {
   font-size: 0.8rem;
   color: var(--color-accent, #7c7cff);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.login-error {
+  font-size: 0.8rem;
+  color: var(--color-error, #ef4444);
   margin: 0;
   line-height: 1.5;
 }
@@ -108,4 +117,10 @@
 
 .login-back-btn:hover {
   color: var(--color-text, #e8e8e8);
+}
+
+.login-links {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
