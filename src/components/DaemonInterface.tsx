@@ -1101,7 +1101,7 @@ export default function DaemonInterface({
                   <li>Confirm this build includes <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.</li>
                   <li>In Supabase Dashboard → Edge Functions → <code>daemon-chat</code>, confirm the function exists and the latest deploy succeeded.</li>
                   <li>Review the <code>daemon-chat</code> Edge Function logs for safe codes such as <code>RATE_LIMITED</code>, <code>PROVIDER_UNAVAILABLE</code>, or <code>FUNCTION_CONFIG_ERROR</code>.</li>
-                  <li>Verify Supabase function secrets: <code>OPENAI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>, <code>DAEMON_PROVIDER</code>, and optional <code>DAEMON_MODEL</code>.</li>
+                  <li>Verify Supabase function secrets: the AI provider API key (e.g. the key for OpenAI or Anthropic), <code>DAEMON_PROVIDER</code>, and optional <code>DAEMON_MODEL</code>.</li>
                   <li>GitHub Pages deploys the frontend only; it does not deploy the Supabase Edge Function or its secrets.</li>
                 </ul>
               </details>
