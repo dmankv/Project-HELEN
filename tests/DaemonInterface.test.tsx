@@ -494,9 +494,11 @@ describe('DaemonInterface', () => {
     expect(listConversations).not.toHaveBeenCalled()
   })
 
-  it('clear all chats keeps local deletion when cloud bulk delete returns false and reports sync error', async () => {
+  it.each([false, null])(
+    'clear all chats keeps local deletion when cloud bulk delete returns %s and reports sync error',
+    async (result) => {
     vi.mocked(isPersistenceConfigured).mockReturnValue(true)
-    vi.mocked(deleteAllCloudConversations).mockResolvedValue(false)
+    vi.mocked(deleteAllCloudConversations).mockResolvedValue(result as unknown as boolean)
 
     const conv = {
       id: 'conv-a',
@@ -516,31 +518,8 @@ describe('DaemonInterface', () => {
     expect(screen.queryByRole('button', { name: /Chat A/i })).not.toBeInTheDocument()
     await waitFor(() => expect(deleteAllCloudConversations).toHaveBeenCalledTimes(1), WAIT_OPTS)
     await waitFor(() => expect(screen.getByText('Sync error')).toBeInTheDocument(), WAIT_OPTS)
-  })
-
-  it('clear all chats keeps local deletion when cloud bulk delete returns null and reports sync error', async () => {
-    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
-    vi.mocked(deleteAllCloudConversations).mockResolvedValue(null as unknown as boolean)
-
-    const conv = {
-      id: 'conv-a',
-      title: 'Chat A',
-      messages: [{ id: 'msg-a', role: 'user', content: 'Message A', timestamp: '2026-08-25T01:00:00Z' }],
-      createdAt: '2026-08-25T01:00:00Z',
-    }
-    localStorage.setItem('daemon_conversations', JSON.stringify([conv]))
-    localStorage.setItem('daemon_active_conv_id', conv.id)
-    localStorage.setItem('daemon_messages', JSON.stringify(conv.messages))
-
-    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /Clear all chats/i }))
-
-    expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Chat A/i })).not.toBeInTheDocument()
-    await waitFor(() => expect(deleteAllCloudConversations).toHaveBeenCalledTimes(1), WAIT_OPTS)
-    await waitFor(() => expect(screen.getByText('Sync error')).toBeInTheDocument(), WAIT_OPTS)
-  })
+    },
+  )
 
   // ── Enter key ─────────────────────────────────────────────────────────────
 
