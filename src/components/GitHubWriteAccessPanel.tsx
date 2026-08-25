@@ -163,6 +163,8 @@ export default function GitHubWriteAccessPanel() {
     }
     setSelectedConnectionId(result.data.connection.id)
     setConnectionConsent(false)
+    setIssueConfirmed(false)
+    resetIssueAttempt()
     setStatus(`Connected ${result.data.connection.repositoryFullName} for issue creation only.`)
     await refresh()
   }

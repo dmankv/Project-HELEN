@@ -91,7 +91,10 @@ In Supabase Dashboard → SQL Editor, run in order:
 -- Migration 5: Private OAuth project-access state, tokens, and audit records
 -- supabase/migrations/20260825083000_supabase_project_access.sql
 
--- Migration 6: Private GitHub App issue-write state, connections, and audit records
+-- Migration 6: Adaptive profile tables and evidence
+-- supabase/migrations/20260825090000_adaptive_profiles.sql
+
+-- Migration 7: Private GitHub App issue-write state, connections, and audit records
 -- supabase/migrations/20260825162000_github_write_access.sql
 ```
 

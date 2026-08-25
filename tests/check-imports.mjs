@@ -127,6 +127,23 @@ for (const legacyFile of [
 // policies or FK constraints.
 // ---------------------------------------------------------------------------
 {
+  const isValidMigrationTimestamp = (ts) => {
+    if (!/^\d{14}$/.test(ts)) return false
+    const year = Number(ts.slice(0, 4))
+    const month = Number(ts.slice(4, 6))
+    const day = Number(ts.slice(6, 8))
+    const hour = Number(ts.slice(8, 10))
+    const minute = Number(ts.slice(10, 12))
+    const second = Number(ts.slice(12, 14))
+    const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+    return date.getUTCFullYear() === year
+      && date.getUTCMonth() + 1 === month
+      && date.getUTCDate() === day
+      && date.getUTCHours() === hour
+      && date.getUTCMinutes() === minute
+      && date.getUTCSeconds() === second
+  }
+
   const migrationsDir = path.join(root, 'supabase', 'migrations')
   if (fs.existsSync(migrationsDir)) {
     const migrationFiles = fs.readdirSync(migrationsDir)
@@ -136,8 +153,8 @@ for (const legacyFile of [
     let previousTimestamp = ''
     for (const file of migrationFiles) {
       const ts = file.slice(0, 14)
-      if (!/^\d{14}$/.test(ts)) {
-        console.error(`Migration check failed: filename "${file}" does not start with a 14-digit timestamp (YYYYMMDDHHmmss)`)
+      if (!isValidMigrationTimestamp(ts)) {
+        console.error(`Migration check failed: filename "${file}" must start with a valid timestamp prefix (YYYYMMDDHHmmss).`)
         process.exit(1)
       }
       if (ts === previousTimestamp) {
@@ -166,7 +183,7 @@ for (const legacyFile of [
       ).trim().split('\n').filter(Boolean)
       const baselineMax = baselineFiles.reduce((max, file) => {
         const ts = path.basename(file).slice(0, 14)
-        return /^\d{14}$/.test(ts) && ts > max ? ts : max
+        return isValidMigrationTimestamp(ts) && ts > max ? ts : max
       }, '0')
       const addedFiles = execFileSync(
         'git',

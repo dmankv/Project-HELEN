@@ -404,20 +404,20 @@ export default function DaemonInterface({
   // One-time local-to-cloud memory migration + cloud hydration when user first signs in
   useEffect(() => {
     if (!isPersistenceConfigured() || !currentUser) return
+    let active = true
     const localMems = listMemories()
+    setHydratedMemories([])
     void migrateLocalMemoriesToCloud(localMems)
     // Hydrate cloud data into local state non-disruptively
     void (async () => {
       const hydrated = await hydrateFromCloud()
-      if (!hydrated) return
-      if (hydrated.memories.length > 0) {
-        setHydratedMemories(hydrated.memories.map(memory => ({
-          id: memory.id,
-          text: memory.text,
-          tags: memory.tags,
-          createdAt: memory.created_at,
-        })))
-      }
+      if (!active || !hydrated) return
+      setHydratedMemories(hydrated.memories.map(memory => ({
+        id: memory.id,
+        text: memory.text,
+        tags: memory.tags,
+        createdAt: memory.created_at,
+      })))
       // Merge cloud conversations: add ones not already in local state.
       // Strategy: cloud data is additive — we never replace or clear local
       // conversations, and we never reset the currently-active conversation
@@ -449,6 +449,9 @@ export default function DaemonInterface({
         })
       }
     })()
+    return () => {
+      active = false
+    }
   }, [currentUser])
 
   // Load cloud personality preferences when the user signs in.
@@ -548,10 +551,20 @@ export default function DaemonInterface({
         // Mirror memory deletions to cloud
         if (isPersistenceConfigured() && currentUser) {
           if (memCmd.type === 'forget-last') {
+            setHydratedMemories(previous => {
+              if (previous.length === 0) return previous
+              const latest = previous.reduce((a, b) => (
+                new Date(a.createdAt).getTime() >= new Date(b.createdAt).getTime() ? a : b
+              ))
+              return previous.filter(memory => memory.id !== latest.id)
+            })
             void deleteLastCloudMemory()
           } else if (memCmd.type === 'forget-text') {
+            const needle = memCmd.payload.toLowerCase().trim()
+            setHydratedMemories(previous => previous.filter(memory => !memory.text.toLowerCase().includes(needle)))
             void deleteCloudMemoriesByText(memCmd.payload)
           } else if (memCmd.type === 'forget-all') {
+            setHydratedMemories([])
             void deleteAllCloudMemories()
           }
         }
