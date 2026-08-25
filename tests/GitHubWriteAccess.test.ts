@@ -1,5 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { generateKeyPairSync } from 'node:crypto'
+import ts from 'typescript'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockGetSession = vi.fn()
@@ -17,6 +19,26 @@ async function loadModule() {
   vi.stubEnv('VITE_SUPABASE_URL', 'https://gateway.supabase.co')
   vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'public-test-key')
   return import('../src/services/githubWriteAccess')
+}
+
+async function loadGitHubWriteServerModule() {
+  vi.resetModules()
+  const srcPath = path.join(
+    path.resolve(process.cwd()),
+    'supabase/functions/_shared/githubWriteAccess.ts',
+  )
+  const source = fs.readFileSync(srcPath, 'utf8').replace(
+    "import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'",
+    'const { createClient } = globalThis.__githubWriteTestDeps',
+  )
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`
+  return import(dataUrl)
 }
 
 describe('GitHub write browser client', () => {
@@ -195,121 +217,283 @@ describe('GitHub write server boundaries', () => {
   })
 })
 
-describe('createGitHubIssue behavioral boundaries', () => {
-  const sharedFunction = fs.readFileSync(
-    path.join(path.resolve(process.cwd()), 'supabase/functions/_shared/githubWriteAccess.ts'),
-    'utf8',
-  )
+describe('GitHub write issue creation behavior', () => {
+  type Connection = {
+    id: string
+    user_id: string
+    github_user_id: string
+    installation_id: string
+    repository_id: string
+    repository_full_name: string
+    allowed_actions: string[]
+    authorization_expires_at: string
+    connected_at: string
+    last_used_at: string | null
+  }
 
-  it('scopes connection lookup to the requesting user (ownership validation)', () => {
-    // getOwnedGitHubConnection must filter by both connection id and user_id so one
-    // user cannot access another user's connection even if they know the UUID.
-    const fn = sharedFunction.slice(sharedFunction.indexOf('async function getOwnedGitHubConnection('))
-    const body = fn.slice(0, fn.indexOf('\n}') + 2)
-    expect(body).toContain(".eq('user_id', userId)")
-    expect(body).toContain(".eq('id', connectionId)")
-    // Connection ownership error must not leak whether the row exists.
-    expect(body).toContain("'CONNECTION_NOT_FOUND'")
+  type Idempotency = {
+    user_id: string
+    connection_id: string
+    idempotency_key: string
+    request_hash: string
+    status: 'pending' | 'succeeded' | 'unknown'
+    issue_number: number | null
+    issue_url: string | null
+  }
+
+  class MockService {
+    connection: Connection
+    idempotency = new Map<string, Idempotency>()
+    auditActions: string[] = []
+    concurrentClaim = false
+
+    constructor(connection: Connection) {
+      this.connection = { ...connection }
+    }
+
+    private key(userId: string, connectionId: string, idempotencyKey: string): string {
+      return `${userId}:${connectionId}:${idempotencyKey}`
+    }
+
+    rpc() {
+      return Promise.resolve({ data: [{ allowed: true }], error: null })
+    }
+
+    from(table: string) {
+      const state = {
+        filters: new Map<string, unknown>(),
+        updatePayload: null as Record<string, unknown> | null,
+      }
+      const execute = async () => {
+        if (table === 'github_write_audit') {
+          return { error: null }
+        }
+        if (table === 'github_write_connections' && state.updatePayload) {
+          if (typeof state.updatePayload.repository_full_name === 'string') {
+            this.connection.repository_full_name = state.updatePayload.repository_full_name
+          }
+          if (typeof state.updatePayload.last_used_at === 'string') {
+            this.connection.last_used_at = state.updatePayload.last_used_at
+          }
+          return { error: null }
+        }
+        if (table === 'github_write_idempotency' && state.updatePayload) {
+          const key = this.key(
+            String(state.filters.get('user_id')),
+            String(state.filters.get('connection_id')),
+            String(state.filters.get('idempotency_key')),
+          )
+          const current = this.idempotency.get(key)
+          if (current) {
+            this.idempotency.set(key, {
+              ...current,
+              ...state.updatePayload,
+            } as Idempotency)
+          }
+          return { error: null }
+        }
+        return { error: null }
+      }
+
+      const builder = {
+        select: () => builder,
+        insert: (payload: Record<string, unknown>) => {
+          if (table === 'github_write_audit') {
+            this.auditActions.push(String(payload.action ?? ''))
+            return Promise.resolve({ error: null })
+          }
+          if (table === 'github_write_idempotency') {
+            const userId = String(payload.user_id)
+            const connectionId = String(payload.connection_id)
+            const idempotencyKey = String(payload.idempotency_key)
+            const key = this.key(userId, connectionId, idempotencyKey)
+            if (this.concurrentClaim && !this.idempotency.has(key)) {
+              this.idempotency.set(key, {
+                user_id: userId,
+                connection_id: connectionId,
+                idempotency_key: idempotencyKey,
+                request_hash: String(payload.request_hash),
+                status: 'succeeded',
+                issue_number: 44,
+                issue_url: `https://github.com/${this.connection.repository_full_name}/issues/44`,
+              })
+              return Promise.resolve({ error: { code: '23505' } })
+            }
+            this.idempotency.set(key, {
+              user_id: userId,
+              connection_id: connectionId,
+              idempotency_key: idempotencyKey,
+              request_hash: String(payload.request_hash),
+              status: String(payload.status) as Idempotency['status'],
+              issue_number: null,
+              issue_url: null,
+            })
+            return Promise.resolve({ error: null })
+          }
+          return Promise.resolve({ error: null })
+        },
+        delete: () => builder,
+        update: (payload: Record<string, unknown>) => {
+          state.updatePayload = payload
+          return builder
+        },
+        eq: (column: string, value: unknown) => {
+          state.filters.set(column, value)
+          return builder
+        },
+        lt: () => builder,
+        gt: () => builder,
+        maybeSingle: async () => {
+          if (table === 'github_write_connections') {
+            const id = state.filters.get('id')
+            const userId = state.filters.get('user_id')
+            if (id === this.connection.id && userId === this.connection.user_id) {
+              return { data: this.connection, error: null }
+            }
+            return { data: null, error: null }
+          }
+          if (table === 'github_write_idempotency') {
+            const key = this.key(
+              String(state.filters.get('user_id')),
+              String(state.filters.get('connection_id')),
+              String(state.filters.get('idempotency_key')),
+            )
+            return { data: this.idempotency.get(key) ?? null, error: null }
+          }
+          return { data: null, error: null }
+        },
+        then: (resolve: (value: { error: null }) => unknown, reject?: (reason: unknown) => unknown) =>
+          execute().then(resolve, reject),
+      }
+      return builder
+    }
+  }
+
+  const connection: Connection = {
+    id: '00000000-0000-4000-8000-000000000111',
+    user_id: '00000000-0000-4000-8000-000000000999',
+    github_user_id: '123',
+    installation_id: '456',
+    repository_id: '789',
+    repository_full_name: 'dmankv/Project-HELEN',
+    allowed_actions: ['create_issue'],
+    authorization_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    connected_at: '2026-08-25T00:00:00.000Z',
+    last_used_at: null,
+  }
+
+  function issueRequest() {
+    return {
+      connectionId: connection.id,
+      idempotencyKey: '00000000-0000-4000-8000-000000000123',
+      title: 'Behavioral test issue',
+      body: 'Body',
+      confirmRepository: 'dmankv/Project-HELEN',
+      confirmed: true,
+      confirmation: 'CREATE_GITHUB_ISSUE',
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    const encryptionKey = Buffer.alloc(32, 7).toString('base64url')
+    const privateKey = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      .privateKey
+      .export({ type: 'pkcs8', format: 'pem' })
+      .toString()
+    vi.stubGlobal('Deno', {
+      env: {
+        get: (key: string) => ({
+          SUPABASE_URL: 'https://project-helen.supabase.co',
+          SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+          SUPABASE_ANON_KEY: 'anon-key',
+          GITHUB_WRITE_ACCESS_ENCRYPTION_KEY: encryptionKey,
+          GITHUB_APP_ID: '1',
+          GITHUB_APP_CLIENT_ID: 'client-id',
+          GITHUB_APP_CLIENT_SECRET: 'client-secret',
+          GITHUB_APP_PRIVATE_KEY: privateKey,
+        }[key] ?? ''),
+      },
+    })
+    vi.stubGlobal('__githubWriteTestDeps', { createClient: vi.fn() })
+    vi.stubGlobal('fetch', vi.fn())
   })
 
-  it('rejects expired authorizations before any write operation (expiry validation)', () => {
-    // requireCurrentGitHubAuthorization must compare the stored expiry against
-    // the current time and throw REPOSITORY_AUTHORIZATION_EXPIRED when elapsed.
-    const fn = sharedFunction.slice(sharedFunction.indexOf('function requireCurrentGitHubAuthorization('))
-    const body = fn.slice(0, fn.indexOf('\n}') + 2)
-    expect(body).toContain('Date.parse(connection.authorization_expires_at)')
-    expect(body).toContain('Date.now()')
-    expect(body).toContain("'REPOSITORY_AUTHORIZATION_EXPIRED'")
-    // The check must be a strict <=, not just <, so tokens expiring at this exact
-    // millisecond are also rejected.
-    expect(body).toMatch(/expiresAt\s*<=\s*Date\.now\(\)/)
-    // createGitHubIssue must call requireCurrentGitHubAuthorization before any
-    // database write or GitHub API call.
-    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
-    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
-    const authCheckPos = createBody.indexOf('requireCurrentGitHubAuthorization(connection)')
-    const firstWritePos = Math.min(
-      createBody.includes('enforceRateLimit') ? createBody.indexOf('enforceRateLimit') : Infinity,
-      createBody.includes('claimIdempotency') ? createBody.indexOf('claimIdempotency') : Infinity,
-      createBody.includes('mintInstallationToken') ? createBody.indexOf('mintInstallationToken') : Infinity,
-    )
-    expect(authCheckPos).toBeGreaterThanOrEqual(0)
-    expect(authCheckPos).toBeLessThan(firstWritePos)
+  it('enforces ownership and current authorization before creating issues', async () => {
+    const { createGitHubIssue } = await loadGitHubWriteServerModule()
+    const unauthorizedService = new MockService(connection)
+
+    await expect(createGitHubIssue(unauthorizedService, 'other-user', issueRequest()))
+      .rejects.toMatchObject({ code: 'CONNECTION_NOT_FOUND' })
+
+    const expiredService = new MockService({
+      ...connection,
+      authorization_expires_at: new Date(Date.now() - 60_000).toISOString(),
+    })
+    await expect(createGitHubIssue(expiredService, connection.user_id, issueRequest()))
+      .rejects.toMatchObject({ code: 'REPOSITORY_AUTHORIZATION_EXPIRED' })
   })
 
-  it('re-verifies repository identity via installation token, not only the cached name (repository re-verification)', () => {
-    // verifyInstallationRepository must call the GitHub API using the installation
-    // token to confirm the repository ID matches, then compare the live full_name
-    // against confirmRepository rather than trusting the cached value alone.
-    const fn = sharedFunction.slice(sharedFunction.indexOf('async function verifyInstallationRepository('))
-    const body = fn.slice(0, fn.indexOf('\n}') + 2)
-    expect(body).toContain('/repositories/')
-    expect(body).toContain('repository.full_name')
-    expect(body).toContain('repository.id')
-    // The live ID must be compared to the stored repositoryId, not accepted blindly.
-    expect(body).toContain('!== repositoryId')
+  it('re-verifies the repository before issue creation', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'installation-token-1234' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: Number(connection.repository_id),
+        full_name: 'dmankv/Other-Repo',
+      }), { status: 200 }))
+    const { createGitHubIssue } = await loadGitHubWriteServerModule()
+    const service = new MockService(connection)
 
-    // createGitHubIssue must call verifyInstallationRepository *after* minting the
-    // token and then compare the returned name against confirmRepository.
-    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
-    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
-    const mintPos = createBody.indexOf('mintInstallationToken(connection)')
-    const verifyPos = createBody.indexOf('verifyInstallationRepository(service, connection, installationToken)')
-    const repoCheckPos = createBody.indexOf('repositoryFullName !== request.confirmRepository')
-    expect(mintPos).toBeGreaterThanOrEqual(0)
-    expect(verifyPos).toBeGreaterThan(mintPos)
-    expect(repoCheckPos).toBeGreaterThan(verifyPos)
+    await expect(createGitHubIssue(service, connection.user_id, issueRequest()))
+      .rejects.toMatchObject({ code: 'WRITE_NOT_CONFIRMED' })
   })
 
-  it('handles concurrent idempotency claims without double-submitting (idempotency)', () => {
-    // claimIdempotency must attempt an insert; when a conflict occurs (another
-    // concurrent request already inserted the same key) it reads back the existing
-    // record and returns it as a previous result rather than retrying the issue
-    // creation.  A null previous means this caller won the race and should proceed.
-    const fn = sharedFunction.slice(sharedFunction.indexOf('async function claimIdempotency('))
-    const body = fn.slice(0, fn.indexOf('\n}') + 2)
-    expect(body).toContain(".insert(")
-    expect(body).toContain('findIdempotency(')
-    expect(body).toContain('previous: null')
-    expect(body).toContain('previous: idempotencyResult(')
+  it('returns the concurrent idempotency winner result', async () => {
+    const { createGitHubIssue } = await loadGitHubWriteServerModule()
+    const service = new MockService(connection)
+    service.concurrentClaim = true
 
-    // createGitHubIssue must short-circuit when the claim returns a previous result
-    // (the racing request already completed) without calling mintInstallationToken.
-    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
-    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
-    const claimPos = createBody.indexOf('claimIdempotency(')
-    const previousCheckPos = createBody.indexOf('if (claim.previous) return claim.previous')
-    const mintPos = createBody.indexOf('mintInstallationToken(connection)')
-    expect(previousCheckPos).toBeGreaterThan(claimPos)
-    expect(mintPos).toBeGreaterThan(previousCheckPos)
+    const issue = await createGitHubIssue(service, connection.user_id, issueRequest())
+
+    expect(issue).toEqual({
+      issueNumber: 44,
+      issueUrl: 'https://github.com/dmankv/Project-HELEN/issues/44',
+    })
   })
 
-  it('marks idempotency as unknown on failure and never as a terminal error (success/unknown transitions)', () => {
-    // A failed issue creation must leave the idempotency record as 'unknown' so that
-    // a retry can detect the ambiguous state and surface IDEMPOTENCY_CONFLICT rather
-    // than silently re-submitting.  The record must never be deleted or left as
-    // 'pending' after an error.
-    const fn = sharedFunction.slice(sharedFunction.indexOf('async function markIdempotencyUnknown('))
-    const body = fn.slice(0, fn.indexOf('\n}') + 2)
-    expect(body).toContain("status: 'unknown'")
-    expect(body).not.toContain("status: 'failed'")
+  it('stores succeeded on success and unknown on downstream failure', async () => {
+    const { createGitHubIssue } = await loadGitHubWriteServerModule()
+    const successService = new MockService(connection)
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'installation-token-1234' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: Number(connection.repository_id),
+        full_name: connection.repository_full_name,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        number: 51,
+        html_url: 'https://github.com/dmankv/Project-HELEN/issues/51',
+      }), { status: 201 }))
 
-    // completeIdempotency must write 'succeeded' plus the real issue metadata.
-    const completeFn = sharedFunction.slice(sharedFunction.indexOf('async function completeIdempotency('))
-    const completeBody = completeFn.slice(0, completeFn.indexOf('\n}') + 2)
-    expect(completeBody).toContain("status: 'succeeded'")
-    expect(completeBody).toContain('issue.issueNumber')
-    expect(completeBody).toContain('issue.issueUrl')
+    const successIssue = await createGitHubIssue(successService, connection.user_id, issueRequest())
+    expect(successIssue.issueNumber).toBe(51)
+    expect(Array.from(successService.idempotency.values())[0]?.status).toBe('succeeded')
 
-    // createGitHubIssue catch block must call markIdempotencyUnknown, not delete.
-    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
-    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
-    const catchPos = createBody.indexOf('} catch (error) {')
-    const unknownCallPos = createBody.indexOf('markIdempotencyUnknown(', catchPos)
-    expect(catchPos).toBeGreaterThanOrEqual(0)
-    expect(unknownCallPos).toBeGreaterThan(catchPos)
-    // The catch block must not call .delete() on the idempotency record.
-    const catchBody = createBody.slice(catchPos)
-    expect(catchBody).not.toMatch(/from\('github_write_idempotency'\)[\s\S]*?\.delete\(\)/)
+    vi.mocked(fetch).mockReset()
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'installation-token-1234' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: Number(connection.repository_id),
+        full_name: connection.repository_full_name,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+
+    const failureService = new MockService(connection)
+    await expect(createGitHubIssue(failureService, connection.user_id, {
+      ...issueRequest(),
+      idempotencyKey: '00000000-0000-4000-8000-000000000124',
+    })).rejects.toMatchObject({ code: 'GITHUB_UNAVAILABLE' })
+    const failureRecord = Array.from(failureService.idempotency.values())[0]
+    expect(failureRecord?.status).toBe('unknown')
   })
 })
