@@ -80,10 +80,7 @@ export function listMemories(): DurableMemory[] {
   return loadDurable().slice().reverse()
 }
 
-/** Remove a memory by its id. Returns true if removed.
- * @todo Not yet called from any UI path. Reserved for a future "manage memories" panel
- *       that lets users delete individual entries by id.
- */
+/** Remove a memory by its id. Returns true if removed. */
 export function forgetById(id: string): boolean {
   const existing = loadDurable()
   const filtered = existing.filter(m => m.id !== id)

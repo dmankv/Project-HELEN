@@ -191,6 +191,15 @@ See `DEPLOYMENT.md` for full details.
 | `forget all memories` | Erase all durable memories |
 | **Clear** button | Clears conversation context only — durable memories are preserved |
 
+The sidebar’s **Manage memories** panel lists durable memories and lets users
+forget individual entries. When cloud persistence is configured for a signed-in
+user, those individual deletions are mirrored to that user’s cloud data.
+
+The sidebar’s **Feedback & data** panel lets users review locally stored
+responses, rate them with an optional note, and download their local learning
+data as JSON. The download stays in the browser; it is not sent to another
+service.
+
 ---
 
 ## Tests

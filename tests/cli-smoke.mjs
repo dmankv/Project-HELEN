@@ -19,6 +19,7 @@
  *   - shell wrapper exit-code propagation
  *   - Python wrapper from a non-root cwd (conditional on python3 availability)
  *   - Python wrapper exit-code propagation
+ *   - feedback, analytics, and JSON export commands
  */
 
 import { spawnSync } from 'node:child_process'
@@ -62,6 +63,14 @@ function run(cmd, args, opts = {}) {
   return result
 }
 
+function parseJson(value) {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
 // Detect whether python3 is available.
 const python3Available = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0
 
@@ -92,6 +101,28 @@ check('one-line stdin produces output', stdin.stdout.trim().length > 0, stdin)
 const empty = run('npx', ['tsx', cliPath], { cwd: repoRoot, input: '' })
 check('empty stdin exits 0', empty.status === 0, empty)
 check('empty stdin does not hang (completes within timeout)', empty.signal === null, empty)
+
+// ── Session data commands ───────────────────────────────────────────────────
+console.log('\n  [session data commands]')
+
+const feedbackFlow = run('npx', ['tsx', cliPath], {
+  cwd: repoRoot,
+  input: 'hello\nfeedback: helpful Clear answer\nanalytics\nexport\n',
+})
+check('piped feedback flow exits 0', feedbackFlow.status === 0, feedbackFlow)
+check('feedback command records a helpful rating', feedbackFlow.stdout.includes('Recorded helpful feedback'), feedbackFlow)
+check('analytics reports a helpful rate', feedbackFlow.stdout.includes('Helpful rate: 100%'), feedbackFlow)
+check('feedback flow export includes interactions', feedbackFlow.stdout.includes('"interactions"'), feedbackFlow)
+
+const exported = run('npx', ['tsx', cliPath, '--message', 'export'], { cwd: repoRoot })
+const exportedData = parseJson(exported.stdout)
+check('export command exits 0', exported.status === 0, exported)
+check('export command emits valid JSON', exportedData !== null, exported)
+check(
+  'export JSON includes session, memories, and interactions',
+  Boolean(exportedData?.session && Array.isArray(exportedData.memories) && Array.isArray(exportedData.interactions)),
+  exported,
+)
 
 // ── Argument validation ──────────────────────────────────────────────────────
 console.log('\n  [argument validation]')

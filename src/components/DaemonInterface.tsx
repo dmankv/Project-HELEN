@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   detectMood,
   detectIntent,
   generateHumanLikeResponse,
 } from '../services/daemonResponseBrain'
 import type { MemorySnippet, ResponseIntent } from '../services/daemonResponseBrain'
-import { selectStrategy, attributeFeedback } from '../services/daemonResponsePolicy'
+import { selectStrategy, attributeFeedback, RESPONSE_STRATEGIES } from '../services/daemonResponsePolicy'
 import type { ResponseStrategy } from '../services/daemonResponsePolicy'
 import { retrieveRelevantMemories } from '../services/daemonMemoryRetrieval'
 import { routeRequest, classifyComplexity, extractTaskKeywords } from '../services/daemonCapabilityRouter'
@@ -14,6 +14,7 @@ import learningSystem from '../services/daemon_learning_integration'
 import {
   saveMemory,
   listMemories,
+  forgetById,
   forgetLast,
   forgetByText,
   forgetAll,
@@ -48,6 +49,7 @@ import {
   hydrateFromCloud,
   deleteCloudConversation,
   deleteAllCloudConversations,
+  deleteCloudMemory,
 } from '../services/supabasePersistence'
 import type { SyncStatus } from '../services/supabasePersistence'
 import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem, runLegacyIdMigration, genUUID } from '../services/daemonStorageMigration'
@@ -61,6 +63,9 @@ import type { PersonalityPreferences } from '../services/daemonPersonalityPrefer
 import PersonalityPreferencesEditor from './PersonalityPreferencesEditor'
 import GitHubWriteAccessPanel from './GitHubWriteAccessPanel'
 import SupabaseProjectAccessPanel from './SupabaseProjectAccessPanel'
+import FeedbackReviewPanel from './FeedbackReviewPanel'
+import type { FeedbackRating } from './FeedbackReviewPanel'
+import MemoryManagementPanel from './MemoryManagementPanel'
 import '../styles/DaemonInterface.css'
 
 interface Message {
@@ -169,6 +174,10 @@ function newUUID(): string {
 }
 
 const nextId = () => newUUID()
+
+function isResponseStrategy(value: string | undefined): value is ResponseStrategy {
+  return typeof value === 'string' && (RESPONSE_STRATEGIES as readonly string[]).includes(value)
+}
 
 // ---------------------------------------------------------------------------
 // Memory command parser
@@ -321,6 +330,8 @@ export default function DaemonInterface({
   const [copyDiagnosticsStatus, setCopyDiagnosticsStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('unconfigured')
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
+  const [dataRevision, setDataRevision] = useState(0)
+  const [exportStatus, setExportStatus] = useState<'idle' | 'exported' | 'failed'>('idle')
   const [personalityPrefs, setPersonalityPrefs] = useState<PersonalityPreferences>(() => loadLocalPreferences())
   const [showPreferences, setShowPreferences] = useState(false)
   const [projectLogContext, setProjectLogContext] = useState<string | null>(null)
@@ -533,6 +544,9 @@ export default function DaemonInterface({
             void deleteAllCloudMemories()
           }
         }
+        if (memCmd.type !== 'recall') {
+          setDataRevision(revision => revision + 1)
+        }
         const aiMsg: Message = {
           id: nextId(),
           role: 'assistant',
@@ -712,6 +726,7 @@ export default function DaemonInterface({
         routingMode: routing.mode,
         routingReason: routing.reason,
       })
+      setDataRevision(revision => revision + 1)
 
       const aiMsg: Message = {
         id: nextId(),
@@ -818,6 +833,8 @@ export default function DaemonInterface({
     setIsThinking(false)
     setConversations([])
     setRatedMessages(new Set())
+    msgToInteractionRef.current.clear()
+    msgToStrategyRef.current.clear()
     abortRef.current = null
     try {
       localStorage.removeItem(MESSAGES_KEY)
@@ -827,6 +844,7 @@ export default function DaemonInterface({
       // best-effort only; UI state is already reset in-memory
     }
     learningSystem.clearHistory()
+    setDataRevision(revision => revision + 1)
     // Durable memories are intentionally preserved. Use "forget all memories" to erase them.
     // Mirror all conversation/message deletions to Supabase when authenticated
     if (isPersistenceConfigured() && currentUser) {
@@ -897,7 +915,66 @@ export default function DaemonInterface({
     saveMessages(current.messages)
   }
 
-  const insights = learningSystem.getLearningInsights()
+  const insights = useMemo(() => learningSystem.getLearningInsights(), [dataRevision])
+  const pendingLearning = useMemo(() => learningSystem.getPendingLearning(), [dataRevision])
+  const durableMemories = useMemo(() => listMemories(), [dataRevision])
+
+  const handleLearningFeedback = useCallback((
+    interactionId: string,
+    rating: FeedbackRating,
+    comment?: string,
+    attribution?: { strategy?: string; contextKey?: string },
+  ) => {
+    learningSystem.processFeedback(interactionId, rating, comment)
+    if (isPersistenceConfigured() && currentUser) {
+      void updateLearningFeedback(interactionId, rating, comment)
+    }
+
+    const savedInteraction = pendingLearning.find(interaction => interaction.id === interactionId)
+    const feedbackAttribution = attribution ?? {
+      strategy: savedInteraction?.metadata.strategy,
+      contextKey: savedInteraction?.metadata.contextKey,
+    }
+    if (rating !== 'neutral' && feedbackAttribution.contextKey && isResponseStrategy(feedbackAttribution.strategy)) {
+      attributeFeedback(feedbackAttribution.contextKey, feedbackAttribution.strategy, rating === 'helpful')
+    }
+
+    setRatedMessages(previous => {
+      const next = new Set(previous)
+      for (const [messageId, mappedInteractionId] of msgToInteractionRef.current) {
+        if (mappedInteractionId === interactionId) next.add(messageId)
+      }
+      return next
+    })
+    setDataRevision(revision => revision + 1)
+  }, [currentUser, pendingLearning])
+
+  const handleDeleteMemory = useCallback((memoryId: string) => {
+    if (!forgetById(memoryId)) return
+    setDataRevision(revision => revision + 1)
+    if (isPersistenceConfigured() && currentUser) {
+      void deleteCloudMemory(memoryId)
+    }
+  }, [currentUser])
+
+  const handleExportLearningData = useCallback(() => {
+    try {
+      const blob = new Blob([learningSystem.exportLearningData()], {
+        type: 'application/json;charset=utf-8',
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `daemon-learning-data-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      setExportStatus('exported')
+    } catch {
+      setExportStatus('failed')
+    }
+  }, [])
 
   return (
     <div className="daemon-app">
@@ -1065,6 +1142,19 @@ export default function DaemonInterface({
                         ? 'Sync error'
                         : 'Sync ready'}
             </p>
+            <details className="data-tools-panel" aria-label="Feedback and data">
+              <summary>Feedback &amp; data</summary>
+              <FeedbackReviewPanel
+                pendingInteractions={pendingLearning}
+                exportStatus={exportStatus}
+                onExport={handleExportLearningData}
+                onFeedback={handleLearningFeedback}
+              />
+            </details>
+            <details className="data-tools-panel" aria-label="Manage memories">
+              <summary>Manage memories</summary>
+              <MemoryManagementPanel memories={durableMemories} onDelete={handleDeleteMemory} />
+            </details>
             {currentUser?.role === 'admin' && (
               <details className="admin-diagnostics" aria-label="Admin cloud diagnostics">
                 <summary>Admin cloud diagnostics</summary>
@@ -1252,16 +1342,13 @@ export default function DaemonInterface({
                             onClick={() => {
                               const interactionId = msgToInteractionRef.current.get(msg.id)
                               if (interactionId) {
-                                learningSystem.processFeedback(interactionId, 'helpful')
-                                if (isPersistenceConfigured() && currentUser) {
-                                  void updateLearningFeedback(interactionId, 'helpful')
-                                }
+                                handleLearningFeedback(
+                                  interactionId,
+                                  'helpful',
+                                  undefined,
+                                  msgToStrategyRef.current.get(msg.id),
+                                )
                               }
-                              const attribution = msgToStrategyRef.current.get(msg.id)
-                              if (attribution) {
-                                attributeFeedback(attribution.contextKey, attribution.strategy, true)
-                              }
-                              setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}
                           ><span aria-hidden="true">👍</span></button>
                           <button
@@ -1271,16 +1358,13 @@ export default function DaemonInterface({
                             onClick={() => {
                               const interactionId = msgToInteractionRef.current.get(msg.id)
                               if (interactionId) {
-                                learningSystem.processFeedback(interactionId, 'unhelpful')
-                                if (isPersistenceConfigured() && currentUser) {
-                                  void updateLearningFeedback(interactionId, 'unhelpful')
-                                }
+                                handleLearningFeedback(
+                                  interactionId,
+                                  'unhelpful',
+                                  undefined,
+                                  msgToStrategyRef.current.get(msg.id),
+                                )
                               }
-                              const attribution = msgToStrategyRef.current.get(msg.id)
-                              if (attribution) {
-                                attributeFeedback(attribution.contextKey, attribution.strategy, false)
-                              }
-                              setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}
                           ><span aria-hidden="true">👎</span></button>
                         </span>

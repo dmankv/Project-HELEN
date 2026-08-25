@@ -38,6 +38,7 @@ vi.mock('../src/services/supabaseEdgeChat', async (importActual) => {
 vi.mock('../src/services/daemonMemory', () => ({
   saveMemory: vi.fn((text: string) => ({ id: 'mem-1', text, createdAt: new Date().toISOString() })),
   listMemories: vi.fn(() => []),
+  forgetById: vi.fn(() => false),
   forgetLast: vi.fn(() => null),
   forgetByText: vi.fn(() => []),
   forgetAll: vi.fn(),
@@ -73,6 +74,7 @@ vi.mock('../src/services/supabasePersistence', async (importActual) => {
     insertMessage: vi.fn(async () => null),
     insertCloudMemory: vi.fn(async () => null),
     deleteLastCloudMemory: vi.fn(async () => false),
+    deleteCloudMemory: vi.fn(async () => false),
     deleteCloudMemoriesByText: vi.fn(async () => false),
     deleteAllCloudMemories: vi.fn(async () => false),
     updateLearningFeedback: vi.fn(async () => false),
@@ -89,13 +91,15 @@ vi.mock('../src/services/supabasePersistence', async (importActual) => {
 
 // Import the component after mocks are registered.
 import DaemonInterface from '../src/components/DaemonInterface'
-import { saveMemory, listMemories, forgetAll } from '../src/services/daemonMemory'
+import { saveMemory, listMemories, forgetById, forgetAll } from '../src/services/daemonMemory'
+import learningSystem from '../src/services/daemon_learning_integration'
 import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonChatAPI'
 import { callEdgeFunction, hasEdgeFunction, createEdgeChatFailure } from '../src/services/supabaseEdgeChat'
 import {
   isPersistenceConfigured,
   deleteCloudConversation,
   deleteAllCloudConversations,
+  deleteCloudMemory,
   listConversations,
 } from '../src/services/supabasePersistence'
 
@@ -114,7 +118,21 @@ beforeEach(() => {
   vi.mocked(isPersistenceConfigured).mockReturnValue(false)
   vi.mocked(deleteCloudConversation).mockResolvedValue(true)
   vi.mocked(deleteAllCloudConversations).mockResolvedValue(true)
+  vi.mocked(deleteCloudMemory).mockResolvedValue(true)
   vi.mocked(listConversations).mockResolvedValue([])
+  vi.mocked(listMemories).mockReturnValue([])
+  vi.mocked(forgetById).mockReturnValue(false)
+  vi.mocked(learningSystem.getLearningInsights).mockReturnValue({
+    totalInteractions: 0,
+    successRate: 0,
+    averageConfidence: 0,
+    commonIntents: {},
+    complexityDistribution: {},
+    learningCycles: 0,
+    policyVersion: 1,
+  })
+  vi.mocked(learningSystem.getPendingLearning).mockReturnValue([])
+  vi.mocked(learningSystem.exportLearningData).mockReturnValue('{}')
 })
 
 // ---------------------------------------------------------------------------
@@ -321,6 +339,70 @@ describe('DaemonInterface', () => {
     fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
     await waitFor(() => expect(forgetAll).toHaveBeenCalled(), WAIT_OPTS)
   }, 8000)
+
+  it('lets users rate pending responses in the feedback review panel', () => {
+    const pendingInteraction = {
+      id: '550e8400-e29b-41d4-a716-446655440010',
+      input: 'How can I get started?',
+      response: 'Start with the smallest useful step.',
+      metadata: {
+        intent: 'suggest',
+        confidence: 0.8,
+        ambiguity: 0.2,
+        memoryUsed: 0,
+        planComplexity: 'simple' as const,
+        timestamp: new Date(),
+      },
+    }
+    vi.mocked(learningSystem.getPendingLearning).mockReturnValue([pendingInteraction])
+
+    render(<DaemonInterface />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Mark response 1 as helpful/i }))
+
+    expect(learningSystem.processFeedback).toHaveBeenCalledWith(
+      pendingInteraction.id,
+      'helpful',
+      undefined,
+    )
+  })
+
+  it('downloads learning data from the feedback and data panel', () => {
+    const createObjectURL = vi.fn(() => 'blob:daemon-learning-data')
+    const revokeObjectURL = vi.fn()
+    const linkClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+
+    render(<DaemonInterface />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Export learning data/i }))
+
+    expect(learningSystem.exportLearningData).toHaveBeenCalledTimes(1)
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:daemon-learning-data')
+    expect(screen.getByText(/Learning-data download started/i)).toBeInTheDocument()
+
+    linkClick.mockRestore()
+  })
+
+  it('forgets an individual durable memory and mirrors it to cloud storage', () => {
+    const memory = {
+      id: '550e8400-e29b-41d4-a716-446655440011',
+      text: 'Use concise answers.',
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    vi.mocked(listMemories).mockReturnValue([memory])
+    vi.mocked(forgetById).mockReturnValue(true)
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory saved/i }))
+
+    expect(forgetById).toHaveBeenCalledWith(memory.id)
+    expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id)
+  })
 
   // ── Clear All button ──────────────────────────────────────────────────────
 

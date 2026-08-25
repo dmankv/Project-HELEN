@@ -31,6 +31,9 @@ echo "hello" | npm run cli
 - `exit` / `quit`
 - `remember this: <text>`
 - `what do you remember?`
+- `feedback: <helpful|neutral|unhelpful> [optional note]`
+- `analytics`
+- `export [all|learning|memories]`
 
 ## Scope
 
@@ -41,6 +44,31 @@ It is separate from the deployed GitHub Pages frontend and does not use browser-
 
 CLI memories are **process-local** and are discarded when the CLI exits.
 They are not shared with the browser application (which uses browser `localStorage`).
+
+## Feedback, analytics, and export
+
+These commands apply to the current CLI process only:
+
+- `feedback: helpful`, `feedback: neutral`, or `feedback: unhelpful` rates the
+  latest unrated response. An optional note is stored with that rating.
+- `analytics` reports interaction counts, feedback totals, helpfulness rate,
+  intents, and uptime without printing message content.
+- `export` writes a JSON snapshot of the current session to standard output.
+  Use `export learning` or `export memories` for a narrower snapshot; `export`
+  and `export all` include both.
+
+For a clean JSON file, invoke the TypeScript entrypoint directly:
+
+```bash
+npx tsx src/cli/daemon-cli.ts --message export > daemon-session.json
+```
+
+Piped multi-line input executes each non-empty line as a separate command in
+the same CLI session, so feedback can follow a response:
+
+```bash
+printf 'hello\nfeedback: helpful\nanalytics\n' | npm run cli
+```
 
 ## Smoke test
 
@@ -67,8 +95,4 @@ following produces a nonzero exit with a clear error message:
 
 `--help` / `-h` always exits 0 and prints usage.
 
-## Unsupported commands
-
-`feedback`, `export`, and `analytics` are not implemented.
 Unsupported flags produce a nonzero exit and an error message.
-

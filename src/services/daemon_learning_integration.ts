@@ -171,7 +171,6 @@ export class DaemonLearningSystem {
   /**
    * Get pending interactions awaiting feedback.
    */
-  // TODO (future) : Expose this through a feedback review panel.
   getPendingLearning(): InteractionRecord[] {
     return this.interactionHistory.filter(i => !i.feedback)
   }
@@ -213,7 +212,6 @@ export class DaemonLearningSystem {
   /**
    * Export learning data for analysis.
    */
-  // TODO (future) : Add a user-facing data-export action.
   exportLearningData(): string {
     return JSON.stringify({
       interactions: this.interactionHistory,
