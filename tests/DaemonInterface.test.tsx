@@ -679,4 +679,40 @@ describe('DaemonInterface', () => {
     expect(oldConv!.messages).toHaveLength(1)
     expect(oldConv!.messages[0].content).toBe('Old message')
   }, 15000)
+
+  it('a completed response does not steal the visible pane after the user switches chats', async () => {
+    const activeConv = {
+      id: 'conv-active',
+      title: 'Active chat',
+      messages: [{ id: 'm-active', role: 'user', content: 'Active message', timestamp: '2026-08-25T02:00:00.000Z' }],
+      createdAt: '2026-08-25T02:00:00.000Z',
+    }
+    const otherConv = {
+      id: 'conv-other',
+      title: 'Other chat',
+      messages: [{ id: 'm-other', role: 'user', content: 'Other message', timestamp: '2026-08-25T01:00:00.000Z' }],
+      createdAt: '2026-08-25T01:00:00.000Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([activeConv, otherConv]))
+    localStorage.setItem('daemon_active_conv_id', activeConv.id)
+    localStorage.setItem('daemon_messages', JSON.stringify(activeConv.messages))
+
+    render(<DaemonInterface />)
+
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'message while active' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Other chat/i }))
+    expect(screen.getByText('Other message')).toBeInTheDocument()
+
+    await waitFor(() => expect(screen.getByRole('log')).toHaveAttribute('aria-busy', 'false'), WAIT_OPTS)
+
+    expect(screen.getByText('Other message')).toBeInTheDocument()
+    expect(screen.queryByText('message while active')).not.toBeInTheDocument()
+
+    const storedConvs = JSON.parse(localStorage.getItem('daemon_conversations') ?? '[]') as Array<{ id: string; messages: Array<{ content: string }> }>
+    const updatedActive = storedConvs.find(conv => conv.id === 'conv-active')
+    expect(updatedActive?.messages.some(message => message.content === 'message while active')).toBe(true)
+  }, 15000)
 })

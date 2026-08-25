@@ -164,11 +164,14 @@ describe('Supabase persistence service – cloud deletion helpers', () => {
   })
 
   it('does not enumerate cloud conversations inside deleteAllCloudConversations', () => {
-    const match = persistenceServiceSrc.match(/export async function deleteAllCloudConversations\(\): Promise<boolean> \{[\s\S]+?\n\}/)
-    expect(match?.[0]).toBeDefined()
-    expect(match?.[0]).not.toContain('listConversations')
-    expect(match?.[0]).not.toContain('.select(')
-    expect(match?.[0]).not.toContain('user_id')
+    const start = persistenceServiceSrc.indexOf('export async function deleteAllCloudConversations')
+    const end = persistenceServiceSrc.indexOf('// ---------------------------------------------------------------------------\n// Messages', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const fnSource = persistenceServiceSrc.slice(start, end)
+    expect(fnSource).not.toContain('listConversations')
+    expect(fnSource).not.toContain('.select(')
+    expect(fnSource).not.toContain('user_id')
   })
 })
 

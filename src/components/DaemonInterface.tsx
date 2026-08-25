@@ -375,7 +375,11 @@ export default function DaemonInterface({
     saveMessages(nextMessages)
   }, [])
 
-  const persistConversationMessages = useCallback((convId: string, nextMessages: Message[]) => {
+  const persistConversationMessages = useCallback((
+    convId: string,
+    nextMessages: Message[],
+    options?: { syncVisiblePane?: boolean },
+  ) => {
     const existing = conversationsRef.current.find(conv => conv.id === convId)
     const updatedConv: Conversation = existing
       ? { ...existing, messages: nextMessages }
@@ -384,13 +388,19 @@ export default function DaemonInterface({
       ? conversationsRef.current.map(conv => (conv.id === convId ? updatedConv : conv))
       : [updatedConv, ...conversationsRef.current]
     conversationsRef.current = nextConversations
-    activeConvIdRef.current = convId
-    messagesRef.current = nextMessages
     setConversations(nextConversations)
-    setActiveConvId(convId)
-    setMessages(nextMessages)
     saveConversations(nextConversations)
-    saveMessages(nextMessages)
+    if (options?.syncVisiblePane) {
+      activeConvIdRef.current = convId
+      messagesRef.current = nextMessages
+      setActiveConvId(convId)
+      setMessages(nextMessages)
+      saveMessages(nextMessages)
+    } else if (activeConvIdRef.current === convId) {
+      messagesRef.current = nextMessages
+      setMessages(nextMessages)
+      saveMessages(nextMessages)
+    }
     return nextConversations
   }, [])
 
