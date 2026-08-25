@@ -64,6 +64,12 @@ const CONVERSATIONS_KEY = 'daemon_conversations'
 // Persists which conversation is currently open so reloads restore the same chat.
 const ACTIVE_CONV_KEY = 'daemon_active_conv_id'
 
+function sortConversationsByMostRecent(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+}
+
 function loadActiveConvId(conversations: Conversation[]): string | null {
   try {
     const saved = localStorage.getItem(ACTIVE_CONV_KEY)
@@ -75,9 +81,7 @@ function loadActiveConvId(conversations: Conversation[]): string | null {
   // Fallback: pick the most-recently-created conversation so the pane is never
   // unexpectedly blank after a reload when history already exists.
   if (conversations.length === 0) return null
-  const sorted = [...conversations].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  )
+  const sorted = sortConversationsByMostRecent(conversations)
   return sorted[0].id
 }
 
@@ -372,6 +376,7 @@ export default function DaemonInterface({
     setActiveConvId(nextActiveConvId)
     setMessages(nextMessages)
     saveConversations(nextConversations)
+    saveActiveConvId(nextActiveConvId)
     saveMessages(nextMessages)
   }, [])
 
@@ -703,7 +708,7 @@ export default function DaemonInterface({
 
     // Compute updated list from current state before any setters fire.
     const remaining = conversationsRef.current.filter(c => c.id !== convIdToDelete)
-    const nextActiveConvId = remaining[0]?.id ?? null
+    const nextActiveConvId = loadActiveConvId(remaining)
     setConversationView(remaining, nextActiveConvId)
 
     // Mirror deletion to Supabase when authenticated

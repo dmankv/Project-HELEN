@@ -142,10 +142,12 @@ export async function deleteCloudConversation(id: string): Promise<boolean> {
 export async function deleteAllCloudConversations(): Promise<boolean> {
   const client = getClient()
   if (!client) return false
+  const userId = await getCurrentUserId()
+  if (!userId) return false
   const { error } = await client
     .from('conversations')
     .delete()
-    .not('id', 'is', null)
+    .eq('user_id', userId)
   if (error) { console.warn('[daemon-persistence] deleteAllCloudConversations:', error.message); return false }
   return true
 }
