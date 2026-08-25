@@ -168,9 +168,9 @@ for (const legacyFile of [
 // ---------------------------------------------------------------------------
 {
   const prefixedIdPatterns = [
-    { re: /`daemon-\$\{|['"]daemon-[0-9]/, label: 'legacy "daemon-<timestamp>" ID construction' },
-    { re: /`mem-\$\{|['"]mem-[0-9a-f]/, label: 'legacy "mem-<uuid>" ID construction' },
-    { re: /`interaction-\$\{|['"]interaction-[0-9]/, label: 'legacy "interaction-<timestamp>" ID construction' },
+    { re: /`daemon-\$\{|['"]daemon-['"]\s*\+|['"]daemon-[0-9]/, label: 'legacy "daemon-<timestamp>" ID construction' },
+    { re: /`mem-\$\{|['"]mem-['"]\s*\+|['"]mem-[0-9a-f]/, label: 'legacy "mem-<uuid>" ID construction' },
+    { re: /`interaction-\$\{|['"]interaction-['"]\s*\+|['"]interaction-[0-9]/, label: 'legacy "interaction-<timestamp>" ID construction' },
   ]
 
   function scanDir(dir, excludeFile) {
