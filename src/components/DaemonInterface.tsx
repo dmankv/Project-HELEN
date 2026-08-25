@@ -17,7 +17,18 @@ import {
 } from '../services/daemonMemory'
 import { callChatAPI, hasBackend, isAPIFailure } from '../services/daemonChatAPI'
 import type { APIMessage } from '../services/daemonChatAPI'
-import { callEdgeFunction, hasEdgeFunction } from '../services/supabaseEdgeChat'
+import {
+  callEdgeFunction,
+  createEdgeChatFailure,
+  getSafeEdgeFallbackMessage,
+  hasEdgeFunction,
+  isEdgeChatFailure,
+} from '../services/supabaseEdgeChat'
+import type {
+  EdgeChatFailure,
+  EdgeChatFailureCategory,
+  SafeEdgeFunctionErrorCode,
+} from '../services/supabaseEdgeChat'
 import {
   isPersistenceConfigured,
   upsertConversation,
@@ -207,6 +218,7 @@ function handleMemoryCommand(cmd: MemoryCommand): string {
 }
 
 const MAX_API_TURNS = 20
+const CLOUD_CHAT_DOCS_URL = 'https://github.com/dmankv/Project-HELEN/blob/main/DEPLOYMENT.md#cloud-chat-diagnostics'
 
 // Confidence/ambiguity defaults for local-brain responses recorded to Supabase.
 // These are fixed-point estimates: local mode always uses the same rule engine,
@@ -230,6 +242,45 @@ interface DaemonInterfaceProps {
   onLoginClick?: () => void
   onLogoutClick?: () => void
   currentUser?: { id?: string; email: string; role?: 'user' | 'admin' | null } | null
+}
+
+type CloudAttemptStatus = 'success' | 'fallback' | 'cancelled'
+
+interface CloudAttemptRecord {
+  status: CloudAttemptStatus
+  mode: 'cloud' | 'local'
+  category?: EdgeChatFailureCategory
+  statusCode?: number
+  safeCode?: SafeEdgeFunctionErrorCode
+  timestamp: string
+}
+
+function formatCloudAttempt(record: CloudAttemptRecord | null): string {
+  if (!record) return 'No cloud-chat attempt recorded in this session.'
+  const details = [record.status, record.mode]
+  if (record.category) details.push(record.category)
+  if (typeof record.statusCode === 'number') details.push(`HTTP ${record.statusCode}`)
+  if (record.safeCode) details.push(record.safeCode)
+  return `${details.join(' · ')} · ${record.timestamp}`
+}
+
+function buildSafeDiagnosticsPayload(
+  currentUser: DaemonInterfaceProps['currentUser'],
+  usingBackend: boolean,
+  lastCloudAttempt: CloudAttemptRecord | null,
+): string {
+  return [
+    'cloud_chat_diagnostics',
+    `frontend_config=${hasEdgeFunction() ? 'present' : 'missing'}`,
+    `session=${currentUser ? 'present' : 'missing'}`,
+    `current_backend_mode=${usingBackend ? 'cloud' : 'local'}`,
+    `last_attempt_status=${lastCloudAttempt?.status ?? 'none'}`,
+    `last_attempt_category=${lastCloudAttempt?.category ?? 'none'}`,
+    `last_attempt_status_code=${typeof lastCloudAttempt?.statusCode === 'number' ? String(lastCloudAttempt.statusCode) : 'none'}`,
+    `last_attempt_code=${lastCloudAttempt?.safeCode ?? 'none'}`,
+    `last_attempt_time=${lastCloudAttempt?.timestamp ?? 'none'}`,
+    `docs=${CLOUD_CHAT_DOCS_URL}`,
+  ].join('\n')
 }
 
 export default function DaemonInterface({
@@ -256,6 +307,8 @@ export default function DaemonInterface({
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const [usingBackend, setUsingBackend] = useState(false)
   const [authError, setAuthError] = useState(false)
+  const [lastCloudAttempt, setLastCloudAttempt] = useState<CloudAttemptRecord | null>(null)
+  const [copyDiagnosticsStatus, setCopyDiagnosticsStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('unconfigured')
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const [personalityPrefs, setPersonalityPrefs] = useState<PersonalityPreferences>(() => loadLocalPreferences())
@@ -367,7 +420,7 @@ export default function DaemonInterface({
     const convId = activeConvId ?? nextId()
     if (!activeConvId) setActiveConvId(convId)
     let backendFailedThisTurn = false
-    let authErrorThisTurn = false
+    let cloudFailureForFallback: EdgeChatFailure | null = null
 
     try {
       // Check for memory command first
@@ -423,12 +476,23 @@ export default function DaemonInterface({
       abortRef.current = controller
 
       // 1. Supabase Edge Function (authenticated, rate-limited, no browser API keys)
+      if (!hasBackend() && !hasEdgeFunction()) {
+        cloudFailureForFallback = createEdgeChatFailure('not-configured')
+      } else if (hasEdgeFunction() && !currentUser && !hasBackend()) {
+        cloudFailureForFallback = createEdgeChatFailure('not-signed-in')
+      }
+
       if (hasEdgeFunction() && currentUser) {
         const apiHistory = buildAPIHistory(nextMessages)
         const edgeResult = await callEdgeFunction(apiHistory, controller.signal)
         if (typeof edgeResult === 'string') {
           setUsingBackend(true)
           setAuthError(false)
+          setLastCloudAttempt({
+            status: 'success',
+            mode: 'cloud',
+            timestamp: new Date().toISOString(),
+          })
           setSyncStatus('syncing')
           const aiMsg: Message = {
             id: nextId(),
@@ -468,15 +532,23 @@ export default function DaemonInterface({
           return
         }
         setUsingBackend(false)
-        if (controller.signal.aborted || (isAPIFailure(edgeResult) && edgeResult.reason === 'aborted')) {
+        if (controller.signal.aborted || (isEdgeChatFailure(edgeResult) && edgeResult.category === 'aborted')) {
+          setLastCloudAttempt({
+            status: 'cancelled',
+            mode: 'local',
+            category: 'aborted',
+            timestamp: new Date().toISOString(),
+          })
           setIsThinking(false)
           abortRef.current = null
           return
         }
-        if (isAPIFailure(edgeResult) && edgeResult.reason === 'auth') {
+        if (isEdgeChatFailure(edgeResult) && (edgeResult.category === 'auth' || edgeResult.category === 'not-signed-in')) {
           setAuthError(true)
-          authErrorThisTurn = true
+        } else {
+          setAuthError(false)
         }
+        cloudFailureForFallback = isEdgeChatFailure(edgeResult) ? edgeResult : createEdgeChatFailure('server')
         backendFailedThisTurn = true
       }
 
@@ -520,7 +592,6 @@ export default function DaemonInterface({
         }
         if (isAPIFailure(backendResult) && backendResult.reason === 'auth') {
           setAuthError(true)
-          authErrorThisTurn = true
         }
         backendFailedThisTurn = true
       }
@@ -565,13 +636,26 @@ export default function DaemonInterface({
         content: response,
         timestamp: new Date().toISOString(),
       }
-      const fallbackMsg: Message | null = backendFailedThisTurn
+      const fallbackText = cloudFailureForFallback
+        ? getSafeEdgeFallbackMessage(cloudFailureForFallback)
+        : backendFailedThisTurn
+          ? 'The configured backend is unavailable. I used local mode for this response.'
+          : null
+      if (fallbackText && cloudFailureForFallback) {
+        setLastCloudAttempt({
+          status: 'fallback',
+          mode: 'local',
+          category: cloudFailureForFallback.category,
+          statusCode: cloudFailureForFallback.status,
+          safeCode: cloudFailureForFallback.safeCode,
+          timestamp: new Date().toISOString(),
+        })
+      }
+      const fallbackMsg: Message | null = fallbackText
         ? {
             id: nextId(),
             role: 'assistant',
-            content: authErrorThisTurn
-              ? 'The cloud backend rejected the request (authentication error). Sign in to use cloud chat. Using local mode for this response.'
-              : 'The cloud backend is unreachable right now. I used local mode for this response.',
+            content: fallbackText,
             timestamp: new Date().toISOString(),
           }
         : null
@@ -628,7 +712,17 @@ export default function DaemonInterface({
       setIsThinking(false)
       abortRef.current = null
     }
-  }, [input, isThinking, messages, activeConvId, lastIntent])
+  }, [input, isThinking, messages, activeConvId, lastIntent, currentUser, personalityPrefs])
+
+  const handleCopySafeDiagnostics = useCallback(async () => {
+    const payload = buildSafeDiagnosticsPayload(currentUser, usingBackend, lastCloudAttempt)
+    try {
+      await navigator.clipboard.writeText(payload)
+      setCopyDiagnosticsStatus('copied')
+    } catch {
+      setCopyDiagnosticsStatus('failed')
+    }
+  }, [currentUser, usingBackend, lastCloudAttempt])
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort()
@@ -828,11 +922,13 @@ export default function DaemonInterface({
                 <span className="stat-label">Chats</span>
               </div>
             </div>
-            {hasBackend() && (
+            {(hasBackend() || hasEdgeFunction()) && (
               <p
                 className="backend-badge"
                 title={
-                  authError
+                  lastCloudAttempt?.category === 'not-signed-in'
+                    ? 'Cloud chat is available after sign-in'
+                    : authError
                     ? 'Authentication error — sign in to use cloud chat'
                     : messages.length === 0
                       ? 'Cloud mode configured — will activate on first message'
@@ -841,7 +937,9 @@ export default function DaemonInterface({
                         : 'Using local brain'
                 }
                 aria-label={
-                  authError
+                  lastCloudAttempt?.category === 'not-signed-in'
+                    ? 'Cloud sign-in required'
+                    : authError
                     ? 'Cloud auth error'
                     : messages.length === 0
                       ? 'Cloud mode configured'
@@ -851,10 +949,12 @@ export default function DaemonInterface({
                 }
               >
                 <span aria-hidden="true">
-                  {authError ? '⚠️' : usingBackend || messages.length === 0 ? '☁️' : '🖥️'}
+                  {lastCloudAttempt?.category === 'not-signed-in' || authError ? '⚠️' : usingBackend || messages.length === 0 ? '☁️' : '🖥️'}
                 </span>
                 {' '}
-                {authError
+                {lastCloudAttempt?.category === 'not-signed-in'
+                  ? 'Sign in for cloud'
+                  : authError
                   ? 'Auth error'
                   : usingBackend
                     ? 'Cloud'
@@ -908,6 +1008,48 @@ export default function DaemonInterface({
                         ? 'Sync error'
                         : 'Sync ready'}
             </p>
+            {currentUser?.role === 'admin' && (
+              <details className="admin-diagnostics" aria-label="Admin cloud diagnostics">
+                <summary>Admin cloud diagnostics</summary>
+                <ul className="admin-diagnostics-list">
+                  <li><strong>Frontend config:</strong> {hasEdgeFunction() ? 'Present' : 'Missing'}</li>
+                  <li><strong>Current session:</strong> {currentUser ? 'Present' : 'Missing'}</li>
+                  <li><strong>Backend mode:</strong> {usingBackend ? 'Cloud' : 'Local'}</li>
+                  <li><strong>Latest cloud attempt:</strong> {formatCloudAttempt(lastCloudAttempt)}</li>
+                </ul>
+                <div className="admin-diagnostics-actions">
+                  <button
+                    type="button"
+                    className="diagnostics-copy-btn"
+                    onClick={() => void handleCopySafeDiagnostics()}
+                  >
+                    Copy safe diagnostics
+                  </button>
+                  <a
+                    className="diagnostics-link"
+                    href={CLOUD_CHAT_DOCS_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Troubleshooting guide
+                  </a>
+                </div>
+                <p className="admin-diagnostics-copy-status" aria-live="polite">
+                  {copyDiagnosticsStatus === 'copied'
+                    ? 'Safe diagnostics copied.'
+                    : copyDiagnosticsStatus === 'failed'
+                      ? 'Unable to copy safe diagnostics.'
+                      : ''}
+                </p>
+                <ul className="admin-diagnostics-list admin-diagnostics-checklist">
+                  <li>Confirm this build includes <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.</li>
+                  <li>In Supabase Dashboard → Edge Functions → <code>daemon-chat</code>, confirm the function exists and the latest deploy succeeded.</li>
+                  <li>Review the <code>daemon-chat</code> Edge Function logs for safe codes such as <code>RATE_LIMITED</code>, <code>PROVIDER_UNAVAILABLE</code>, or <code>FUNCTION_CONFIG_ERROR</code>.</li>
+                  <li>Verify Supabase function secrets: <code>OPENAI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>, <code>DAEMON_PROVIDER</code>, and optional <code>DAEMON_MODEL</code>.</li>
+                  <li>GitHub Pages deploys the frontend only; it does not deploy the Supabase Edge Function or its secrets.</li>
+                </ul>
+              </details>
+            )}
           </div>
           <div className="sidebar-preferences">
             <button

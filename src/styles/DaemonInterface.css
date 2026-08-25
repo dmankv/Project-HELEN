@@ -722,6 +722,73 @@
   padding: 0.15rem 0;
 }
 
+.admin-diagnostics {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
+}
+
+.admin-diagnostics summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.admin-diagnostics-list {
+  margin: 0.6rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+
+.admin-diagnostics-list li + li {
+  margin-top: 0.35rem;
+}
+
+.admin-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.diagnostics-copy-btn,
+.diagnostics-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  text-decoration: none;
+}
+
+.diagnostics-copy-btn:hover,
+.diagnostics-link:hover {
+  color: var(--color-text);
+  background-color: var(--color-surface-light);
+  transform: none;
+  box-shadow: none;
+}
+
+.admin-diagnostics-copy-status {
+  min-height: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+}
+
+.admin-diagnostics-checklist {
+  border-left: 2px solid var(--color-border);
+  margin-top: 0.4rem;
+  padding-left: 1rem;
+}
+
 /* ── Welcome hint ────────────────────────────────────── */
 .welcome-hint {
   font-size: 0.8rem;

@@ -100,6 +100,10 @@ These are injected at build time by `deploy.yml` and are safe to embed in the br
 supabase functions deploy daemon-chat
 ```
 
+> **Deployment boundary:** the GitHub Pages workflow deploys only the static frontend.
+> It does **not** deploy `supabase/functions/daemon-chat`, create Supabase secrets,
+> or repair a missing Edge Function deployment.
+
 #### 4. Set Edge Function secrets (server-only — NEVER commit values)
 
 ```bash
@@ -111,6 +115,71 @@ supabase secrets set DAEMON_MODEL=claude-3-5-haiku-20241022  # optional
 ```
 
 These secrets are held only in Supabase and are never present in the browser bundle.
+
+### Cloud chat diagnostics
+
+The fallback message “I used local mode for this response” does **not** prove a live outage by
+itself. Without direct access to the project logs/secrets, you can only confirm the code-level
+failure taxonomy below and then inspect the Supabase project directly.
+
+#### Verified client-visible categories
+
+| Category | Meaning | Safe user message |
+|---|---|---|
+| `not-configured` | `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` missing from the frontend build | “Cloud chat is not configured in this build. I used local mode for this response.” |
+| `not-signed-in` | No current signed-in Supabase session | “Cloud chat is available after you sign in. I used local mode for this response.” |
+| `auth` | Function returned `401`/`403` | “Cloud chat rejected the current session. I used local mode for this response.” |
+| `rate-limited` | Function returned `429` | “Cloud chat is temporarily rate-limited. I used local mode for this response.” |
+| `not-found` | Function returned `404` | “Cloud chat is not deployed or this build points at the wrong project. I used local mode for this response.” |
+| `provider` | Function returned `502`/`503` or safe provider/config error code | “Cloud chat is temporarily unavailable. I used local mode for this response.” |
+| `server` | Other server-side error | “Cloud chat had a temporary server error. I used local mode for this response.” |
+| `timeout` | Browser-side request timeout | “Cloud chat timed out. I used local mode for this response.” |
+| `network` | Browser could not reach the function | “Cloud chat could not be reached from this browser. I used local mode for this response.” |
+| `aborted` | User cancelled the request | No fallback/error banner is shown. |
+
+#### Safe Edge Function error codes
+
+The Supabase Edge Function returns only safe machine-readable codes:
+
+- `AUTH_REQUIRED`
+- `INVALID_TOKEN`
+- `RATE_LIMITED`
+- `FUNCTION_CONFIG_ERROR`
+- `PROVIDER_UNAVAILABLE`
+- `BAD_REQUEST`
+- `ORIGIN_NOT_ALLOWED`
+- `METHOD_NOT_ALLOWED`
+- `INTERNAL_ERROR`
+
+These codes are intentionally generic. They do **not** include provider response bodies, SQL
+errors, stack traces, prompt contents, tokens, or secret values.
+
+#### Operator steps: check deployment, logs, and configuration
+
+1. Open **Supabase Dashboard → Edge Functions → `daemon-chat`**.
+2. Confirm the function exists and the latest deployment succeeded. If it does not exist, deploy it:
+   ```bash
+   supabase functions deploy daemon-chat
+   ```
+3. Open the function’s **Logs** tab and look for safe codes such as
+   `RATE_LIMITED`, `INVALID_TOKEN`, `PROVIDER_UNAVAILABLE`, or `FUNCTION_CONFIG_ERROR`.
+4. Open **Supabase Dashboard → Project Settings → Edge Functions / Secrets** (or use the CLI)
+   and verify that the function has:
+   - `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY`
+   - `DAEMON_PROVIDER`
+   - optional `DAEMON_MODEL`
+   - Supabase runtime variables injected by the platform (`SUPABASE_URL`,
+     `SUPABASE_SERVICE_ROLE_KEY`, and the project’s function anon key/runtime auth context)
+5. Verify the frontend build variables in **GitHub → Settings → Secrets and variables → Actions → Variables**:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+6. Reproduce the request in the browser and inspect the request to
+   `/functions/v1/daemon-chat`:
+   - `404` usually means the function is missing or the build points at the wrong Supabase project
+   - `401`/`403` means the browser session/JWT was rejected
+   - `429` means the per-user function rate limit was hit
+   - `502`/`503` means the function reported safe provider/config unavailability
+   - browser timeout/network failure means the request did not complete successfully from the client
 
 ### Edge Function security boundaries
 

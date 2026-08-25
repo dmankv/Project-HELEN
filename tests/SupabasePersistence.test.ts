@@ -167,8 +167,8 @@ describe('Edge function callEdgeFunction – runtime behavior', () => {
     const { callEdgeFunction: realCall } = await import('../src/services/supabaseEdgeChat')
     // Without real env vars, getClient() returns null → returns null
     const result = await realCall([{ role: 'user', content: 'hi' }])
-    // Result is null because SUPABASE_URL/KEY are empty in test env
-    expect(result).toBeNull()
+    // Result is a typed "not-configured" failure because SUPABASE_URL/KEY are empty in test env
+    expect(result).toMatchObject({ category: 'not-configured' })
   })
 })
 
@@ -416,7 +416,7 @@ describe('Edge Function source – CORS preflight rejection', () => {
   it('rejects disallowed CORS preflight origins with 403', () => {
     // Must check allowedOrigin before responding to OPTIONS
     expect(edgeSrc).toContain("status: 403")
-    expect(edgeSrc).toContain("CORS: origin not allowed")
+    expect(edgeSrc).toContain("ORIGIN_NOT_ALLOWED")
   })
 
   it('does not fall back to a permissive default origin on OPTIONS', () => {
@@ -429,6 +429,30 @@ describe('Edge Function source – CORS preflight rejection', () => {
     expect(edgeSrc).toContain('localhost')
     // No wildcard credentialed CORS
     expect(edgeSrc).not.toContain("'Access-Control-Allow-Origin': '*'")
+  })
+})
+
+describe('Edge Function source – safe diagnostics codes and secret isolation', () => {
+  const edgeSrc = fs.readFileSync(
+    path.resolve(process.cwd(), 'supabase/functions/daemon-chat/index.ts'),
+    'utf8',
+  )
+
+  it('returns only approved safe error codes', () => {
+    expect(edgeSrc).toContain('AUTH_REQUIRED')
+    expect(edgeSrc).toContain('INVALID_TOKEN')
+    expect(edgeSrc).toContain('RATE_LIMITED')
+    expect(edgeSrc).toContain('FUNCTION_CONFIG_ERROR')
+    expect(edgeSrc).toContain('PROVIDER_UNAVAILABLE')
+    expect(edgeSrc).toContain('BAD_REQUEST')
+    expect(edgeSrc).toContain('ORIGIN_NOT_ALLOWED')
+    expect(edgeSrc).toContain('METHOD_NOT_ALLOWED')
+    expect(edgeSrc).toContain('INTERNAL_ERROR')
+  })
+
+  it('does not log raw provider bodies or SQL error messages', () => {
+    expect(edgeSrc).not.toContain('text.slice(0, 200)')
+    expect(edgeSrc).not.toContain('error.message')
   })
 })
 

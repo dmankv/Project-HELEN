@@ -26,6 +26,15 @@ vi.mock('../src/services/daemonChatAPI', () => ({
   isAPIFailure: vi.fn((result: unknown) => result !== null && typeof result === 'object' && 'reason' in (result as object)),
 }))
 
+vi.mock('../src/services/supabaseEdgeChat', async (importActual) => {
+  const actual = await importActual<typeof import('../src/services/supabaseEdgeChat')>()
+  return {
+    ...actual,
+    callEdgeFunction: vi.fn(() => Promise.resolve(actual.createEdgeChatFailure('provider', { status: 503, safeCode: 'PROVIDER_UNAVAILABLE' }))),
+    hasEdgeFunction: vi.fn(() => false),
+  }
+})
+
 vi.mock('../src/services/daemonMemory', () => ({
   saveMemory: vi.fn((text: string) => ({ id: 'mem-1', text, createdAt: new Date().toISOString() })),
   listMemories: vi.fn(() => []),
@@ -59,6 +68,7 @@ vi.mock('../src/services/daemon_learning_integration', () => ({
 import DaemonInterface from '../src/components/DaemonInterface'
 import { saveMemory, listMemories, forgetAll } from '../src/services/daemonMemory'
 import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonChatAPI'
+import { callEdgeFunction, hasEdgeFunction, createEdgeChatFailure } from '../src/services/supabaseEdgeChat'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,6 +77,11 @@ import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonCha
 beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
+  Object.assign(navigator, {
+    clipboard: {
+      writeText: vi.fn(() => Promise.resolve()),
+    },
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -116,6 +131,45 @@ describe('DaemonInterface', () => {
     expect(screen.getByLabelText(/account role unknown/i)).toHaveTextContent('Role: Unknown')
   })
 
+  it('renders the admin diagnostics panel only for admin users', () => {
+    render(<DaemonInterface currentUser={{ email: 'admin@example.com', role: 'admin' }} onLoginClick={vi.fn()} />)
+    expect(screen.getByText(/Admin cloud diagnostics/i)).toBeInTheDocument()
+  })
+
+  it('does not render the admin diagnostics panel for non-admin users', () => {
+    render(<DaemonInterface currentUser={{ email: 'user@example.com', role: 'user' }} onLoginClick={vi.fn()} />)
+    expect(screen.queryByText(/Admin cloud diagnostics/i)).not.toBeInTheDocument()
+  })
+
+  it('does not render the admin diagnostics panel for signed-out visitors', () => {
+    render(<DaemonInterface />)
+    expect(screen.queryByText(/Admin cloud diagnostics/i)).not.toBeInTheDocument()
+  })
+
+  it('copies redacted safe diagnostics for admins', async () => {
+    vi.mocked(hasBackend).mockReturnValue(false)
+    vi.mocked(hasEdgeFunction).mockReturnValue(true)
+    vi.mocked(callEdgeFunction).mockResolvedValue(createEdgeChatFailure('provider', { status: 503, safeCode: 'FUNCTION_CONFIG_ERROR' }))
+
+    render(<DaemonInterface currentUser={{ email: 'admin@example.com', role: 'admin' }} onLoginClick={vi.fn()} />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'Secret prompt text' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(() => expect(screen.getByText(/Cloud chat is temporarily unavailable/i)).toBeInTheDocument(), WAIT_OPTS)
+
+    fireEvent.click(screen.getByRole('button', { name: /Copy safe diagnostics/i }))
+
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalled(), WAIT_OPTS)
+    const payload = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]
+    expect(payload).toContain('frontend_config=present')
+    expect(payload).toContain('last_attempt_category=provider')
+    expect(payload).toContain('last_attempt_code=FUNCTION_CONFIG_ERROR')
+    expect(payload).not.toContain('admin@example.com')
+    expect(payload).not.toContain('Secret prompt text')
+    expect(payload).not.toMatch(/access[_-]?token/i)
+  })
+
   // ── Sending a message ─────────────────────────────────────────────────────
 
   it('displays the user message immediately after sending', async () => {
@@ -160,6 +214,52 @@ describe('DaemonInterface', () => {
       WAIT_OPTS,
     )
   }, 10000)
+
+  it('shows the not-configured fallback message when only local mode is available', async () => {
+    vi.mocked(hasBackend).mockReturnValue(false)
+    vi.mocked(hasEdgeFunction).mockReturnValue(false)
+
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'Use local mode' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(
+      () => expect(screen.getByText(/Cloud chat is not configured in this build/i)).toBeInTheDocument(),
+      WAIT_OPTS,
+    )
+  })
+
+  it('shows the sign-in fallback message instead of an outage for signed-out users', async () => {
+    vi.mocked(hasBackend).mockReturnValue(false)
+    vi.mocked(hasEdgeFunction).mockReturnValue(true)
+
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'Use local mode' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(
+      () => expect(screen.getByText(/Cloud chat is available after you sign in/i)).toBeInTheDocument(),
+      WAIT_OPTS,
+    )
+  })
+
+  it('shows the rate-limit fallback message for rate-limited cloud responses', async () => {
+    vi.mocked(hasBackend).mockReturnValue(false)
+    vi.mocked(hasEdgeFunction).mockReturnValue(true)
+    vi.mocked(callEdgeFunction).mockResolvedValue(createEdgeChatFailure('rate-limited', { status: 429, safeCode: 'RATE_LIMITED' }))
+
+    render(<DaemonInterface currentUser={{ email: 'admin@example.com', role: 'admin' }} onLoginClick={vi.fn()} />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'Rate limited?' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(
+      () => expect(screen.getByText(/Cloud chat is temporarily rate-limited/i)).toBeInTheDocument(),
+      WAIT_OPTS,
+    )
+  })
 
   // ── Memory commands ───────────────────────────────────────────────────────
 

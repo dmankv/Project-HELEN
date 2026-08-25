@@ -29,6 +29,9 @@ supabase secrets set DAEMON_MODEL=claude-3-5-haiku-20241022   # optional
 supabase functions deploy daemon-chat
 ```
 
+> GitHub Pages does **not** deploy this function. The frontend and the Supabase Edge Function
+> are separate deployment targets.
+
 ### 3. Apply database migration
 
 Run `supabase/migrations/20260824160000_daemon_persistence.sql` in the Supabase SQL Editor (or via CLI).
@@ -56,6 +59,34 @@ curl -X POST https://<project>.supabase.co/functions/v1/daemon-chat \
 | `SUPABASE_SERVICE_ROLE_KEY` | Auto-injected by Supabase | Service role (rate limit writes) |
 | `VITE_SUPABASE_URL` | GitHub Actions variable | Public project URL (safe in browser) |
 | `VITE_SUPABASE_ANON_KEY` | GitHub Actions variable | Public anon key (safe in browser) |
+
+## Safe error codes
+
+`daemon-chat` returns only the following machine-readable error codes on failure:
+
+- `AUTH_REQUIRED`
+- `INVALID_TOKEN`
+- `RATE_LIMITED`
+- `FUNCTION_CONFIG_ERROR`
+- `PROVIDER_UNAVAILABLE`
+- `BAD_REQUEST`
+- `ORIGIN_NOT_ALLOWED`
+- `METHOD_NOT_ALLOWED`
+- `INTERNAL_ERROR`
+
+The function does **not** return provider bodies, stack traces, SQL errors, tokens, or prompt
+contents to the browser.
+
+## Operator checks
+
+When the frontend falls back to local mode, verify these items in order:
+
+1. **Edge Functions → `daemon-chat` → Deployment**: confirm the function exists and the latest deploy succeeded.
+2. **Edge Functions → `daemon-chat` → Logs**: look for the safe codes above.
+3. **Function secrets/runtime config**: verify `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`,
+   `DAEMON_PROVIDER`, optional `DAEMON_MODEL`, plus Supabase-injected runtime variables.
+4. **Frontend build variables**: confirm the GitHub Pages build was given only
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as public values.
 
 ## Rate limiting
 

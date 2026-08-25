@@ -40,6 +40,28 @@ interface RequestBody {
   messages: ChatMessage[]
 }
 
+type SafeErrorCode =
+  | 'AUTH_REQUIRED'
+  | 'INVALID_TOKEN'
+  | 'RATE_LIMITED'
+  | 'FUNCTION_CONFIG_ERROR'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'BAD_REQUEST'
+  | 'ORIGIN_NOT_ALLOWED'
+  | 'METHOD_NOT_ALLOWED'
+  | 'INTERNAL_ERROR'
+
+class EdgeFunctionError extends Error {
+  code: SafeErrorCode
+  status: number
+
+  constructor(code: SafeErrorCode, status: number) {
+    super(code)
+    this.code = code
+    this.status = status
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -123,6 +145,46 @@ function corsHeaders(origin: string): Record<string, string> {
   }
 }
 
+function safeErrorMessage(code: SafeErrorCode): string {
+  switch (code) {
+    case 'AUTH_REQUIRED':
+      return 'Authentication required.'
+    case 'INVALID_TOKEN':
+      return 'Invalid or expired token.'
+    case 'RATE_LIMITED':
+      return 'Rate limit exceeded.'
+    case 'FUNCTION_CONFIG_ERROR':
+      return 'Cloud chat is temporarily unavailable.'
+    case 'PROVIDER_UNAVAILABLE':
+      return 'Cloud chat is temporarily unavailable.'
+    case 'BAD_REQUEST':
+      return 'Invalid request.'
+    case 'ORIGIN_NOT_ALLOWED':
+      return 'Origin not allowed.'
+    case 'METHOD_NOT_ALLOWED':
+      return 'Method not allowed.'
+    case 'INTERNAL_ERROR':
+    default:
+      return 'Internal server error.'
+  }
+}
+
+function jsonErrorResponse(
+  code: SafeErrorCode,
+  status: number,
+  headers: Record<string, string>,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  return new Response(
+    JSON.stringify({ code, error: safeErrorMessage(code) }),
+    { status, headers: { ...headers, ...extraHeaders } },
+  )
+}
+
+function logDiagnostic(event: string, metadata: Record<string, string | number | boolean | null> = {}): void {
+  console.warn('[daemon-chat]', JSON.stringify({ event, ...metadata }))
+}
+
 // ---------------------------------------------------------------------------
 // Rate limiting (server-side, durable, atomic)
 // ---------------------------------------------------------------------------
@@ -138,7 +200,7 @@ async function checkRateLimit(
   })
 
   if (error) {
-    console.warn('[daemon-chat] rate limit rpc failed:', error.message)
+    logDiagnostic('rate_limit_rpc_failed', { userId })
     // Fail open on RPC errors to avoid blocking all users on DB hiccup
     return { allowed: true, remaining: RATE_LIMIT_MAX }
   }
@@ -193,56 +255,72 @@ async function callProvider(messages: ChatMessage[]): Promise<string> {
 
   if (provider === 'anthropic') {
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured')
+    if (!apiKey) throw new EdgeFunctionError('FUNCTION_CONFIG_ERROR', 503)
     const model = Deno.env.get('DAEMON_MODEL') ?? 'claude-3-5-haiku-20241022'
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1024,
-        system: DAEMON_SYSTEM_PROMPT,
-        messages,
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
+    let res: Response
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 1024,
+          system: DAEMON_SYSTEM_PROMPT,
+          messages,
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+    } catch {
+      throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
+    }
     if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      console.error('[daemon-chat] Anthropic error:', res.status, text.slice(0, 200))
-      throw new Error('Provider error')
+      logDiagnostic('provider_http_error', { provider, status: res.status })
+      throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
     }
     const data = await res.json() as { content?: Array<{ text?: string }> }
-    return data.content?.[0]?.text ?? ''
+    const message = data.content?.[0]?.text ?? ''
+    if (!message) throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
+    return message
+  }
+
+  if (provider !== 'openai') {
+    throw new EdgeFunctionError('FUNCTION_CONFIG_ERROR', 503)
   }
 
   // Default: OpenAI
   const apiKey = Deno.env.get('OPENAI_API_KEY')
-  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
+  if (!apiKey) throw new EdgeFunctionError('FUNCTION_CONFIG_ERROR', 503)
   const model = Deno.env.get('DAEMON_MODEL') ?? 'gpt-4o-mini'
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [...systemMessages, ...messages],
-      max_tokens: 1024,
-    }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  })
+  let res: Response
+  try {
+    res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [...systemMessages, ...messages],
+        max_tokens: 1024,
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch {
+    throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
+  }
   if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    console.error('[daemon-chat] OpenAI error:', res.status, text.slice(0, 200))
-    throw new Error('Provider error')
+    logDiagnostic('provider_http_error', { provider, status: res.status })
+    throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
   }
   const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> }
-  return data.choices?.[0]?.message?.content ?? ''
+  const message = data.choices?.[0]?.message?.content ?? ''
+  if (!message) throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
+  return message
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +334,7 @@ Deno.serve(async (req: Request) => {
   // Always handle preflight — reject disallowed origins explicitly
   if (req.method === 'OPTIONS') {
     if (!allowedOrigin) {
-      return new Response(JSON.stringify({ error: 'CORS: origin not allowed' }), {
+      return new Response(JSON.stringify({ code: 'ORIGIN_NOT_ALLOWED', error: safeErrorMessage('ORIGIN_NOT_ALLOWED') }), {
         status: 403,
         headers: { 'Content-Type': 'application/json' },
       })
@@ -266,7 +344,7 @@ Deno.serve(async (req: Request) => {
 
   // Reject disallowed origins for credentialed requests
   if (!allowedOrigin) {
-    return new Response(JSON.stringify({ error: 'CORS: origin not allowed' }), {
+    return new Response(JSON.stringify({ code: 'ORIGIN_NOT_ALLOWED', error: safeErrorMessage('ORIGIN_NOT_ALLOWED') }), {
       status: 403,
       headers: { 'Content-Type': 'application/json' },
     })
@@ -275,36 +353,42 @@ Deno.serve(async (req: Request) => {
   const headers = { 'Content-Type': 'application/json', ...corsHeaders(allowedOrigin) }
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers })
+    return jsonErrorResponse('METHOD_NOT_ALLOWED', 405, headers)
   }
 
   // ── JWT verification ─────────────────────────────────────────────────────
   const authHeader = req.headers.get('authorization')
   if (!authHeader?.startsWith('Bearer ')) {
-    return new Response(JSON.stringify({ error: 'Authentication required' }), { status: 401, headers })
+    return jsonErrorResponse('AUTH_REQUIRED', 401, headers)
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+  if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+    logDiagnostic('runtime_config_missing', {
+      hasSupabaseUrl: Boolean(supabaseUrl),
+      hasServiceRoleKey: Boolean(serviceRoleKey),
+      hasAnonKey: Boolean(anonKey),
+    })
+    return jsonErrorResponse('FUNCTION_CONFIG_ERROR', 503, headers)
+  }
   const userClient = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   })
 
   const { data: { user }, error: authError } = await userClient.auth.getUser()
   if (authError || !user) {
-    return new Response(JSON.stringify({ error: 'Invalid or expired token' }), { status: 401, headers })
+    logDiagnostic('auth_rejected', { hasUser: Boolean(user) })
+    return jsonErrorResponse('INVALID_TOKEN', 401, headers)
   }
 
   // ── Rate limit ───────────────────────────────────────────────────────────
   const serviceClient = createClient(supabaseUrl, serviceRoleKey)
   const { allowed, remaining } = await checkRateLimit(serviceClient, user.id)
   if (!allowed) {
-    return new Response(
-      JSON.stringify({ error: 'Rate limit exceeded. Please wait before sending more messages.' }),
-      { status: 429, headers: { ...headers, 'X-RateLimit-Remaining': '0' } },
-    )
+    logDiagnostic('rate_limited', { userId: user.id })
+    return jsonErrorResponse('RATE_LIMITED', 429, headers, { 'X-RateLimit-Remaining': '0' })
   }
 
   // ── Schema validation ────────────────────────────────────────────────────
@@ -312,12 +396,12 @@ Deno.serve(async (req: Request) => {
   try {
     body = await req.json()
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers })
+    return jsonErrorResponse('BAD_REQUEST', 400, headers)
   }
 
   const validation = validateMessages(body)
   if (!validation.valid || !validation.messages) {
-    return new Response(JSON.stringify({ error: validation.error }), { status: 400, headers })
+    return jsonErrorResponse('BAD_REQUEST', 400, headers)
   }
 
   // ── AI provider call ─────────────────────────────────────────────────────
@@ -328,12 +412,11 @@ Deno.serve(async (req: Request) => {
       { status: 200, headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) } },
     )
   } catch (err) {
-    const msg = (err as Error).message ?? 'Unknown error'
-    // Do not expose provider details; log internally only
-    console.error('[daemon-chat] provider call failed:', msg)
-    return new Response(
-      JSON.stringify({ error: 'The AI provider is temporarily unavailable. Please try again later.' }),
-      { status: 502, headers },
-    )
+    if (err instanceof EdgeFunctionError) {
+      logDiagnostic('edge_function_error', { code: err.code, status: err.status, userId: user.id })
+      return jsonErrorResponse(err.code, err.status, headers)
+    }
+    logDiagnostic('internal_error', { userId: user.id })
+    return jsonErrorResponse('INTERNAL_ERROR', 500, headers)
   }
 })
