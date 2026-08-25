@@ -81,6 +81,15 @@ In Supabase Dashboard → SQL Editor, run in order:
 
 -- Migration 2: Daemon persistence tables
 -- supabase/migrations/20260824160000_daemon_persistence.sql
+
+-- Migration 3: Atomic Edge Function rate limiting
+-- supabase/migrations/20260824180000_atomic_rate_limit.sql
+
+-- Migration 4: Personality preferences
+-- supabase/migrations/20260824200000_personality_preferences.sql
+
+-- Migration 5: Private OAuth project-access state, tokens, and audit records
+-- supabase/migrations/20260825083000_supabase_project_access.sql
 ```
 
 #### 2. Configure GitHub Actions variables (public, browser-safe)
@@ -100,6 +109,10 @@ These are injected at build time by `deploy.yml` and are safe to embed in the br
 supabase functions deploy daemon-chat
 ```
 
+> **Deployment boundary:** the GitHub Pages workflow deploys only the static frontend.
+> It does **not** deploy `supabase/functions/daemon-chat`, create Supabase secrets,
+> or repair a missing Edge Function deployment.
+
 #### 4. Set Edge Function secrets (server-only — NEVER commit values)
 
 ```bash
@@ -112,6 +125,114 @@ supabase secrets set DAEMON_MODEL=claude-3-5-haiku-20241022  # optional
 
 These secrets are held only in Supabase and are never present in the browser bundle.
 
+### Optional live project diagnostics
+
+The **Supabase project access** sidebar panel is an opt-in, server-side
+integration for a user-selected project. It is not enabled by any `VITE_*`
+variable and does not expose an OAuth or management token to GitHub Pages.
+
+1. Register/configure the server-side OAuth client for the hosted Supabase MCP
+   service, with the exact callback URL:
+   ```
+   https://<gateway-project-ref>.supabase.co/functions/v1/supabase-project-access
+   ```
+2. Set the server-only secrets described in
+   [`supabase/functions/supabase-project-access/README.md`](supabase/functions/supabase-project-access/README.md).
+   In particular, set a unique 32-byte base64url
+   `SUPABASE_PROJECT_ACCESS_ENCRYPTION_KEY`; never reuse or commit it.
+3. Deploy the functions:
+   ```bash
+   supabase functions deploy supabase-project-access --no-verify-jwt
+   supabase functions deploy supabase-project-secret-write
+   ```
+4. A signed-in user explicitly consents before being redirected through OAuth.
+   The read connection is hard-coded to one `project_ref`,
+   `read_only=true`, and `features=debugging`.
+
+Live log access is on-demand only: requests are capped to a one-hour time
+range, 100 displayed entries, and 10 requests per user per minute. Results are
+redacted, marked untrusted, held only in browser memory, and may be attached
+to exactly one subsequent Daemon cloud request. They are never saved in chat
+history or database records.
+
+The integration intentionally does **not** query remote secret inventories:
+some management APIs can include secret values. It reports configured/missing
+metadata only for an allow-listed set of secrets when the selected connection
+is this gateway's own project; other projects report `unavailable`. Secret
+rotation requires a separate `write_secrets` OAuth consent and the isolated
+`supabase-project-secret-write` function. Configure it with a distinct OAuth
+client ID and provider-enforced write scope—not merely a `read_only` URL
+parameter—then it takes an explicit confirmation and never reads, returns,
+stores, or logs a secret value.
+
+Disconnect removes the encrypted refresh token immediately, attempts OAuth
+provider revocation when configured, and records only a value-free audit event.
+
+### Cloud chat diagnostics
+
+The fallback message “I used local mode for this response” does **not** prove a live outage by
+itself. Without an explicitly connected project, you can only confirm the
+code-level failure taxonomy below and then inspect the Supabase project directly.
+
+#### Verified client-visible categories
+
+| Category | Meaning | Safe user message |
+|---|---|---|
+| `not-configured` | `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` missing from the frontend build | “Cloud chat is not configured in this build. I used local mode for this response.” |
+| `not-signed-in` | No current signed-in Supabase session | “Cloud chat is available after you sign in. I used local mode for this response.” |
+| `auth` | Function returned `401`/`403` | “Cloud chat rejected the current session. I used local mode for this response.” |
+| `rate-limited` | Function returned `429` | “Cloud chat is temporarily rate-limited. I used local mode for this response.” |
+| `not-found` | Function returned `404` | “Cloud chat is not deployed or this build points at the wrong project. I used local mode for this response.” |
+| `provider` | Function returned `502`/`503` or safe provider/config error code | “Cloud chat is temporarily unavailable. I used local mode for this response.” |
+| `server` | Other server-side error | “Cloud chat had a temporary server error. I used local mode for this response.” |
+| `timeout` | Browser-side request timeout | “Cloud chat timed out. I used local mode for this response.” |
+| `network` | Browser could not reach the function | “Cloud chat could not be reached from this browser. I used local mode for this response.” |
+| `aborted` | User cancelled the request | No fallback/error banner is shown. |
+
+#### Safe Edge Function error codes
+
+The Supabase Edge Function returns only safe machine-readable codes:
+
+- `AUTH_REQUIRED`
+- `INVALID_TOKEN`
+- `RATE_LIMITED`
+- `FUNCTION_CONFIG_ERROR`
+- `PROVIDER_UNAVAILABLE`
+- `BAD_REQUEST`
+- `ORIGIN_NOT_ALLOWED`
+- `METHOD_NOT_ALLOWED`
+- `INTERNAL_ERROR`
+
+These codes are intentionally generic. They do **not** include provider response bodies, SQL
+errors, stack traces, prompt contents, tokens, or secret values.
+
+#### Operator steps: check deployment, logs, and configuration
+
+1. Open **Supabase Dashboard → Edge Functions → `daemon-chat`**.
+2. Confirm the function exists and the latest deployment succeeded. If it does not exist, deploy it:
+   ```bash
+   supabase functions deploy daemon-chat
+   ```
+3. Open the function’s **Logs** tab and look for safe codes such as
+   `RATE_LIMITED`, `INVALID_TOKEN`, `PROVIDER_UNAVAILABLE`, or `FUNCTION_CONFIG_ERROR`.
+4. Open **Supabase Dashboard → Project Settings → Edge Functions / Secrets** (or use the CLI)
+   and verify that the function has:
+   - `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY`
+   - `DAEMON_PROVIDER`
+   - optional `DAEMON_MODEL`
+   - Supabase runtime variables injected by the platform (`SUPABASE_URL`,
+     `SUPABASE_SERVICE_ROLE_KEY`, and the project’s function anon key/runtime auth context)
+5. Verify the frontend build variables in **GitHub → Settings → Secrets and variables → Actions → Variables**:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+6. Reproduce the request in the browser and inspect the request to
+   `/functions/v1/daemon-chat`:
+   - `404` usually means the function is missing or the build points at the wrong Supabase project
+   - `401`/`403` means the browser session/JWT was rejected
+   - `429` means the per-user function rate limit was hit
+   - `502`/`503` means the function reported safe provider/config unavailability
+   - browser timeout/network failure means the request did not complete successfully from the client
+
 ### Edge Function security boundaries
 
 | Concern | Mechanism |
@@ -122,6 +243,7 @@ These secrets are held only in Supabase and are never present in the browser bun
 | Secrets | Provider keys in Supabase Function secrets only |
 | CORS | Only `https://dmankv.github.io` and localhost (dev) |
 | Error masking | Provider errors are logged server-side; generic message to client |
+| Project diagnostics | Separate OAuth callback, one project/ref, read-only MCP debugging tools, redaction, and audit-only metadata |
 
 ---
 
