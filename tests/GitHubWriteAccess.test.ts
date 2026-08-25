@@ -194,3 +194,122 @@ describe('GitHub write server boundaries', () => {
     expect(browserClient).toContain("confirmation: 'CREATE_GITHUB_ISSUE'")
   })
 })
+
+describe('createGitHubIssue behavioral boundaries', () => {
+  const sharedFunction = fs.readFileSync(
+    path.join(path.resolve(process.cwd()), 'supabase/functions/_shared/githubWriteAccess.ts'),
+    'utf8',
+  )
+
+  it('scopes connection lookup to the requesting user (ownership validation)', () => {
+    // getOwnedGitHubConnection must filter by both connection id and user_id so one
+    // user cannot access another user's connection even if they know the UUID.
+    const fn = sharedFunction.slice(sharedFunction.indexOf('async function getOwnedGitHubConnection('))
+    const body = fn.slice(0, fn.indexOf('\n}') + 2)
+    expect(body).toContain(".eq('user_id', userId)")
+    expect(body).toContain(".eq('id', connectionId)")
+    // Connection ownership error must not leak whether the row exists.
+    expect(body).toContain("'CONNECTION_NOT_FOUND'")
+  })
+
+  it('rejects expired authorizations before any write operation (expiry validation)', () => {
+    // requireCurrentGitHubAuthorization must compare the stored expiry against
+    // the current time and throw REPOSITORY_AUTHORIZATION_EXPIRED when elapsed.
+    const fn = sharedFunction.slice(sharedFunction.indexOf('function requireCurrentGitHubAuthorization('))
+    const body = fn.slice(0, fn.indexOf('\n}') + 2)
+    expect(body).toContain('Date.parse(connection.authorization_expires_at)')
+    expect(body).toContain('Date.now()')
+    expect(body).toContain("'REPOSITORY_AUTHORIZATION_EXPIRED'")
+    // The check must be a strict <=, not just <, so tokens expiring at this exact
+    // millisecond are also rejected.
+    expect(body).toMatch(/expiresAt\s*<=\s*Date\.now\(\)/)
+    // createGitHubIssue must call requireCurrentGitHubAuthorization before any
+    // database write or GitHub API call.
+    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
+    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
+    const authCheckPos = createBody.indexOf('requireCurrentGitHubAuthorization(connection)')
+    const firstWritePos = Math.min(
+      createBody.includes('enforceRateLimit') ? createBody.indexOf('enforceRateLimit') : Infinity,
+      createBody.includes('claimIdempotency') ? createBody.indexOf('claimIdempotency') : Infinity,
+      createBody.includes('mintInstallationToken') ? createBody.indexOf('mintInstallationToken') : Infinity,
+    )
+    expect(authCheckPos).toBeGreaterThanOrEqual(0)
+    expect(authCheckPos).toBeLessThan(firstWritePos)
+  })
+
+  it('re-verifies repository identity via installation token, not only the cached name (repository re-verification)', () => {
+    // verifyInstallationRepository must call the GitHub API using the installation
+    // token to confirm the repository ID matches, then compare the live full_name
+    // against confirmRepository rather than trusting the cached value alone.
+    const fn = sharedFunction.slice(sharedFunction.indexOf('async function verifyInstallationRepository('))
+    const body = fn.slice(0, fn.indexOf('\n}') + 2)
+    expect(body).toContain('/repositories/')
+    expect(body).toContain('repository.full_name')
+    expect(body).toContain('repository.id')
+    // The live ID must be compared to the stored repositoryId, not accepted blindly.
+    expect(body).toContain('!== repositoryId')
+
+    // createGitHubIssue must call verifyInstallationRepository *after* minting the
+    // token and then compare the returned name against confirmRepository.
+    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
+    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
+    const mintPos = createBody.indexOf('mintInstallationToken(connection)')
+    const verifyPos = createBody.indexOf('verifyInstallationRepository(service, connection, installationToken)')
+    const repoCheckPos = createBody.indexOf('repositoryFullName !== request.confirmRepository')
+    expect(mintPos).toBeGreaterThanOrEqual(0)
+    expect(verifyPos).toBeGreaterThan(mintPos)
+    expect(repoCheckPos).toBeGreaterThan(verifyPos)
+  })
+
+  it('handles concurrent idempotency claims without double-submitting (idempotency)', () => {
+    // claimIdempotency must attempt an insert; when a conflict occurs (another
+    // concurrent request already inserted the same key) it reads back the existing
+    // record and returns it as a previous result rather than retrying the issue
+    // creation.  A null previous means this caller won the race and should proceed.
+    const fn = sharedFunction.slice(sharedFunction.indexOf('async function claimIdempotency('))
+    const body = fn.slice(0, fn.indexOf('\n}') + 2)
+    expect(body).toContain(".insert(")
+    expect(body).toContain('findIdempotency(')
+    expect(body).toContain('previous: null')
+    expect(body).toContain('previous: idempotencyResult(')
+
+    // createGitHubIssue must short-circuit when the claim returns a previous result
+    // (the racing request already completed) without calling mintInstallationToken.
+    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
+    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
+    const claimPos = createBody.indexOf('claimIdempotency(')
+    const previousCheckPos = createBody.indexOf('if (claim.previous) return claim.previous')
+    const mintPos = createBody.indexOf('mintInstallationToken(connection)')
+    expect(previousCheckPos).toBeGreaterThan(claimPos)
+    expect(mintPos).toBeGreaterThan(previousCheckPos)
+  })
+
+  it('marks idempotency as unknown on failure and never as a terminal error (success/unknown transitions)', () => {
+    // A failed issue creation must leave the idempotency record as 'unknown' so that
+    // a retry can detect the ambiguous state and surface IDEMPOTENCY_CONFLICT rather
+    // than silently re-submitting.  The record must never be deleted or left as
+    // 'pending' after an error.
+    const fn = sharedFunction.slice(sharedFunction.indexOf('async function markIdempotencyUnknown('))
+    const body = fn.slice(0, fn.indexOf('\n}') + 2)
+    expect(body).toContain("status: 'unknown'")
+    expect(body).not.toContain("status: 'failed'")
+
+    // completeIdempotency must write 'succeeded' plus the real issue metadata.
+    const completeFn = sharedFunction.slice(sharedFunction.indexOf('async function completeIdempotency('))
+    const completeBody = completeFn.slice(0, completeFn.indexOf('\n}') + 2)
+    expect(completeBody).toContain("status: 'succeeded'")
+    expect(completeBody).toContain('issue.issueNumber')
+    expect(completeBody).toContain('issue.issueUrl')
+
+    // createGitHubIssue catch block must call markIdempotencyUnknown, not delete.
+    const createFn = sharedFunction.slice(sharedFunction.indexOf('export async function createGitHubIssue('))
+    const createBody = createFn.slice(0, createFn.indexOf('\n}') + 2)
+    const catchPos = createBody.indexOf('} catch (error) {')
+    const unknownCallPos = createBody.indexOf('markIdempotencyUnknown(', catchPos)
+    expect(catchPos).toBeGreaterThanOrEqual(0)
+    expect(unknownCallPos).toBeGreaterThan(catchPos)
+    // The catch block must not call .delete() on the idempotency record.
+    const catchBody = createBody.slice(catchPos)
+    expect(catchBody).not.toMatch(/from\('github_write_idempotency'\)[\s\S]*?\.delete\(\)/)
+  })
+})
