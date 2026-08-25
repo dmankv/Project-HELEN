@@ -82,7 +82,7 @@ describe('supabaseEdgeChat diagnostics', () => {
 
   it('classifies missing functions as not-found', async () => {
     const { classifyEdgeStatusFailure } = await loadModule('not-found')
-    const result = classifyEdgeStatusFailure(404, 'METHOD_NOT_ALLOWED')
+    const result = classifyEdgeStatusFailure(404)
     expect(result.category).toBe('not-found')
   })
 
