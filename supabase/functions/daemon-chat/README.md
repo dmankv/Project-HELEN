@@ -32,6 +32,9 @@ supabase functions deploy daemon-chat
 
 > GitHub Pages does **not** deploy this function. The frontend and the Supabase Edge Function
 > are separate deployment targets.
+>
+> For a protected GitHub Actions deployment of this function, see
+> [the deployment guide](../../../DEPLOYMENT.md#github-actions-deployment).
 
 ### 3. Apply database migration
 
@@ -60,6 +63,8 @@ curl -X POST https://<project>.supabase.co/functions/v1/daemon-chat \
 | `SUPABASE_SERVICE_ROLE_KEY` | Auto-injected by Supabase | Service role (rate limit writes) |
 | `VITE_SUPABASE_URL` | GitHub Actions variable | Public project URL (safe in browser) |
 | `VITE_SUPABASE_ANON_KEY` | GitHub Actions variable | Public anon key (safe in browser) |
+| `SUPABASE_ACCESS_TOKEN` | GitHub Actions environment secret | CLI deployment credential (never in browser or function runtime) |
+| `SUPABASE_PROJECT_REF` | GitHub Actions environment variable | CLI target used with `--project-ref` |
 
 ## Safe error codes
 

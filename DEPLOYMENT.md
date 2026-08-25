@@ -116,6 +116,66 @@ supabase functions deploy daemon-chat
 > It does **not** deploy `supabase/functions/daemon-chat`, create Supabase secrets,
 > or repair a missing Edge Function deployment.
 
+##### GitHub Actions deployment
+
+The repository's
+[`supabase-functions.yml`](.github/workflows/supabase-functions.yml) workflow
+deploys only `daemon-chat` to a protected `production` environment on pushes to
+`main` and when manually dispatched. It deliberately does **not** copy provider
+keys from GitHub to Supabase during normal deployments.
+
+1. In the target Supabase project dashboard, copy the **Reference ID**. It is
+   also the `<project-ref>` portion of
+   `https://<project-ref>.supabase.co`.
+2. In Supabase **Account → Access Tokens**, create a personal access token for
+   deployments. Copy it when it is shown and treat it as a password.
+3. In GitHub, open this repository's **Settings → Environments**, create an
+   environment named `production`, and configure any required reviewers or
+   other protection rules. The deployment job targets this environment.
+4. In that `production` environment's **Secrets and variables** settings, add:
+
+   | Type | Name | Value |
+   |------|------|-------|
+   | Secret | `SUPABASE_ACCESS_TOKEN` | The Supabase personal access token |
+   | Variable | `SUPABASE_PROJECT_REF` | The Reference ID only, not the project URL |
+
+   Environment-scoped values keep deployment credentials behind the
+   environment's protection rules. Do not put either value in a `VITE_*`
+   variable, a committed `.env` file, or frontend configuration.
+5. Set the required provider secrets in Supabase before the first production
+   request. For example, from a trusted terminal authenticated to the target
+   project:
+
+   ```bash
+   supabase secrets set --project-ref "<project-ref>" \
+     OPENAI_API_KEY="..." \
+     DAEMON_PROVIDER=openai \
+     DAEMON_MODEL=gpt-4o-mini
+   ```
+
+   Or, for Anthropic:
+
+   ```bash
+   supabase secrets set --project-ref "<project-ref>" \
+     ANTHROPIC_API_KEY="..." \
+     DAEMON_PROVIDER=anthropic \
+     DAEMON_MODEL=claude-3-5-haiku-20241022
+   ```
+
+   The provider keys are Supabase Function secrets, not frontend values. If
+   they must be managed with GitHub Actions, store them as protected
+   environment secrets and use a separately reviewed, manually triggered
+   secret-rotation workflow; do not add them to the normal deployment job.
+6. Run **Actions → Deploy Supabase Edge Functions → Run workflow**, or merge a
+   change to `main`. The workflow uses `SUPABASE_ACCESS_TOKEN` only for its
+   deployment step and targets the ref with
+   `--project-ref "$SUPABASE_PROJECT_REF"`.
+7. Verify the run completes without revealing credential values, then open
+   **Supabase Dashboard → Edge Functions → `daemon-chat`** and confirm the
+   latest deployment succeeded. Finally, verify that the GitHub Pages build's
+   `VITE_SUPABASE_URL` points to the same project and test cloud chat while
+   signed in.
+
 #### 4. Set Edge Function secrets (server-only — NEVER commit values)
 
 ```bash
