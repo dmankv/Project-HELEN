@@ -22,6 +22,46 @@ const SUPABASE_ANON_KEY = (import.meta as { env?: Record<string, string> }).env?
 
 const EDGE_TIMEOUT_MS = 30_000
 
+export type EdgeChatFailureCategory =
+  | 'not-configured'
+  | 'not-signed-in'
+  | 'auth'
+  | 'rate-limited'
+  | 'not-found'
+  | 'provider'
+  | 'server'
+  | 'timeout'
+  | 'network'
+  | 'aborted'
+
+export type SafeEdgeFunctionErrorCode =
+  | 'AUTH_REQUIRED'
+  | 'INVALID_TOKEN'
+  | 'RATE_LIMITED'
+  | 'FUNCTION_CONFIG_ERROR'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'BAD_REQUEST'
+  | 'ORIGIN_NOT_ALLOWED'
+  | 'METHOD_NOT_ALLOWED'
+  | 'INTERNAL_ERROR'
+
+export interface EdgeChatFailure extends APIFailure {
+  category: EdgeChatFailureCategory
+  safeCode?: SafeEdgeFunctionErrorCode
+}
+
+const SAFE_EDGE_FUNCTION_ERROR_CODES = new Set<SafeEdgeFunctionErrorCode>([
+  'AUTH_REQUIRED',
+  'INVALID_TOKEN',
+  'RATE_LIMITED',
+  'FUNCTION_CONFIG_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'BAD_REQUEST',
+  'ORIGIN_NOT_ALLOWED',
+  'METHOD_NOT_ALLOWED',
+  'INTERNAL_ERROR',
+])
+
 let _client: SupabaseClient | null = null
 
 function getClient(): SupabaseClient | null {
@@ -48,25 +88,119 @@ export interface EdgeChatMetadata {
   interactionId?: string
 }
 
+function isSafeEdgeFunctionErrorCode(value: unknown): value is SafeEdgeFunctionErrorCode {
+  return typeof value === 'string' && SAFE_EDGE_FUNCTION_ERROR_CODES.has(value as SafeEdgeFunctionErrorCode)
+}
+
+async function readSafeErrorCode(res: Response): Promise<SafeEdgeFunctionErrorCode | undefined> {
+  try {
+    const data = await res.json() as { code?: unknown }
+    return isSafeEdgeFunctionErrorCode(data?.code) ? data.code : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function createEdgeChatFailure(
+  category: EdgeChatFailureCategory,
+  options: { status?: number; safeCode?: SafeEdgeFunctionErrorCode } = {},
+): EdgeChatFailure {
+  return {
+    reason: category === 'aborted' ? 'aborted' : category === 'auth' || category === 'not-signed-in' ? 'auth' : 'error',
+    category,
+    status: options.status,
+    safeCode: options.safeCode,
+  }
+}
+
+export function isEdgeChatFailure(result: string | APIFailure | null): result is EdgeChatFailure {
+  return result !== null && typeof result === 'object' && 'category' in result
+}
+
+export function getSafeEdgeFallbackMessage(failure: EdgeChatFailure | null | undefined): string | null {
+  switch (failure?.category) {
+    case 'not-configured':
+      return 'Cloud chat is not configured in this build. I used local mode for this response.'
+    case 'not-signed-in':
+      return 'Cloud chat is available after you sign in. I used local mode for this response.'
+    case 'auth':
+      return 'Cloud chat rejected the current session. I used local mode for this response.'
+    case 'rate-limited':
+      return 'Cloud chat is temporarily rate-limited. I used local mode for this response.'
+    case 'not-found':
+      return 'Cloud chat is not deployed or this build points at the wrong project. I used local mode for this response.'
+    case 'provider':
+      return 'Cloud chat is temporarily unavailable. I used local mode for this response.'
+    case 'server':
+      return 'Cloud chat had a temporary server error. I used local mode for this response.'
+    case 'timeout':
+      return 'Cloud chat timed out. I used local mode for this response.'
+    case 'network':
+      return 'Cloud chat could not be reached from this browser. I used local mode for this response.'
+    case 'aborted':
+    default:
+      return null
+  }
+}
+
+export function classifyEdgeStatusFailure(
+  status: number,
+  safeCode?: SafeEdgeFunctionErrorCode,
+): EdgeChatFailure {
+  if (status === 401 || status === 403) {
+    return createEdgeChatFailure('auth', { status, safeCode })
+  }
+  if (status === 429) {
+    return createEdgeChatFailure('rate-limited', { status, safeCode })
+  }
+  if (status === 404) {
+    return createEdgeChatFailure('not-found', { status, safeCode })
+  }
+  if (status === 502 || status === 503) {
+    return createEdgeChatFailure('provider', { status, safeCode })
+  }
+  return createEdgeChatFailure('server', { status, safeCode })
+}
+
+export function classifyEdgeTransportFailure(
+  err: unknown,
+  options: { timedOut?: boolean } = {},
+): EdgeChatFailure {
+  if ((err as Error).name === 'AbortError') {
+    return createEdgeChatFailure(options.timedOut ? 'timeout' : 'aborted')
+  }
+  return createEdgeChatFailure('network')
+}
+
 /**
  * Call the daemon-chat Supabase Edge Function.
- * Returns the assistant reply, an APIFailure, or null (not configured / user not signed in).
+ * Returns the assistant reply or a typed safe failure classification.
  */
 export async function callEdgeFunction(
   messages: APIMessage[],
   signal?: AbortSignal,
   metadata?: EdgeChatMetadata,
-): Promise<string | APIFailure | null> {
+  diagnosticContext?: string,
+): Promise<string | EdgeChatFailure> {
   const client = getClient()
-  if (!client) return null
+  if (!client) return createEdgeChatFailure('not-configured')
 
   // Check for authenticated session
   const { data: sessionData } = await client.auth.getSession()
   const session = sessionData?.session
-  if (!session) return null
+  if (!session) return createEdgeChatFailure('not-signed-in')
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), EDGE_TIMEOUT_MS)
+  let timedOut = false
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, EDGE_TIMEOUT_MS)
+
+  if (signal?.aborted) {
+    clearTimeout(timeoutId)
+    return createEdgeChatFailure('aborted')
+  }
   if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true })
 
   const functionUrl = SUPABASE_URL + '/functions/v1/daemon-chat'
@@ -83,34 +217,32 @@ export async function callEdgeFunction(
         ...(metadata?.strategy ? { strategy: metadata.strategy } : {}),
         ...(metadata?.contextKey ? { context_key: metadata.contextKey } : {}),
         ...(metadata?.interactionId ? { interaction_id: metadata.interactionId } : {}),
+        ...(diagnosticContext ? { diagnosticContext } : {}),
       }),
       signal: controller.signal,
     })
 
     clearTimeout(timeoutId)
 
-    if (res.status === 429) {
-      console.warn('[edge-chat] Rate limit exceeded')
-      return { reason: 'error', status: 429 }
-    }
-    if (res.status === 401 || res.status === 403) {
-      console.warn('[edge-chat] Auth error:', res.status)
-      return { reason: 'auth', status: res.status }
-    }
     if (!res.ok) {
-      console.warn('[edge-chat] Request failed:', res.status)
-      return { reason: 'error', status: res.status }
+      const safeCode = await readSafeErrorCode(res)
+      const failure = classifyEdgeStatusFailure(res.status, safeCode)
+      console.warn('[edge-chat] request failed', { category: failure.category, status: failure.status, safeCode: failure.safeCode })
+      return failure
     }
 
     const data = (await res.json()) as { message?: string }
-    return data.message ?? null
+    if (typeof data.message !== 'string' || data.message.length === 0) {
+      return createEdgeChatFailure('server', { status: 502, safeCode: 'INTERNAL_ERROR' })
+    }
+    return data.message
   } catch (err) {
     clearTimeout(timeoutId)
-    if ((err as Error).name === 'AbortError') {
-      console.warn('[edge-chat] Request aborted')
-      return { reason: 'aborted' }
-    }
-    console.warn('[edge-chat] Request error:', (err as Error).message)
-    return { reason: 'error' }
+    const failure = classifyEdgeTransportFailure(err, { timedOut })
+    console.warn(
+      failure.category === 'network' ? '[edge-chat] request error' : '[edge-chat] request aborted',
+      { category: failure.category },
+    )
+    return failure
   }
 }

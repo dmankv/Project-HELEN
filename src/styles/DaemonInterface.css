@@ -722,6 +722,177 @@
   padding: 0.15rem 0;
 }
 
+.admin-diagnostics {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
+}
+
+.admin-diagnostics summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.admin-diagnostics-list {
+  margin: 0.6rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+
+.admin-diagnostics-list li + li {
+  margin-top: 0.35rem;
+}
+
+.admin-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.diagnostics-copy-btn,
+.diagnostics-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  text-decoration: none;
+}
+
+.diagnostics-copy-btn:hover,
+.diagnostics-link:hover {
+  color: var(--color-text);
+  background-color: var(--color-surface-light);
+  transform: none;
+  box-shadow: none;
+}
+
+.admin-diagnostics-copy-status {
+  min-height: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+}
+
+.admin-diagnostics-checklist {
+  border-left: 2px solid var(--color-border);
+  margin-top: 0.4rem;
+  padding-left: 1rem;
+}
+
+/* ── Supabase project access ───────────────────────────── */
+.project-access-panel {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
+}
+
+.project-access-panel summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.project-access-description,
+.project-access-status,
+.project-access-connected,
+.project-access-logs,
+.project-access-health {
+  margin-top: 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.project-access-connect {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+  font-size: 0.72rem;
+}
+
+.project-access-connect input[type="text"],
+.project-access-connect input:not([type]),
+.project-access-connect input[type="checkbox"],
+.project-access-connected select {
+  accent-color: var(--color-primary);
+}
+
+.project-access-connect input[type="text"],
+.project-access-connect input:not([type]),
+.project-access-connected select {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-light);
+  color: var(--color-text);
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+}
+
+.project-access-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.project-access-connect button,
+.project-access-actions button,
+.project-access-logs button {
+  min-height: 30px;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+}
+
+.project-access-connect button:hover:not(:disabled),
+.project-access-actions button:hover:not(:disabled),
+.project-access-logs button:hover:not(:disabled) {
+  color: var(--color-text);
+  background-color: var(--color-surface-light);
+  transform: none;
+  box-shadow: none;
+}
+
+.project-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.project-access-log-output {
+  max-height: 180px;
+  overflow: auto;
+  margin-top: 0.55rem;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-background);
+  color: var(--color-text-secondary);
+  font-size: 0.64rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.project-access-health ul {
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+}
+
 /* ── Welcome hint ────────────────────────────────────── */
 .welcome-hint {
   font-size: 0.8rem;
