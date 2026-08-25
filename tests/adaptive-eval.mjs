@@ -6,8 +6,8 @@
  * access, no API keys, and no real user data — suitable for CI on every PR.
  *
  * Usage:
- *   node tests/adaptive-eval.mjs
- *   npx tsx tests/adaptive-eval.mjs   (TypeScript source, dev only)
+ *   npm run test:adaptive
+ *   npx tsx tests/adaptive-eval.mjs
  */
 
 import { runEvaluationSuite } from '../src/services/daemonEvaluation.js'
