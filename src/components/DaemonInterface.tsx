@@ -30,6 +30,9 @@ import {
   insertLearningInteraction,
   migrateLocalMemoriesToCloud,
   hydrateFromCloud,
+  deleteConversation,
+  deleteMessagesForConversation,
+  listConversations as listCloudConversations,
 } from '../services/supabasePersistence'
 import type { SyncStatus } from '../services/supabasePersistence'
 import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem, runLegacyIdMigration, genUUID } from '../services/daemonStorageMigration'
@@ -639,7 +642,7 @@ export default function DaemonInterface({
     }
   }
 
-  const handleClear = () => {
+  const handleClearAllChats = () => {
     abortRef.current?.abort()
     setMessages([])
     setActiveConvId(null)
@@ -657,11 +660,75 @@ export default function DaemonInterface({
     }
     learningSystem.clearHistory()
     // Durable memories are intentionally preserved. Use "forget all memories" to erase them.
+    // Mirror all conversation/message deletions to Supabase when authenticated
+    if (isPersistenceConfigured() && currentUser) {
+      setSyncStatus('syncing')
+      void (async () => {
+        try {
+          const cloudConvs = await listCloudConversations()
+          if (cloudConvs) {
+            const results = await Promise.all(
+              cloudConvs.map(async c => {
+                const r1 = await deleteMessagesForConversation(c.id)
+                const r2 = await deleteConversation(c.id)
+                return r1 && r2
+              })
+            )
+            setSyncStatus(results.every(Boolean) ? 'synced' : 'error')
+          } else {
+            setSyncStatus('error')
+          }
+        } catch {
+          setSyncStatus('error')
+        }
+      })()
+    }
+  }
+
+  const handleClearCurrentChat = () => {
+    if (!activeConvId) return
+    // Capture the ID immediately so all downstream logic uses the same value,
+    // regardless of async state batching or React strict-mode double-invocation.
+    const convIdToDelete = activeConvId
+
+    abortRef.current?.abort()
+    abortRef.current = null
+    setIsThinking(false)
+
+    // Compute updated list from current state before any setters fire.
+    const remaining = conversations.filter(c => c.id !== convIdToDelete)
+    saveConversations(remaining)
+    setConversations(remaining)
+
+    if (remaining.length > 0) {
+      const next = remaining[0]
+      setActiveConvId(next.id)
+      setMessages(next.messages)
+      saveMessages(next.messages)
+    } else {
+      setActiveConvId(null)
+      setMessages([])
+      saveMessages([])
+    }
+
+    // Mirror deletion to Supabase when authenticated
+    if (isPersistenceConfigured() && currentUser) {
+      setSyncStatus('syncing')
+      void (async () => {
+        try {
+          const r1 = await deleteMessagesForConversation(convIdToDelete)
+          const r2 = await deleteConversation(convIdToDelete)
+          setSyncStatus(r1 && r2 ? 'synced' : 'error')
+        } catch {
+          setSyncStatus('error')
+        }
+      })()
+    }
   }
 
   const handleNewChat = () => {
     // Start a blank conversation while preserving the conversation history in the sidebar.
-    // Use handleClear instead if you want to wipe everything.
+    // Use handleClearAllChats instead if you want to wipe everything.
     setMessages([])
     setActiveConvId(null)
     setLastIntent(undefined)
@@ -703,6 +770,28 @@ export default function DaemonInterface({
           <button type="button" className="new-chat-btn" onClick={handleNewChat}>
             + New chat
           </button>
+
+          <div className="sidebar-chat-actions">
+            <button
+              type="button"
+              className="clear-current-btn"
+              onClick={handleClearCurrentChat}
+              disabled={!activeConvId}
+              aria-label={activeConvId ? 'Clear current chat' : 'No active chat to clear'}
+              title={activeConvId ? 'Delete only the current conversation' : 'No active conversation selected'}
+            >
+              Clear current chat
+            </button>
+            <button
+              type="button"
+              className="clear-all-btn"
+              onClick={handleClearAllChats}
+              aria-label="Clear all chats"
+              title="Delete all conversations and history (durable memories are preserved)"
+            >
+              Clear all chats
+            </button>
+          </div>
 
           <ul className="conversation-list">
             {conversations.length === 0 ? (
@@ -865,15 +954,6 @@ export default function DaemonInterface({
             <span>Daemon</span>
           </div>
           <div className="header-actions">
-            <button
-              type="button"
-              className="clear-btn"
-              onClick={handleClear}
-              aria-label="Clear all conversations and history"
-              title="Clears all conversations and history (durable memories are preserved)"
-            >
-              Clear All
-            </button>
             {onLoginClick && (
               currentUser ? (
                 <>

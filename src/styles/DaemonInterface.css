@@ -135,6 +135,39 @@
   box-shadow: none;
 }
 
+.sidebar-chat-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0 0.75rem 0.5rem;
+}
+
+.clear-current-btn,
+.clear-all-btn {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  text-align: center;
+  cursor: pointer;
+  background-color: transparent;
+  border: 1px solid var(--color-border, #555);
+  color: var(--color-text-secondary, #ccc);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.clear-current-btn:hover:not(:disabled),
+.clear-all-btn:hover:not(:disabled) {
+  background-color: rgba(220, 80, 80, 0.15);
+  border-color: #c0392b;
+  color: #e74c3c;
+}
+
+.clear-current-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .conversation-list {
   flex: 1;
   overflow-y: auto;
