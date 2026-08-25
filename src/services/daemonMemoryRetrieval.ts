@@ -46,7 +46,6 @@ export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   minRelevanceScore: 0.1,
 }
 
-const DEFAULT_CONFIG: RetrievalConfig = DEFAULT_RETRIEVAL_CONFIG
 
 // ---------------------------------------------------------------------------
 // Forbidden content
@@ -174,7 +173,7 @@ export function retrieveRelevantMemories(
   adaptiveProfile: AdaptiveProfile,
   config: Partial<RetrievalConfig> = {},
 ): RetrievedMemory[] {
-  const cfg: RetrievalConfig = { ...DEFAULT_CONFIG, ...config }
+  const cfg: RetrievalConfig = { ...DEFAULT_RETRIEVAL_CONFIG, ...config }
   const now = new Date()
   const candidates: RetrievedMemory[] = []
 

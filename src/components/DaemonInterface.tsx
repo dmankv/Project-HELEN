@@ -522,6 +522,7 @@ export default function DaemonInterface({
             content: edgeResult,
             timestamp: new Date().toISOString(),
           }
+          msgToStrategyRef.current.set(aiMsg.id, { strategy: selection.strategy, contextKey: selection.contextKey })
           const updated = [...nextMessages, aiMsg]
           persistConversationMessages(convId, updated)
           // Persist to Supabase
