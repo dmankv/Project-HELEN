@@ -243,14 +243,13 @@ export default function DaemonInterface({
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen)
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
+  const [conversations, setConversations] = useState<Conversation[]>(loadConversations)
   // Restore the previously-active conversation so that the next send appends to
   // it rather than creating a new one. Null only when no history exists or the
   // user explicitly started a new chat via "+ New chat".
-  const [activeConvId, setActiveConvId] = useState<string | null>(() => {
-    const convs = loadConversations()
-    return loadActiveConvId(convs)
-  })
+  // `conversations` above is already the result of loadConversations(), so we
+  // re-use it here to avoid a second localStorage parse.
+  const [activeConvId, setActiveConvId] = useState<string | null>(() => loadActiveConvId(conversations))
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const [usingBackend, setUsingBackend] = useState(false)
   const [authError, setAuthError] = useState(false)
