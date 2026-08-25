@@ -641,28 +641,32 @@ export default function DaemonInterface({
 
   const handleClearCurrentChat = () => {
     if (!activeConvId) return
+    // Capture the ID immediately so all downstream logic uses the same value,
+    // regardless of async state batching or React strict-mode double-invocation.
+    const convIdToDelete = activeConvId
+
     abortRef.current?.abort()
     abortRef.current = null
     setIsThinking(false)
 
-    setConversations(prev => {
-      const remaining = prev.filter(c => c.id !== activeConvId)
-      saveConversations(remaining)
-      if (remaining.length > 0) {
-        const next = remaining[0]
-        setActiveConvId(next.id)
-        setMessages(next.messages)
-        saveMessages(next.messages)
-      } else {
-        setActiveConvId(null)
-        setMessages([])
-        saveMessages([])
-      }
-      return remaining
-    })
+    // Compute updated list from current state before any setters fire.
+    const remaining = conversations.filter(c => c.id !== convIdToDelete)
+    saveConversations(remaining)
+    setConversations(remaining)
+
+    if (remaining.length > 0) {
+      const next = remaining[0]
+      setActiveConvId(next.id)
+      setMessages(next.messages)
+      saveMessages(next.messages)
+    } else {
+      setActiveConvId(null)
+      setMessages([])
+      saveMessages([])
+    }
+
     // Mirror deletion to Supabase when authenticated
     if (isPersistenceConfigured() && currentUser) {
-      const convIdToDelete = activeConvId
       setSyncStatus('syncing')
       void (async () => {
         try {
