@@ -191,7 +191,7 @@ describe('DaemonInterface', () => {
 
   // ── Clear All button ──────────────────────────────────────────────────────
 
-  it('"Clear All" button removes all messages from view', async () => {
+  it('"Clear all chats" button in sidebar removes all messages from view', async () => {
     render(<DaemonInterface />)
     const input = screen.getByPlaceholderText(/Message Daemon/i)
     fireEvent.change(input, { target: { value: 'hello' } })
@@ -200,21 +200,154 @@ describe('DaemonInterface', () => {
     // Wait for user message to be visible.
     await waitFor(() => expect(screen.getByText('hello')).toBeInTheDocument(), WAIT_OPTS)
 
-    fireEvent.click(screen.getByRole('button', { name: /Clear all conversations/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Clear all chats/i }))
 
     expect(screen.queryByText('hello')).not.toBeInTheDocument()
     expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
   }, 8000)
 
-  it('Clear All remains safe when localStorage removeItem fails', () => {
+  it('Clear all chats remains safe when localStorage removeItem fails', () => {
     const originalRemoveItem = localStorage.removeItem
     localStorage.removeItem = vi.fn(() => { throw new Error('blocked') })
     render(<DaemonInterface />)
     expect(() => {
-      fireEvent.click(screen.getByRole('button', { name: /Clear all conversations/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Clear all chats/i }))
     }).not.toThrow()
     localStorage.removeItem = originalRemoveItem
   })
+
+  // ── Sidebar layout ────────────────────────────────────────────────────────
+
+  it('sidebar has New chat above the clear action buttons', () => {
+    render(<DaemonInterface />)
+    const sidebar = screen.getByRole('navigation', { name: /Conversation history/i })
+    const buttons = Array.from(sidebar.querySelectorAll('button'))
+    const newChatIdx = buttons.findIndex(b => /\+ New chat/i.test(b.textContent ?? ''))
+    const clearCurrentIdx = buttons.findIndex(b => /Clear current chat/i.test(b.textContent ?? ''))
+    const clearAllIdx = buttons.findIndex(b => /Clear all chats/i.test(b.textContent ?? ''))
+    expect(newChatIdx).toBeGreaterThanOrEqual(0)
+    expect(clearCurrentIdx).toBeGreaterThan(newChatIdx)
+    expect(clearAllIdx).toBeGreaterThan(newChatIdx)
+  })
+
+  it('header does not contain a Clear All button', () => {
+    render(<DaemonInterface />)
+    const header = document.querySelector('.daemon-header')
+    expect(header).not.toBeNull()
+    const clearAllInHeader = Array.from(header!.querySelectorAll('button')).find(b =>
+      /clear/i.test(b.textContent ?? '') || /clear/i.test(b.getAttribute('aria-label') ?? '')
+    )
+    expect(clearAllInHeader).toBeUndefined()
+  })
+
+  // ── Clear current chat ────────────────────────────────────────────────────
+
+  it('"Clear current chat" is disabled when no active conversation exists', () => {
+    render(<DaemonInterface />)
+    const btn = screen.getByRole('button', { name: /No active chat to clear/i })
+    expect(btn).toBeDisabled()
+  })
+
+  it('"Clear current chat" removes only the active conversation, leaves others intact', async () => {
+    // Pre-populate two conversations in localStorage
+    const conv1 = {
+      id: 'conv-1',
+      title: 'First chat',
+      messages: [{ id: 'msg-1', role: 'user', content: 'First message', timestamp: '2026-08-25T01:00:00Z' }],
+      createdAt: '2026-08-25T01:00:00Z',
+    }
+    const conv2 = {
+      id: 'conv-2',
+      title: 'Second chat',
+      messages: [{ id: 'msg-2', role: 'user', content: 'Second message', timestamp: '2026-08-25T02:00:00Z' }],
+      createdAt: '2026-08-25T02:00:00Z',
+    }
+    // Most recent first
+    localStorage.setItem('daemon_conversations', JSON.stringify([conv2, conv1]))
+    localStorage.setItem('daemon_messages', JSON.stringify(conv2.messages))
+
+    render(<DaemonInterface />)
+
+    // Select conv1 (the first conversation entry, which is the second item in list)
+    const conv1Btn = screen.getByRole('button', { name: /First chat/i })
+    fireEvent.click(conv1Btn)
+
+    // Active is now conv1 — clear current chat should remove only conv1
+    fireEvent.click(screen.getByRole('button', { name: /Clear current chat/i }))
+
+    // conv2 should still be present in sidebar
+    expect(screen.getByRole('button', { name: /Second chat/i })).toBeInTheDocument()
+    // conv1 should be gone
+    expect(screen.queryByRole('button', { name: /First chat/i })).not.toBeInTheDocument()
+    // The view should now show conv2's messages
+    expect(screen.getByText('Second message')).toBeInTheDocument()
+  })
+
+  it('"Clear current chat" with the sole conversation shows blank pane', async () => {
+    const conv = {
+      id: 'conv-only',
+      title: 'Only chat',
+      messages: [{ id: 'msg-only', role: 'user', content: 'Only message', timestamp: '2026-08-25T01:00:00Z' }],
+      createdAt: '2026-08-25T01:00:00Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([conv]))
+    localStorage.setItem('daemon_messages', JSON.stringify(conv.messages))
+
+    render(<DaemonInterface />)
+
+    // Select the sole conversation
+    fireEvent.click(screen.getByRole('button', { name: /Only chat/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear current chat/i }))
+
+    // Welcome pane should be visible
+    expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
+    // The button should now be disabled
+    const btn = screen.getByRole('button', { name: /No active chat to clear/i })
+    expect(btn).toBeDisabled()
+  })
+
+  it('"Clear all chats" preserves no conversation data but leaves a blank pane', async () => {
+    const conv = {
+      id: 'conv-a',
+      title: 'Chat A',
+      messages: [{ id: 'msg-a', role: 'user', content: 'Message A', timestamp: '2026-08-25T01:00:00Z' }],
+      createdAt: '2026-08-25T01:00:00Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([conv]))
+    localStorage.setItem('daemon_messages', JSON.stringify(conv.messages))
+
+    render(<DaemonInterface />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear all chats/i }))
+
+    expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Chat A/i })).not.toBeInTheDocument()
+  })
+
+  it('active-chat behavior preserved after clearing: new chat only on explicit + New chat click', async () => {
+    render(<DaemonInterface />)
+
+    // Send first message — creates active conv
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'Hello first' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('Hello first')).toBeInTheDocument(), WAIT_OPTS)
+
+    // Wait for the conversation to be listed in the sidebar
+    await waitFor(() => expect(document.querySelectorAll('.conversation-item').length).toBeGreaterThanOrEqual(1), WAIT_OPTS)
+
+    // Click New chat
+    fireEvent.click(screen.getByRole('button', { name: /\+ New chat/i }))
+
+    // Send second message — should create a second distinct conversation
+    fireEvent.change(input, { target: { value: 'Hello second' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('Hello second')).toBeInTheDocument(), WAIT_OPTS)
+
+    // Wait for both conversations to be listed
+    await waitFor(() => expect(document.querySelectorAll('.conversation-item').length).toBe(2), WAIT_OPTS)
+  }, 12000)
 
   // ── Enter key ─────────────────────────────────────────────────────────────
 
