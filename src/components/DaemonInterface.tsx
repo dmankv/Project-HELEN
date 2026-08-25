@@ -41,9 +41,8 @@ import {
   insertLearningInteraction,
   migrateLocalMemoriesToCloud,
   hydrateFromCloud,
-  deleteConversation,
-  deleteMessagesForConversation,
-  listConversations as listCloudConversations,
+  deleteCloudConversation,
+  deleteAllCloudConversations,
 } from '../services/supabasePersistence'
 import type { SyncStatus } from '../services/supabasePersistence'
 import { LEGACY_STORAGE_KEYS, loadMigratedStorageItem, runLegacyIdMigration, genUUID } from '../services/daemonStorageMigration'
@@ -77,6 +76,12 @@ const CONVERSATIONS_KEY = 'daemon_conversations'
 // Persists which conversation is currently open so reloads restore the same chat.
 const ACTIVE_CONV_KEY = 'daemon_active_conv_id'
 
+function sortConversationsByMostRecent(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+}
+
 function loadActiveConvId(conversations: Conversation[]): string | null {
   try {
     const saved = localStorage.getItem(ACTIVE_CONV_KEY)
@@ -88,9 +93,7 @@ function loadActiveConvId(conversations: Conversation[]): string | null {
   // Fallback: pick the most-recently-created conversation so the pane is never
   // unexpectedly blank after a reload when history already exists.
   if (conversations.length === 0) return null
-  const sorted = [...conversations].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  )
+  const sorted = sortConversationsByMostRecent(conversations)
   return sorted[0].id
 }
 
@@ -318,12 +321,27 @@ export default function DaemonInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const messagesRef = useRef(messages)
+  const conversationsRef = useRef(conversations)
+  const activeConvIdRef = useRef(activeConvId)
   // Maps message id → learning interaction id (ephemeral; not persisted across page loads).
   const msgToInteractionRef = useRef<Map<string, string>>(new Map())
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    conversationsRef.current = conversations
+  }, [conversations])
+
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId
+  }, [activeConvId])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -410,6 +428,50 @@ export default function DaemonInterface({
     })
   }, [currentUser])
 
+  const setConversationView = useCallback((nextConversations: Conversation[], nextActiveConvId: string | null) => {
+    const nextMessages = nextActiveConvId
+      ? nextConversations.find(conv => conv.id === nextActiveConvId)?.messages ?? []
+      : []
+    conversationsRef.current = nextConversations
+    activeConvIdRef.current = nextActiveConvId
+    messagesRef.current = nextMessages
+    setConversations(nextConversations)
+    setActiveConvId(nextActiveConvId)
+    setMessages(nextMessages)
+    saveConversations(nextConversations)
+    saveActiveConvId(nextActiveConvId)
+    saveMessages(nextMessages)
+  }, [])
+
+  const persistConversationMessages = useCallback((
+    convId: string,
+    nextMessages: Message[],
+    options?: { syncVisiblePane?: boolean },
+  ) => {
+    const existing = conversationsRef.current.find(conv => conv.id === convId)
+    const updatedConv: Conversation = existing
+      ? { ...existing, messages: nextMessages }
+      : { id: convId, title: conversationTitle(nextMessages), messages: nextMessages, createdAt: new Date().toISOString() }
+    const nextConversations = existing
+      ? conversationsRef.current.map(conv => (conv.id === convId ? updatedConv : conv))
+      : [updatedConv, ...conversationsRef.current]
+    conversationsRef.current = nextConversations
+    setConversations(nextConversations)
+    saveConversations(nextConversations)
+    if (options?.syncVisiblePane) {
+      activeConvIdRef.current = convId
+      messagesRef.current = nextMessages
+      setActiveConvId(convId)
+      setMessages(nextMessages)
+      saveMessages(nextMessages)
+    } else if (activeConvIdRef.current === convId) {
+      messagesRef.current = nextMessages
+      setMessages(nextMessages)
+      saveMessages(nextMessages)
+    }
+    return nextConversations
+  }, [])
+
   const handleSend = useCallback(async () => {
     const text = input.trim()
     if (!text || isThinking) return
@@ -422,13 +484,19 @@ export default function DaemonInterface({
       timestamp: new Date().toISOString(),
     }
 
-    const nextMessages = [...messages, userMsg]
+    const currentMessages = messagesRef.current
+    const nextMessages = [...currentMessages, userMsg]
     setMessages(nextMessages)
     saveMessages(nextMessages)
+    messagesRef.current = nextMessages
     setIsThinking(true)
 
-    const convId = activeConvId ?? nextId()
-    if (!activeConvId) setActiveConvId(convId)
+    const currentActiveConvId = activeConvIdRef.current
+    const convId = currentActiveConvId ?? nextId()
+    if (!currentActiveConvId) {
+      activeConvIdRef.current = convId
+      setActiveConvId(convId)
+    }
     let backendFailedThisTurn = false
     let cloudFailureForFallback: EdgeChatFailure | null = null
 
@@ -463,20 +531,7 @@ export default function DaemonInterface({
           timestamp: new Date().toISOString(),
         }
         const updated = [...nextMessages, aiMsg]
-        setMessages(updated)
-        saveMessages(updated)
-        // Use functional update to avoid stale conversations closure
-        setConversations(prev => {
-          const existing = prev.find(c => c.id === convId)
-          const updatedConv: Conversation = existing
-            ? { ...existing, messages: updated }
-            : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-          const updatedList = existing
-            ? prev.map(c => (c.id === convId ? updatedConv : c))
-            : [updatedConv, ...prev]
-          saveConversations(updatedList)
-          return updatedList
-        })
+        persistConversationMessages(convId, updated)
         setIsThinking(false)
         return
       }
@@ -517,8 +572,7 @@ export default function DaemonInterface({
             timestamp: new Date().toISOString(),
           }
           const updated = [...nextMessages, aiMsg]
-          setMessages(updated)
-          saveMessages(updated)
+          persistConversationMessages(convId, updated)
           // Persist to Supabase
           void (async () => {
             try {
@@ -532,17 +586,6 @@ export default function DaemonInterface({
               setSyncStatus('synced')
             } catch { setSyncStatus('error') }
           })()
-          setConversations(prev => {
-            const existing = prev.find(c => c.id === convId)
-            const updatedConv: Conversation = existing
-              ? { ...existing, messages: updated }
-              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-            const updatedList = existing
-              ? prev.map(c => (c.id === convId ? updatedConv : c))
-              : [updatedConv, ...prev]
-            saveConversations(updatedList)
-            return updatedList
-          })
           setIsThinking(false)
           abortRef.current = null
           return
@@ -582,19 +625,7 @@ export default function DaemonInterface({
             timestamp: new Date().toISOString(),
           }
           const updated = [...nextMessages, aiMsg]
-          setMessages(updated)
-          saveMessages(updated)
-          setConversations(prev => {
-            const existing = prev.find(c => c.id === convId)
-            const updatedConv: Conversation = existing
-              ? { ...existing, messages: updated }
-              : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-            const updatedList = existing
-              ? prev.map(c => (c.id === convId ? updatedConv : c))
-              : [updatedConv, ...prev]
-            saveConversations(updatedList)
-            return updatedList
-          })
+          persistConversationMessages(convId, updated)
           setIsThinking(false)
           abortRef.current = null
           return
@@ -678,8 +709,7 @@ export default function DaemonInterface({
       msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
 
       const updated = fallbackMsg ? [...nextMessages, fallbackMsg, aiMsg] : [...nextMessages, aiMsg]
-      setMessages(updated)
-      saveMessages(updated)
+      persistConversationMessages(convId, updated)
 
       // Persist learning interaction and conversation/messages to Supabase when authenticated
       if (isPersistenceConfigured() && currentUser) {
@@ -708,18 +738,6 @@ export default function DaemonInterface({
           } catch { setSyncStatus('error') }
         })()
       }
-
-      setConversations(prev => {
-        const existing = prev.find(c => c.id === convId)
-        const updatedConv: Conversation = existing
-          ? { ...existing, messages: updated }
-          : { id: convId, title: conversationTitle(updated), messages: updated, createdAt: new Date().toISOString() }
-        const updatedList = existing
-          ? prev.map(c => (c.id === convId ? updatedConv : c))
-          : [updatedConv, ...prev]
-        saveConversations(updatedList)
-        return updatedList
-      })
       setIsThinking(false)
       abortRef.current = null
     } catch (err) {
@@ -728,7 +746,7 @@ export default function DaemonInterface({
       setIsThinking(false)
       abortRef.current = null
     }
-  }, [input, isThinking, messages, activeConvId, lastIntent, currentUser, personalityPrefs, projectLogContext])
+  }, [input, isThinking, lastIntent, persistConversationMessages, currentUser, personalityPrefs, projectLogContext])
 
   const handleCopySafeDiagnostics = useCallback(async () => {
     const payload = buildSafeDiagnosticsPayload(currentUser, usingBackend, lastCloudAttempt)
@@ -754,6 +772,9 @@ export default function DaemonInterface({
 
   const handleClearAllChats = () => {
     abortRef.current?.abort()
+    conversationsRef.current = []
+    activeConvIdRef.current = null
+    messagesRef.current = []
     setMessages([])
     setActiveConvId(null)
     setLastIntent(undefined)
@@ -775,19 +796,8 @@ export default function DaemonInterface({
       setSyncStatus('syncing')
       void (async () => {
         try {
-          const cloudConvs = await listCloudConversations()
-          if (cloudConvs) {
-            const results = await Promise.all(
-              cloudConvs.map(async c => {
-                const r1 = await deleteMessagesForConversation(c.id)
-                const r2 = await deleteConversation(c.id)
-                return r1 && r2
-              })
-            )
-            setSyncStatus(results.every(Boolean) ? 'synced' : 'error')
-          } else {
-            setSyncStatus('error')
-          }
+          const deleted = await deleteAllCloudConversations()
+          setSyncStatus(deleted ? 'synced' : 'error')
         } catch {
           setSyncStatus('error')
         }
@@ -796,39 +806,28 @@ export default function DaemonInterface({
   }
 
   const handleClearCurrentChat = () => {
-    if (!activeConvId) return
+    const currentActiveConvId = activeConvIdRef.current
+    if (!currentActiveConvId) return
     // Capture the ID immediately so all downstream logic uses the same value,
     // regardless of async state batching or React strict-mode double-invocation.
-    const convIdToDelete = activeConvId
+    const convIdToDelete = currentActiveConvId
 
     abortRef.current?.abort()
     abortRef.current = null
     setIsThinking(false)
 
     // Compute updated list from current state before any setters fire.
-    const remaining = conversations.filter(c => c.id !== convIdToDelete)
-    saveConversations(remaining)
-    setConversations(remaining)
-
-    if (remaining.length > 0) {
-      const next = remaining[0]
-      setActiveConvId(next.id)
-      setMessages(next.messages)
-      saveMessages(next.messages)
-    } else {
-      setActiveConvId(null)
-      setMessages([])
-      saveMessages([])
-    }
+    const remaining = conversationsRef.current.filter(c => c.id !== convIdToDelete)
+    const nextActiveConvId = loadActiveConvId(remaining)
+    setConversationView(remaining, nextActiveConvId)
 
     // Mirror deletion to Supabase when authenticated
     if (isPersistenceConfigured() && currentUser) {
       setSyncStatus('syncing')
       void (async () => {
         try {
-          const r1 = await deleteMessagesForConversation(convIdToDelete)
-          const r2 = await deleteConversation(convIdToDelete)
-          setSyncStatus(r1 && r2 ? 'synced' : 'error')
+          const deleted = await deleteCloudConversation(convIdToDelete)
+          setSyncStatus(deleted ? 'synced' : 'error')
         } catch {
           setSyncStatus('error')
         }
@@ -839,6 +838,8 @@ export default function DaemonInterface({
   const handleNewChat = () => {
     // Start a blank conversation while preserving the conversation history in the sidebar.
     // Use handleClearAllChats instead if you want to wipe everything.
+    activeConvIdRef.current = null
+    messagesRef.current = []
     setMessages([])
     setActiveConvId(null)
     setLastIntent(undefined)
@@ -851,9 +852,12 @@ export default function DaemonInterface({
   }
 
   const handleSelectConversation = (conv: Conversation) => {
-    setMessages(conv.messages)
-    setActiveConvId(conv.id)
-    saveMessages(conv.messages)
+    const current = conversationsRef.current.find(existing => existing.id === conv.id) ?? conv
+    activeConvIdRef.current = current.id
+    messagesRef.current = current.messages
+    setMessages(current.messages)
+    setActiveConvId(current.id)
+    saveMessages(current.messages)
   }
 
   const insights = learningSystem.getLearningInsights()

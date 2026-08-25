@@ -126,11 +126,29 @@ export async function upsertConversation(
   return data
 }
 
-export async function deleteConversation(id: string): Promise<boolean> {
+export async function deleteCloudConversation(id: string): Promise<boolean> {
   const client = getClient()
   if (!client) return false
   const { error } = await client.from('conversations').delete().eq('id', id)
-  if (error) { console.warn('[daemon-persistence] deleteConversation:', error.message); return false }
+  if (error) { console.warn('[daemon-persistence] deleteCloudConversation:', error.message); return false }
+  return true
+}
+
+/**
+ * Delete all conversations visible to the authenticated user in one RLS-safe
+ * operation. Ownership is enforced by Supabase row-level security rather than
+ * client-supplied user identifiers.
+ */
+export async function deleteAllCloudConversations(): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+  const userId = await getCurrentUserId()
+  if (!userId) return false
+  const { error } = await client
+    .from('conversations')
+    .delete()
+    .eq('user_id', userId)
+  if (error) { console.warn('[daemon-persistence] deleteAllCloudConversations:', error.message); return false }
   return true
 }
 

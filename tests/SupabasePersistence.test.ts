@@ -61,6 +61,10 @@ const persistenceSql = fs.readFileSync(
   'utf8',
 )
 const normalizedSql = persistenceSql.toLowerCase()
+const persistenceServiceSrc = fs.readFileSync(
+  path.resolve(process.cwd(), 'src/services/supabasePersistence.ts'),
+  'utf8',
+)
 
 describe('Supabase persistence – isPersistenceConfigured mock', () => {
   it('returns true (mocked as configured)', () => {
@@ -133,6 +137,42 @@ describe('Daemon persistence SQL – owner immutability triggers', () => {
   it('prevents learning interaction owner change', () => {
     expect(persistenceSql).toMatch(/prevent_learning_owner_change/i)
     expect(persistenceSql).toMatch(/learning interaction owner is immutable/i)
+  })
+})
+
+describe('Daemon persistence SQL – conversation/message delete safety', () => {
+  it('cascades message deletion from conversations', () => {
+    expect(normalizedSql).toContain('conversation_id uuid not null references public.conversations(id) on delete cascade')
+  })
+
+  it('keeps owner-scoped delete policies on conversations and messages', () => {
+    expect(normalizedSql).toContain('create policy "conversations_delete_own"')
+    expect(normalizedSql).toContain('create policy "messages_delete_own"')
+    expect(normalizedSql).toContain('using (auth.uid() = user_id);')
+  })
+})
+
+describe('Supabase persistence service – cloud deletion helpers', () => {
+  it('defines deleteCloudConversation as a dedicated helper', () => {
+    expect(persistenceServiceSrc).toContain('export async function deleteCloudConversation')
+  })
+
+  it('defines deleteAllCloudConversations as a single owner-scoped delete operation', () => {
+    expect(persistenceServiceSrc).toContain("export async function deleteAllCloudConversations")
+    expect(persistenceServiceSrc).toContain(".from('conversations')")
+    expect(persistenceServiceSrc).toContain(".delete()")
+    expect(persistenceServiceSrc).toContain(".eq('user_id', userId)")
+  })
+
+  it('does not enumerate cloud conversations inside deleteAllCloudConversations', () => {
+    const start = persistenceServiceSrc.indexOf('export async function deleteAllCloudConversations')
+    const end = persistenceServiceSrc.indexOf('// ---------------------------------------------------------------------------\n// Messages', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const fnSource = persistenceServiceSrc.slice(start, end)
+    expect(fnSource).not.toContain('listConversations')
+    expect(fnSource).not.toContain('.select(')
+    expect(fnSource).toContain('getCurrentUserId')
   })
 })
 
