@@ -238,7 +238,10 @@ export default function GitHubWriteAccessPanel() {
           <select
             id="github-write-eligible-repository"
             value={selectedRepository?.repositoryId ?? ''}
-            onChange={event => setSelectedRepositoryId(event.target.value)}
+            onChange={event => {
+              setSelectedRepositoryId(event.target.value)
+              setConnectionConsent(false)
+            }}
           >
             {eligibleRepositories.map(repository => (
               <option key={repository.repositoryId} value={repository.repositoryId}>
