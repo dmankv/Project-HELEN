@@ -126,23 +126,12 @@ export async function upsertConversation(
   return data
 }
 
-export async function deleteConversation(id: string): Promise<boolean> {
+export async function deleteCloudConversation(id: string): Promise<boolean> {
   const client = getClient()
   if (!client) return false
   const { error } = await client.from('conversations').delete().eq('id', id)
-  if (error) { console.warn('[daemon-persistence] deleteConversation:', error.message); return false }
+  if (error) { console.warn('[daemon-persistence] deleteCloudConversation:', error.message); return false }
   return true
-}
-
-/**
- * Delete a single conversation owned by the authenticated user.
- *
- * Message cleanup relies on the conversations → messages foreign key cascade
- * defined in the Supabase schema, while RLS limits the delete to rows the
- * current authenticated user is allowed to remove.
- */
-export async function deleteCloudConversation(id: string): Promise<boolean> {
-  return deleteConversation(id)
 }
 
 /**
