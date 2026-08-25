@@ -3,8 +3,9 @@
  * creating an issue in a user-approved, App-installed repository.
  *
  * GitHub OAuth user tokens, GitHub App JWTs, installation tokens, private keys,
- * issue bodies, and authorization URLs never enter the browser, audit tables,
- * logs, or conversation state.
+ * and client secrets never enter the browser, audit tables,
+ * logs, or conversation state. User-supplied issue bodies and one-time
+ * authorization URLs enter the browser transiently but are not persisted or logged.
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'

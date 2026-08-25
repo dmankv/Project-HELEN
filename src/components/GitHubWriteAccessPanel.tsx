@@ -269,7 +269,11 @@ export default function GitHubWriteAccessPanel() {
           <select
             id="github-write-connection"
             value={selectedConnection.id}
-            onChange={event => setSelectedConnectionId(event.target.value)}
+            onChange={event => {
+              setSelectedConnectionId(event.target.value)
+              setIssueConfirmed(false)
+              resetIssueAttempt()
+            }}
           >
             {connections.map(connection => (
               <option key={connection.id} value={connection.id}>{connection.repositoryFullName}</option>

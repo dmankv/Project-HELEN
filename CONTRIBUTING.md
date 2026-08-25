@@ -40,7 +40,7 @@ The current highest migration timestamp is **`20260825162000`**
 
 Example:
 ```
-20260825130000_your_migration_name.sql
+20260825162001_your_migration_name.sql
 ```
 
 The `check:imports` CI step enforces this automatically and will fail the build

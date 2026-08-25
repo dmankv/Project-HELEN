@@ -189,9 +189,9 @@ for (const legacyFile of [
 // All Daemon entity IDs must be raw UUID v4 strings produced by genUUID().
 // The patterns below match the legacy construction forms documented in
 // daemonStorageMigration.ts:
-//   "daemon-<ts>-<n>"  → /`daemon-\$\{|['"]daemon-[0-9]/
-//   "mem-<uuid>"       → /`mem-\$\{|['"]mem-[0-9a-f]/
-//   "interaction-<ts>" → /`interaction-\$\{|['"]interaction-[0-9]/
+//   "daemon-<ts>-<n>"  → /`daemon-\$\{|['"]daemon-[0-9]|['"]daemon-['"]\s*\+/
+//   "mem-<uuid>"       → /`mem-\$\{|['"]mem-[0-9a-f]|['"]mem-['"]\s*\+/
+//   "interaction-<ts>" → /`interaction-\$\{|['"]interaction-[0-9]|['"]interaction-['"]\s*\+/
 //
 // The migration service itself is excluded (it explicitly handles legacy IDs).
 // ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ for (const legacyFile of [
 }
 
 // ---------------------------------------------------------------------------
-// 5f — Provider secret-key names in frontend source
+// 5e — Provider secret-key names in frontend source
 //
 // The frontend must not contain the literal strings OPENAI_API_KEY or
 // ANTHROPIC_API_KEY. Provider keys are Supabase Vault secrets accessed only

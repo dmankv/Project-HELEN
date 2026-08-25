@@ -7,7 +7,6 @@
  *
  * Usage:
  *   npm run test:adaptive
- *   npx tsx tests/adaptive-eval.mjs
  */
 
 import { runEvaluationSuite } from '../src/services/daemonEvaluation.js'
