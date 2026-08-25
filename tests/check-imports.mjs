@@ -18,6 +18,7 @@
  */
 
 import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -119,11 +120,11 @@ for (const legacyFile of [
 // ---------------------------------------------------------------------------
 // 5c — Migration timestamp ordering
 //
-// All migration filenames must parse as strictly ascending 14-digit timestamps
-// (YYYYMMDDHHmmss). This prevents a future migration from accidentally being
-// applied before an existing one, which could break RLS policies or FK
-// constraints.  The current highest timestamp is printed so contributors know
-// what value to exceed when adding a new migration.
+// All migration filenames must parse as 14-digit timestamps (YYYYMMDDHHmmss).
+// On pull requests, newly added migrations must be greater than the highest
+// timestamp in the merge base. This prevents a future migration from
+// accidentally being applied before an existing one, which could break RLS
+// policies or FK constraints.
 // ---------------------------------------------------------------------------
 {
   const migrationsDir = path.join(root, 'supabase', 'migrations')
@@ -132,24 +133,52 @@ for (const legacyFile of [
       .filter(f => f.endsWith('.sql'))
       .sort()
 
-    let prev = '0'
     for (const file of migrationFiles) {
       const ts = file.slice(0, 14)
       if (!/^\d{14}$/.test(ts)) {
         console.error(`Migration check failed: filename "${file}" does not start with a 14-digit timestamp (YYYYMMDDHHmmss)`)
         process.exit(1)
       }
-      if (ts <= prev) {
-        console.error(
-          `Migration check failed: "${file}" timestamp ${ts} is not strictly greater than previous ${prev}.` +
-          ' Migrations must have strictly ascending timestamps.',
-        )
+    }
+
+    if (process.env.GITHUB_BASE_REF) {
+      const baseRef = `origin/${process.env.GITHUB_BASE_REF}`
+      let mergeBase
+      try {
+        mergeBase = execFileSync('git', ['merge-base', 'HEAD', baseRef], { cwd: root, encoding: 'utf8' }).trim()
+      } catch {
+        console.error(`Migration check failed: unable to find merge base with ${baseRef}.`)
         process.exit(1)
       }
-      prev = ts
-    }
-    if (migrationFiles.length > 0) {
-      console.log(`Migration timestamp check passed. Max timestamp: ${prev} (next migration must use > ${prev})`)
+
+      const baselineFiles = execFileSync(
+        'git',
+        ['ls-tree', '-r', '--name-only', mergeBase, '--', 'supabase/migrations'],
+        { cwd: root, encoding: 'utf8' },
+      ).trim().split('\n').filter(Boolean)
+      const baselineMax = baselineFiles.reduce((max, file) => {
+        const ts = path.basename(file).slice(0, 14)
+        return /^\d{14}$/.test(ts) && ts > max ? ts : max
+      }, '0')
+      const addedFiles = execFileSync(
+        'git',
+        ['diff', '--name-only', '--diff-filter=A', `${mergeBase}..HEAD`, '--', 'supabase/migrations'],
+        { cwd: root, encoding: 'utf8' },
+      ).trim().split('\n').filter(Boolean)
+
+      for (const file of addedFiles) {
+        const ts = path.basename(file).slice(0, 14)
+        if (ts <= baselineMax) {
+          console.error(
+            `Migration check failed: newly added "${file}" timestamp ${ts} is not greater than ` +
+            `the merge-base maximum ${baselineMax}.`,
+          )
+          process.exit(1)
+        }
+      }
+      console.log(`Migration timestamp check passed. Merge-base max timestamp: ${baselineMax}`)
+    } else if (migrationFiles.length > 0) {
+      console.log('Migration timestamp format check passed.')
     }
   }
 }
