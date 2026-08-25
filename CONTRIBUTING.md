@@ -33,10 +33,10 @@ This deletes merged PR branches immediately after merge and has no effect on
 Every new migration file must be placed in `supabase/migrations/` and named
 with a strictly ascending 14-digit timestamp prefix in `YYYYMMDDHHmmss` format.
 
-The current highest migration timestamp is **`20260825090000`**
-(`20260825090000_adaptive_profiles.sql`).
+The current highest migration timestamp is **`20260825162000`**
+(`20260825162000_github_write_access.sql`).
 
-**Any new migration must use a timestamp greater than `20260825090000`.**
+**Any new migration must use a timestamp greater than `20260825162000`.**
 
 Example:
 ```

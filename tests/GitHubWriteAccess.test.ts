@@ -96,6 +96,17 @@ describe('GitHub write browser client', () => {
 
     expect(result).toEqual({ ok: false, code: 'unavailable' })
   })
+
+  it('preserves the safe repository-authorization-expired failure code', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      code: 'REPOSITORY_AUTHORIZATION_EXPIRED',
+    }), { status: 403 }))
+    const { beginGitHubWriteAuthorization } = await loadModule()
+
+    const result = await beginGitHubWriteAuthorization(true)
+
+    expect(result).toEqual({ ok: false, code: 'REPOSITORY_AUTHORIZATION_EXPIRED' })
+  })
 })
 
 describe('GitHub write server boundaries', () => {
