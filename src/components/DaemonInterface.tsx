@@ -5,6 +5,11 @@ import {
   generateHumanLikeResponse,
 } from '../services/daemonResponseBrain'
 import type { MemorySnippet, ResponseIntent } from '../services/daemonResponseBrain'
+import { selectStrategy, attributeFeedback } from '../services/daemonResponsePolicy'
+import type { ResponseStrategy } from '../services/daemonResponsePolicy'
+import { retrieveRelevantMemories } from '../services/daemonMemoryRetrieval'
+import { routeRequest, classifyComplexity, extractTaskKeywords } from '../services/daemonCapabilityRouter'
+import { getAdaptiveProfile } from '../services/daemonAdaptiveProfile'
 import learningSystem from '../services/daemon_learning_integration'
 import {
   saveMemory,
@@ -326,6 +331,9 @@ export default function DaemonInterface({
   const activeConvIdRef = useRef(activeConvId)
   // Maps message id → learning interaction id (ephemeral; not persisted across page loads).
   const msgToInteractionRef = useRef<Map<string, string>>(new Map())
+  // Maps an assistant message to the approved strategy that produced it, so
+  // thumbs-up/down feedback is attributed to the right strategy.
+  const msgToStrategyRef = useRef<Map<string, { strategy: ResponseStrategy; contextKey: string }>>(new Map())
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -540,6 +548,24 @@ export default function DaemonInterface({
       const controller = new AbortController()
       abortRef.current = controller
 
+      // Adaptive layer: classify the turn once and reuse the selected strategy
+      // for both the cloud request and the local fallback.
+      const adaptiveProfile = getAdaptiveProfile()
+      const mood = detectMood(text)
+      const intent = detectIntent(text, lastIntent)
+      const complexity = classifyComplexity(text, intent)
+      const routing = routeRequest({
+        intent,
+        mood,
+        complexity,
+        isAuthenticated: Boolean(currentUser),
+        isOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
+        cloudAvailable: hasEdgeFunction() || hasBackend(),
+        privacyOptOut: false,
+        taskKeywords: extractTaskKeywords(text),
+      })
+      const selection = selectStrategy(intent, mood, adaptiveProfile, personalityPrefs)
+
       // 1. Supabase Edge Function (authenticated, rate-limited, no browser API keys)
       // Project logs can only be attached once after an explicit user selection.
       // They are never persisted with the conversation or sent to the legacy API.
@@ -555,7 +581,10 @@ export default function DaemonInterface({
         // Clear only when this request actually dispatches the selected context
         // to the Supabase Edge Function. Local/legacy fallback leaves it queued.
         if (diagnosticContext) setProjectLogContext(null)
-        const edgeResult = await callEdgeFunction(apiHistory, controller.signal, diagnosticContext)
+        const edgeResult = await callEdgeFunction(apiHistory, controller.signal, {
+          strategy: selection.strategy,
+          contextKey: selection.contextKey,
+        }, diagnosticContext)
         if (typeof edgeResult === 'string') {
           setUsingBackend(true)
           setAuthError(false)
@@ -571,6 +600,7 @@ export default function DaemonInterface({
             content: edgeResult,
             timestamp: new Date().toISOString(),
           }
+          msgToStrategyRef.current.set(aiMsg.id, { strategy: selection.strategy, contextKey: selection.contextKey })
           const updated = [...nextMessages, aiMsg]
           persistConversationMessages(convId, updated)
           // Persist to Supabase
@@ -647,14 +677,15 @@ export default function DaemonInterface({
       await new Promise(r => setTimeout(r, thinkingDelay(text)))
 
       const durableMemories = retrieveRelevant(text, 5)
-      const legacySnippets: MemorySnippet[] = durableMemories.map(m => ({
-        text: m.text,
-        relevance: new Date(m.createdAt).getTime(),
-      }))
 
-      const mood = detectMood(text)
-      const intent = detectIntent(text, lastIntent)
+      // Bounded, provenance-tagged context retrieval.
+      const retrieved = retrieveRelevantMemories(text, durableMemories, adaptiveProfile)
+      const legacySnippets: MemorySnippet[] = retrieved
+        .filter(m => m.type === 'explicit')
+        .map(m => ({ text: m.text, relevance: m.relevanceScore }))
+
       const wantsShortAnswer = text.trim().split(/\s+/).length <= 5
+        || selection.strategy === 'concise-action-plan'
 
       const response = generateHumanLikeResponse(text, {
         userMessage: text,
@@ -672,9 +703,13 @@ export default function DaemonInterface({
         intent,
         confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
         ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
-        memoryUsed: legacySnippets.length,
-        planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
+        memoryUsed: retrieved.length,
+        planComplexity: complexity,
         timestamp: new Date(),
+        strategy: selection.strategy,
+        contextKey: selection.contextKey,
+        routingMode: routing.mode,
+        routingReason: routing.reason,
       })
 
       const aiMsg: Message = {
@@ -707,6 +742,7 @@ export default function DaemonInterface({
           }
         : null
       msgToInteractionRef.current.set(aiMsg.id, interactionRecord.id)
+      msgToStrategyRef.current.set(aiMsg.id, { strategy: selection.strategy, contextKey: selection.contextKey })
 
       const updated = fallbackMsg ? [...nextMessages, fallbackMsg, aiMsg] : [...nextMessages, aiMsg]
       persistConversationMessages(convId, updated)
@@ -720,8 +756,8 @@ export default function DaemonInterface({
           intent,
           confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
           ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
-          memoryUsed: legacySnippets.length,
-          planComplexity: wantsShortAnswer ? 'simple' : 'moderate',
+          memoryUsed: retrieved.length,
+          planComplexity: complexity,
           createdAt: new Date().toISOString(),
         })
         setSyncStatus('syncing')
@@ -1065,7 +1101,7 @@ export default function DaemonInterface({
                   <li>Confirm this build includes <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.</li>
                   <li>In Supabase Dashboard → Edge Functions → <code>daemon-chat</code>, confirm the function exists and the latest deploy succeeded.</li>
                   <li>Review the <code>daemon-chat</code> Edge Function logs for safe codes such as <code>RATE_LIMITED</code>, <code>PROVIDER_UNAVAILABLE</code>, or <code>FUNCTION_CONFIG_ERROR</code>.</li>
-                  <li>Verify Supabase function secrets: <code>OPENAI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>, <code>DAEMON_PROVIDER</code>, and optional <code>DAEMON_MODEL</code>.</li>
+                  <li>Verify Supabase function secrets: the AI provider API key (e.g. the key for OpenAI or Anthropic), <code>DAEMON_PROVIDER</code>, and optional <code>DAEMON_MODEL</code>.</li>
                   <li>GitHub Pages deploys the frontend only; it does not deploy the Supabase Edge Function or its secrets.</li>
                 </ul>
               </details>
@@ -1217,6 +1253,10 @@ export default function DaemonInterface({
                                   void updateLearningFeedback(interactionId, 'helpful')
                                 }
                               }
+                              const attribution = msgToStrategyRef.current.get(msg.id)
+                              if (attribution) {
+                                attributeFeedback(attribution.contextKey, attribution.strategy, true)
+                              }
                               setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}
                           ><span aria-hidden="true">👍</span></button>
@@ -1231,6 +1271,10 @@ export default function DaemonInterface({
                                 if (isPersistenceConfigured() && currentUser) {
                                   void updateLearningFeedback(interactionId, 'unhelpful')
                                 }
+                              }
+                              const attribution = msgToStrategyRef.current.get(msg.id)
+                              if (attribution) {
+                                attributeFeedback(attribution.contextKey, attribution.strategy, false)
                               }
                               setRatedMessages(prev => new Set(prev).add(msg.id))
                             }}

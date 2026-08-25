@@ -78,6 +78,16 @@ export function hasEdgeFunction(): boolean {
   return SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0
 }
 
+/** Optional adaptive metadata forwarded to the edge function for this turn. */
+export interface EdgeChatMetadata {
+  /** Approved response strategy selected locally (daemonResponsePolicy). */
+  strategy?: string
+  /** "intent:mood" key the strategy was selected for. */
+  contextKey?: string
+  /** Local interaction id, echoed back so feedback can be attributed. */
+  interactionId?: string
+}
+
 function isSafeEdgeFunctionErrorCode(value: unknown): value is SafeEdgeFunctionErrorCode {
   return typeof value === 'string' && SAFE_EDGE_FUNCTION_ERROR_CODES.has(value as SafeEdgeFunctionErrorCode)
 }
@@ -169,6 +179,7 @@ export function classifyEdgeTransportFailure(
 export async function callEdgeFunction(
   messages: APIMessage[],
   signal?: AbortSignal,
+  metadata?: EdgeChatMetadata,
   diagnosticContext?: string,
 ): Promise<string | EdgeChatFailure> {
   const client = getClient()
@@ -203,6 +214,9 @@ export async function callEdgeFunction(
       },
       body: JSON.stringify({
         messages,
+        ...(metadata?.strategy ? { strategy: metadata.strategy } : {}),
+        ...(metadata?.contextKey ? { context_key: metadata.contextKey } : {}),
+        ...(metadata?.interactionId ? { interaction_id: metadata.interactionId } : {}),
         ...(diagnosticContext ? { diagnosticContext } : {}),
       }),
       signal: controller.signal,

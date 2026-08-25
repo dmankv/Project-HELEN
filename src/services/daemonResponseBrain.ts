@@ -1,3 +1,14 @@
+import { selectStrategy } from './daemonResponsePolicy'
+import type { ResponseStrategy, StrategySelectionResult } from './daemonResponsePolicy'
+import { retrieveRelevantMemories } from './daemonMemoryRetrieval'
+import type { RetrievedMemory, RetrievalConfig } from './daemonMemoryRetrieval'
+import { routeRequest, classifyComplexity, extractTaskKeywords } from './daemonCapabilityRouter'
+import type { RoutingDecision } from './daemonCapabilityRouter'
+import { getAdaptiveProfile } from './daemonAdaptiveProfile'
+import type { AdaptiveProfile } from './daemonAdaptiveProfile'
+import type { PersonalityPreferences } from './daemonPersonalityPreferences'
+import type { DurableMemory } from './daemonMemory'
+
 export type UserMood = 'neutral' | 'frustrated' | 'excited' | 'confused' | 'urgent' | 'sad'
   | 'overwhelmed' | 'discouraged'
 
@@ -545,4 +556,149 @@ function buildTopicPhrase(message: string, _context: ResponseContext): string {
     return trimmed.slice(0, 57) + '…'
   }
   return trimmed || message.trim().slice(0, 60)
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive orchestration
+//
+// buildResponse wires the adaptive layer around generateHumanLikeResponse:
+//   1. routeRequest decides where the turn should be handled (and reports
+//      honestly when a capability is unavailable).
+//   2. selectStrategy picks an approved response strategy for the situation.
+//   3. retrieveRelevantMemories supplies bounded, provenance-tagged context.
+//
+// The strategy can only influence phrasing/shape within already-approved
+// behavior — it never changes safety, crisis, refusal, or factuality policy,
+// and Daemon never claims sentience regardless of what was learned.
+// ---------------------------------------------------------------------------
+
+export interface BuildResponseOptions {
+  userMessage: string
+  /** Explicit user personality settings. These always outrank inferred ones. */
+  personalityPrefs?: PersonalityPreferences
+  /** Defaults to the stored profile; injectable for tests and offline use. */
+  adaptiveProfile?: AdaptiveProfile
+  /** Durable memories to consider for retrieval. */
+  memories?: DurableMemory[]
+  lastIntent?: ResponseIntent
+  isAuthenticated?: boolean
+  isOnline?: boolean
+  cloudAvailable?: boolean
+  privacyOptOut?: boolean
+  retrievalConfig?: Partial<RetrievalConfig>
+}
+
+export interface BuildResponseResult {
+  text: string
+  mood: UserMood
+  intent: ResponseIntent
+  strategy: ResponseStrategy
+  contextKey: string
+  strategySelection: StrategySelectionResult
+  routing: RoutingDecision
+  retrievedMemories: RetrievedMemory[]
+  complexity: 'simple' | 'moderate' | 'complex'
+  wantsShortAnswer: boolean
+}
+
+/**
+ * Produces a local response together with the metadata needed to attribute
+ * later feedback (strategy + contextKey) and to explain what context was used.
+ */
+export function buildResponse(options: BuildResponseOptions): BuildResponseResult {
+  const {
+    userMessage,
+    personalityPrefs = {},
+    memories = [],
+    lastIntent,
+    isAuthenticated = false,
+    isOnline = true,
+    cloudAvailable = false,
+    privacyOptOut = false,
+    retrievalConfig,
+  } = options
+
+  const mood = detectMood(userMessage)
+  const intent = detectIntent(userMessage, lastIntent)
+  const adaptiveProfile = options.adaptiveProfile ?? getAdaptiveProfile()
+  const complexity = classifyComplexity(userMessage, intent)
+
+  const routing = routeRequest({
+    intent,
+    mood,
+    complexity,
+    isAuthenticated,
+    isOnline,
+    cloudAvailable,
+    privacyOptOut,
+    taskKeywords: extractTaskKeywords(userMessage),
+  })
+
+  const strategySelection = selectStrategy(intent, mood, adaptiveProfile, personalityPrefs)
+
+  const retrievedMemories = retrieveRelevantMemories(
+    userMessage,
+    memories,
+    adaptiveProfile,
+    retrievalConfig,
+  )
+
+  const wantsShortAnswer = userMessage.trim().split(/\s+/).length <= 5
+    || strategySelection.strategy === 'concise-action-plan'
+
+  const snippets: MemorySnippet[] = retrievedMemories
+    .filter(m => m.type === 'explicit')
+    .map(m => ({ text: m.text, relevance: m.relevanceScore }))
+
+  const text = generateHumanLikeResponse(userMessage, {
+    userMessage,
+    mood,
+    intent,
+    memories: snippets.length > 0 ? snippets : undefined,
+    wantsShortAnswer,
+    lastIntent,
+    personality: strategyAwarePersonality(personalityPrefs, strategySelection.strategy),
+  })
+
+  return {
+    text,
+    mood,
+    intent,
+    strategy: strategySelection.strategy,
+    contextKey: strategySelection.contextKey,
+    strategySelection,
+    routing,
+    retrievedMemories,
+    complexity,
+    wantsShortAnswer,
+  }
+}
+
+/**
+ * Converts explicit preferences into PersonalitySettings, letting the selected
+ * strategy shape only the fields the user has not set explicitly.
+ * Explicit settings always win.
+ */
+function strategyAwarePersonality(
+  prefs: PersonalityPreferences,
+  strategy: ResponseStrategy,
+): PersonalitySettings {
+  const settings: PersonalitySettings = {
+    detailLevel: prefs.detail_level,
+    warmth: prefs.warmth,
+    humorLevel: prefs.humor_level,
+    directness: prefs.directness,
+    allowMildProfanity: prefs.allow_mild_profanity,
+    followUpQuestions: prefs.follow_up_questions,
+    customGreeting: prefs.custom_greeting ?? null,
+    patternRecognition: prefs.pattern_recognition,
+  }
+
+  if (settings.detailLevel === undefined && strategy === 'concise-action-plan') {
+    settings.detailLevel = 'concise'
+  }
+  if (settings.followUpQuestions === undefined && strategy === 'clarify-first') {
+    settings.followUpQuestions = true
+  }
+  return settings
 }

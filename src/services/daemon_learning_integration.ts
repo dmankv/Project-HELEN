@@ -12,6 +12,18 @@ export interface LearningMetadata {
   memoryUsed: number
   planComplexity: 'simple' | 'moderate' | 'complex'
   timestamp: Date
+  /**
+   * Approved response strategy used for this turn (see daemonResponsePolicy).
+   * Recorded so later thumbs-up/down feedback can be attributed to the
+   * strategy that actually produced the response.
+   */
+  strategy?: string
+  /** (intent, mood) context key the strategy was selected for. */
+  contextKey?: string
+  /** Where the turn was routed (see daemonCapabilityRouter). */
+  routingMode?: string
+  /** Why it was routed there. */
+  routingReason?: string
 }
 
 export interface InteractionRecord {
