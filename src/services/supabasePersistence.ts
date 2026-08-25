@@ -134,6 +134,33 @@ export async function deleteConversation(id: string): Promise<boolean> {
   return true
 }
 
+/**
+ * Delete a single conversation owned by the authenticated user.
+ *
+ * Message cleanup relies on the conversations → messages foreign key cascade
+ * defined in the Supabase schema, while RLS limits the delete to rows the
+ * current authenticated user is allowed to remove.
+ */
+export async function deleteCloudConversation(id: string): Promise<boolean> {
+  return deleteConversation(id)
+}
+
+/**
+ * Delete all conversations visible to the authenticated user in one RLS-safe
+ * operation. Ownership is enforced by Supabase row-level security rather than
+ * client-supplied user identifiers.
+ */
+export async function deleteAllCloudConversations(): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+  const { error } = await client
+    .from('conversations')
+    .delete()
+    .not('id', 'is', null)
+  if (error) { console.warn('[daemon-persistence] deleteAllCloudConversations:', error.message); return false }
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------

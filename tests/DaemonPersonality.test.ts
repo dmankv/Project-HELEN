@@ -5,7 +5,7 @@
  * opt-in phrase behavior, safety boundaries, and the preferences service.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   detectMood,
   detectIntent,
@@ -235,9 +235,24 @@ describe('generateHumanLikeResponse — pushback', () => {
 // ---------------------------------------------------------------------------
 
 describe('generateHumanLikeResponse — uncertainty', () => {
-  it('returns honest uncertainty response for uncertain intent', () => {
-    const resp = generateHumanLikeResponse('', ctx({ intent: 'uncertain' }))
-    expect(resp).toMatch(/not sure|don'?t want to guess|can'?t|upfront|disservice/i)
+  it('returns every approved honest uncertainty response deterministically', () => {
+    const approvedResponses = [
+      "Honestly, I'm not sure about that one — I don't want to guess and give you something wrong. Could you rephrase or ask a different way?",
+      "That's outside what I can help with confidently right now, but I don't want to make something up. Is there another angle I can try?",
+      "I want to be upfront — I'm not confident I have a good answer for that. Is there a related question I can actually help with?",
+      "Good question, but I'd be doing you a disservice if I just made something up here. Want to narrow it down or try a different question?",
+    ]
+
+    approvedResponses.forEach((expected, index) => {
+      const randomValue = (index + 0.01) / approvedResponses.length
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(randomValue)
+      try {
+        const resp = generateHumanLikeResponse('', ctx({ intent: 'uncertain' }))
+        expect(resp).toBe(expected)
+      } finally {
+        randomSpy.mockRestore()
+      }
+    })
   })
 })
 

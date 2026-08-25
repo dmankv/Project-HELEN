@@ -55,10 +55,39 @@ vi.mock('../src/services/daemon_learning_integration', () => ({
   },
 }))
 
+vi.mock('../src/services/supabasePersistence', async (importActual) => {
+  const actual = await importActual<typeof import('../src/services/supabasePersistence')>()
+  return {
+    ...actual,
+    isPersistenceConfigured: vi.fn(() => false),
+    upsertConversation: vi.fn(async () => null),
+    insertMessage: vi.fn(async () => null),
+    insertCloudMemory: vi.fn(async () => null),
+    deleteLastCloudMemory: vi.fn(async () => false),
+    deleteCloudMemoriesByText: vi.fn(async () => false),
+    deleteAllCloudMemories: vi.fn(async () => false),
+    updateLearningFeedback: vi.fn(async () => false),
+    insertLearningInteraction: vi.fn(async () => null),
+    migrateLocalMemoriesToCloud: vi.fn(async () => undefined),
+    hydrateFromCloud: vi.fn(async () => null),
+    deleteConversation: vi.fn(async () => true),
+    deleteMessagesForConversation: vi.fn(async () => true),
+    listConversations: vi.fn(async () => []),
+    deleteCloudConversation: vi.fn(async () => true),
+    deleteAllCloudConversations: vi.fn(async () => true),
+  }
+})
+
 // Import the component after mocks are registered.
 import DaemonInterface from '../src/components/DaemonInterface'
 import { saveMemory, listMemories, forgetAll } from '../src/services/daemonMemory'
 import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonChatAPI'
+import {
+  isPersistenceConfigured,
+  deleteCloudConversation,
+  deleteAllCloudConversations,
+  listConversations,
+} from '../src/services/supabasePersistence'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,6 +96,10 @@ import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonCha
 beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
+  vi.mocked(isPersistenceConfigured).mockReturnValue(false)
+  vi.mocked(deleteCloudConversation).mockResolvedValue(true)
+  vi.mocked(deleteAllCloudConversations).mockResolvedValue(true)
+  vi.mocked(listConversations).mockResolvedValue([])
 })
 
 // ---------------------------------------------------------------------------
@@ -283,6 +316,48 @@ describe('DaemonInterface', () => {
     expect(screen.getByText('Second message')).toBeInTheDocument()
   })
 
+  it('clear current chat promotes the remaining conversation with its latest persisted messages', async () => {
+    const newerConv = {
+      id: 'conv-newer',
+      title: 'Newer chat',
+      messages: [{ id: 'm-newer', role: 'user', content: 'Newer message', timestamp: '2026-08-25T02:00:00Z' }],
+      createdAt: '2026-08-25T02:00:00Z',
+    }
+    const olderConv = {
+      id: 'conv-older',
+      title: 'Older chat',
+      messages: [{ id: 'm-older', role: 'user', content: 'Older message', timestamp: '2026-08-25T01:00:00Z' }],
+      createdAt: '2026-08-25T01:00:00Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([newerConv, olderConv]))
+    localStorage.setItem('daemon_active_conv_id', newerConv.id)
+    localStorage.setItem('daemon_messages', JSON.stringify(newerConv.messages))
+
+    render(<DaemonInterface />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Older chat/i }))
+
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'reply to older' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('reply to older')).toBeInTheDocument(), WAIT_OPTS)
+    await waitFor(() => expect(screen.getByRole('log')).toHaveAttribute('aria-busy', 'false'), WAIT_OPTS)
+
+    fireEvent.click(screen.getByRole('button', { name: /Newer chat/i }))
+    expect(screen.getByText('Newer message')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear current chat/i }))
+
+    expect(screen.queryByRole('button', { name: /Newer chat/i })).not.toBeInTheDocument()
+    expect(screen.getByText('Older message')).toBeInTheDocument()
+    expect(screen.getByText('reply to older')).toBeInTheDocument()
+
+    const storedConvs = JSON.parse(localStorage.getItem('daemon_conversations') ?? '[]') as Array<{ id: string; messages: Array<{ content: string }> }>
+    expect(storedConvs).toHaveLength(1)
+    expect(storedConvs[0].id).toBe('conv-older')
+    expect(storedConvs[0].messages.some(message => message.content === 'reply to older')).toBe(true)
+  }, 15000)
+
   it('"Clear current chat" with the sole conversation shows blank pane', async () => {
     const conv = {
       id: 'conv-only',
@@ -348,6 +423,65 @@ describe('DaemonInterface', () => {
     // Wait for both conversations to be listed
     await waitFor(() => expect(document.querySelectorAll('.conversation-item').length).toBe(2), WAIT_OPTS)
   }, 12000)
+
+  it('clear current chat keeps local deletion when cloud delete fails and reports sync error', async () => {
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(deleteCloudConversation).mockResolvedValue(false)
+
+    const conv1 = {
+      id: 'conv-1',
+      title: 'First chat',
+      messages: [{ id: 'msg-1', role: 'user', content: 'First message', timestamp: '2026-08-25T01:00:00Z' }],
+      createdAt: '2026-08-25T01:00:00Z',
+    }
+    const conv2 = {
+      id: 'conv-2',
+      title: 'Second chat',
+      messages: [{ id: 'msg-2', role: 'user', content: 'Second message', timestamp: '2026-08-25T02:00:00Z' }],
+      createdAt: '2026-08-25T02:00:00Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([conv2, conv1]))
+    localStorage.setItem('daemon_active_conv_id', conv2.id)
+    localStorage.setItem('daemon_messages', JSON.stringify(conv2.messages))
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear current chat/i }))
+
+    expect(screen.queryByRole('button', { name: /Second chat/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /First chat/i })).toBeInTheDocument()
+    expect(screen.getByText('First message')).toBeInTheDocument()
+
+    await waitFor(() => expect(deleteCloudConversation).toHaveBeenCalledWith('conv-2'), WAIT_OPTS)
+    await waitFor(() => expect(screen.getByText('Sync error')).toBeInTheDocument(), WAIT_OPTS)
+
+    const storedConvs = JSON.parse(localStorage.getItem('daemon_conversations') ?? '[]') as Array<{ id: string }>
+    expect(storedConvs.map(conv => conv.id)).toEqual(['conv-1'])
+  })
+
+  it('clear all chats uses the owner-scoped bulk delete helper without post-wipe discovery', async () => {
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(deleteAllCloudConversations).mockResolvedValue(true)
+
+    const conv = {
+      id: 'conv-a',
+      title: 'Chat A',
+      messages: [{ id: 'msg-a', role: 'user', content: 'Message A', timestamp: '2026-08-25T01:00:00Z' }],
+      createdAt: '2026-08-25T01:00:00Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([conv]))
+    localStorage.setItem('daemon_active_conv_id', conv.id)
+    localStorage.setItem('daemon_messages', JSON.stringify(conv.messages))
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear all chats/i }))
+
+    expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Chat A/i })).not.toBeInTheDocument()
+    await waitFor(() => expect(deleteAllCloudConversations).toHaveBeenCalledTimes(1), WAIT_OPTS)
+    expect(listConversations).not.toHaveBeenCalled()
+  })
 
   // ── Enter key ─────────────────────────────────────────────────────────────
 
