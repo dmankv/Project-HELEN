@@ -45,8 +45,8 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const body: unknown = await req.json()
     const { userId, service } = await authenticateRequest(req)
+    const body: unknown = await req.json()
     await writeProjectSecret(service, userId, body)
     return jsonResponse({ written: true }, 200, headers)
   } catch (error) {

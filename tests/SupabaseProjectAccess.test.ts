@@ -110,6 +110,10 @@ describe('Supabase project access server boundaries', () => {
     path.join(repoRoot, 'supabase/functions/_shared/supabaseProjectAccess.ts'),
     'utf8',
   )
+  const secretWriteFunction = fs.readFileSync(
+    path.join(repoRoot, 'supabase/functions/supabase-project-secret-write/index.ts'),
+    'utf8',
+  )
 
   it('keeps OAuth state, connection ciphertext, rate limits, and audit records private', () => {
     const normalized = migration.toLowerCase()
@@ -141,5 +145,11 @@ describe('Supabase project access server boundaries', () => {
     expect(sharedFunction).not.toMatch(/method:\s*'GET'[\s\S]{0,300}\/secrets/)
     expect(sharedFunction).toContain('await response.body?.cancel()')
     expect(sharedFunction).toContain("action: 'secret_write_succeeded'")
+  })
+
+  it('authenticates secret-write callers before reading the request body', () => {
+    expect(secretWriteFunction.indexOf('authenticateRequest(req)')).toBeLessThan(
+      secretWriteFunction.indexOf('await req.json()'),
+    )
   })
 })
