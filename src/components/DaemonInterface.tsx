@@ -548,23 +548,30 @@ export default function DaemonInterface({
             void insertCloudMemory({ id: latest.id, text: latest.text, tags: latest.tags, createdAt: latest.createdAt })
           }
         }
+        // Always clear hydrated memories for deletion commands so the panel
+        // does not show stale entries when persistence is not configured or the
+        // user is not signed in.
+        if (memCmd.type === 'forget-last') {
+          setHydratedMemories(previous => {
+            if (previous.length === 0) return previous
+            const latest = previous.reduce((a, b) => (
+              new Date(a.createdAt).getTime() >= new Date(b.createdAt).getTime() ? a : b
+            ))
+            return previous.filter(memory => memory.id !== latest.id)
+          })
+        } else if (memCmd.type === 'forget-text') {
+          const needle = memCmd.payload.toLowerCase().trim()
+          setHydratedMemories(previous => previous.filter(memory => !memory.text.toLowerCase().includes(needle)))
+        } else if (memCmd.type === 'forget-all') {
+          setHydratedMemories([])
+        }
         // Mirror memory deletions to cloud
         if (isPersistenceConfigured() && currentUser) {
           if (memCmd.type === 'forget-last') {
-            setHydratedMemories(previous => {
-              if (previous.length === 0) return previous
-              const latest = previous.reduce((a, b) => (
-                new Date(a.createdAt).getTime() >= new Date(b.createdAt).getTime() ? a : b
-              ))
-              return previous.filter(memory => memory.id !== latest.id)
-            })
             void deleteLastCloudMemory()
           } else if (memCmd.type === 'forget-text') {
-            const needle = memCmd.payload.toLowerCase().trim()
-            setHydratedMemories(previous => previous.filter(memory => !memory.text.toLowerCase().includes(needle)))
             void deleteCloudMemoriesByText(memCmd.payload)
           } else if (memCmd.type === 'forget-all') {
-            setHydratedMemories([])
             void deleteAllCloudMemories()
           }
         }
