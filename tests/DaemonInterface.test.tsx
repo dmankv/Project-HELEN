@@ -100,6 +100,7 @@ import {
   deleteCloudConversation,
   deleteAllCloudConversations,
   deleteCloudMemory,
+  hydrateFromCloud,
   listConversations,
 } from '../src/services/supabasePersistence'
 
@@ -398,10 +399,35 @@ describe('DaemonInterface', () => {
 
     render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Forget memory saved/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: Use concise answers\./i }))
 
     expect(forgetById).toHaveBeenCalledWith(memory.id)
     expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id)
+  })
+
+  it('shows hydrated durable memories and can delete cloud-only entries', async () => {
+    const cloudOnlyMemoryId = '550e8400-e29b-41d4-a716-446655440099'
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(hydrateFromCloud).mockResolvedValue({
+      conversations: [],
+      messagesByConversation: {},
+      memories: [{
+        id: cloudOnlyMemoryId,
+        user_id: 'user-1',
+        text: 'Cloud-only durable memory',
+        tags: [],
+        created_at: '2026-08-25T00:00:00.000Z',
+      }],
+      learningInteractions: [],
+    })
+    vi.mocked(forgetById).mockReturnValue(false)
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    expect(await screen.findByText('Cloud-only durable memory')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: Cloud-only durable memory/i }))
+
+    expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId)
   })
 
   // ── Clear All button ──────────────────────────────────────────────────────

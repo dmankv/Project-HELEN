@@ -133,12 +133,20 @@ for (const legacyFile of [
       .filter(f => f.endsWith('.sql'))
       .sort()
 
+    let previousTimestamp = ''
     for (const file of migrationFiles) {
       const ts = file.slice(0, 14)
       if (!/^\d{14}$/.test(ts)) {
         console.error(`Migration check failed: filename "${file}" does not start with a 14-digit timestamp (YYYYMMDDHHmmss)`)
         process.exit(1)
       }
+      if (ts === previousTimestamp) {
+        console.error(
+          `Migration check failed: duplicate migration timestamp prefix ${ts} detected in sorted migrations.`,
+        )
+        process.exit(1)
+      }
+      previousTimestamp = ts
     }
 
     if (process.env.GITHUB_BASE_REF) {

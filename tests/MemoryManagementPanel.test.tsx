@@ -17,7 +17,7 @@ describe('MemoryManagementPanel', () => {
     expect(screen.getByText(memory.text)).toBeInTheDocument()
     expect(screen.getByText(/preferences/i)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Forget memory saved/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: I prefer concise answers\./i }))
 
     expect(onDelete).toHaveBeenCalledWith(memory.id)
   })

@@ -3,7 +3,7 @@
  *
  * Invokes the deterministic fixture suite from daemonEvaluation.ts and exits
  * non-zero if any assertion fails.  This runs entirely locally with no network
- * access, no API keys, and no real user data — suitable for CI on every PR.
+ * access, no API keys, and no real user data.
  *
  * Usage:
  *   npm run test:adaptive

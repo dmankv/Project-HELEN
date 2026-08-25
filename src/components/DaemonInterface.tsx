@@ -21,6 +21,7 @@ import {
   retrieveRelevant,
   formatMemoriesForContext,
 } from '../services/daemonMemory'
+import type { DurableMemory } from '../services/daemonMemory'
 import { callChatAPI, hasBackend, isAPIFailure } from '../services/daemonChatAPI'
 import type { APIMessage } from '../services/daemonChatAPI'
 import {
@@ -331,6 +332,7 @@ export default function DaemonInterface({
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('unconfigured')
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const [dataRevision, setDataRevision] = useState(0)
+  const [hydratedMemories, setHydratedMemories] = useState<DurableMemory[]>([])
   const [exportStatus, setExportStatus] = useState<'idle' | 'exported' | 'failed'>('idle')
   const [personalityPrefs, setPersonalityPrefs] = useState<PersonalityPreferences>(() => loadLocalPreferences())
   const [showPreferences, setShowPreferences] = useState(false)
@@ -393,6 +395,7 @@ export default function DaemonInterface({
       setSyncStatus('unconfigured')
     } else if (!currentUser) {
       setSyncStatus('offline')
+      setHydratedMemories([])
     } else {
       setSyncStatus('idle')
     }
@@ -407,6 +410,14 @@ export default function DaemonInterface({
     void (async () => {
       const hydrated = await hydrateFromCloud()
       if (!hydrated) return
+      if (hydrated.memories.length > 0) {
+        setHydratedMemories(hydrated.memories.map(memory => ({
+          id: memory.id,
+          text: memory.text,
+          tags: memory.tags,
+          createdAt: memory.created_at,
+        })))
+      }
       // Merge cloud conversations: add ones not already in local state.
       // Strategy: cloud data is additive — we never replace or clear local
       // conversations, and we never reset the currently-active conversation
@@ -917,7 +928,15 @@ export default function DaemonInterface({
 
   const insights = useMemo(() => learningSystem.getLearningInsights(), [dataRevision])
   const pendingLearning = useMemo(() => learningSystem.getPendingLearning(), [dataRevision])
-  const durableMemories = useMemo(() => listMemories(), [dataRevision])
+  const durableMemories = useMemo(() => {
+    const merged = new Map<string, DurableMemory>()
+    for (const memory of listMemories()) merged.set(memory.id, memory)
+    for (const memory of hydratedMemories) {
+      if (!merged.has(memory.id)) merged.set(memory.id, memory)
+    }
+    return Array.from(merged.values())
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  }, [dataRevision, hydratedMemories])
 
   const handleLearningFeedback = useCallback((
     interactionId: string,
@@ -950,12 +969,17 @@ export default function DaemonInterface({
   }, [currentUser, pendingLearning])
 
   const handleDeleteMemory = useCallback((memoryId: string) => {
-    if (!forgetById(memoryId)) return
+    const deletedLocal = forgetById(memoryId)
+    const deletedHydrated = hydratedMemories.some(memory => memory.id === memoryId)
+    if (!deletedLocal && !deletedHydrated) return
+    if (deletedHydrated) {
+      setHydratedMemories(previous => previous.filter(memory => memory.id !== memoryId))
+    }
     setDataRevision(revision => revision + 1)
     if (isPersistenceConfigured() && currentUser) {
       void deleteCloudMemory(memoryId)
     }
-  }, [currentUser])
+  }, [currentUser, hydratedMemories])
 
   const handleExportLearningData = useCallback(() => {
     try {

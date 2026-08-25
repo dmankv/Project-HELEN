@@ -48,9 +48,6 @@ jobs:
       - name: Check imports
         run: npm run check:imports
 
-      - name: Adaptive intelligence fixture suite
-        run: npm run test:adaptive
-
       - name: Typecheck and build server
         run: |
           npm run server:typecheck

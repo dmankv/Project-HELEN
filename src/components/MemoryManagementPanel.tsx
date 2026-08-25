@@ -42,7 +42,7 @@ export default function MemoryManagementPanel({
                 type="button"
                 className="memory-delete-btn"
                 onClick={() => onDelete(memory.id)}
-                aria-label={`Forget memory saved ${formatCreatedAt(memory.createdAt)}`}
+                aria-label={`Forget memory: ${memory.text} (saved ${formatCreatedAt(memory.createdAt)})`}
                 title="Forget this memory"
               >
                 Forget

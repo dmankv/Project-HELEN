@@ -54,6 +54,14 @@ function newIdempotencyKey(): string | null {
   return typeof randomUUID === 'function' ? randomUUID.call(globalThis.crypto) : null
 }
 
+const MAX_ISSUE_TITLE_BYTES = 256
+const MAX_ISSUE_BODY_BYTES = 16_384
+const UTF8_ENCODER = new TextEncoder()
+
+function utf8ByteLength(value: string): number {
+  return UTF8_ENCODER.encode(value).byteLength
+}
+
 export default function GitHubWriteAccessPanel() {
   const [connections, setConnections] = useState<GitHubWriteConnectionSummary[]>([])
   const [eligibleRepositories, setEligibleRepositories] = useState<GitHubEligibleRepository[]>([])
@@ -75,6 +83,10 @@ export default function GitHubWriteAccessPanel() {
   const selectedRepository = eligibleRepositories.find(repository => repository.repositoryId === selectedRepositoryId)
     ?? eligibleRepositories[0]
     ?? null
+  const issueTitleBytes = utf8ByteLength(issueTitle)
+  const issueBodyBytes = utf8ByteLength(issueBody)
+  const issueTitleWithinLimit = issueTitleBytes > 0 && issueTitleBytes <= MAX_ISSUE_TITLE_BYTES
+  const issueBodyWithinLimit = issueBodyBytes <= MAX_ISSUE_BODY_BYTES
 
   const refreshConnections = async (): Promise<GitHubWriteResult<{
     connections: GitHubWriteConnectionSummary[]
@@ -298,10 +310,10 @@ export default function GitHubWriteAccessPanel() {
               value={issueTitle}
               onChange={event => {
                 setIssueTitle(event.target.value)
+                setIssueConfirmed(false)
                 resetIssueAttempt()
               }}
               autoComplete="off"
-              maxLength={256}
             />
             <label htmlFor="github-write-issue-body">Issue body (optional)</label>
             <textarea
@@ -309,11 +321,14 @@ export default function GitHubWriteAccessPanel() {
               value={issueBody}
               onChange={event => {
                 setIssueBody(event.target.value)
+                setIssueConfirmed(false)
                 resetIssueAttempt()
               }}
               rows={5}
-              maxLength={16_384}
             />
+            <p className="github-write-access-preview">
+              Title bytes: {issueTitleBytes}/{MAX_ISSUE_TITLE_BYTES} · Body bytes: {issueBodyBytes}/{MAX_ISSUE_BODY_BYTES}
+            </p>
             <p className="github-write-access-preview">
               Preview: create an issue in <code>{selectedConnection.repositoryFullName}</code>. Daemon
               content is never submitted automatically; review or enter the text yourself.
@@ -329,7 +344,7 @@ export default function GitHubWriteAccessPanel() {
             <button
               type="button"
               onClick={() => void handleCreateIssue()}
-              disabled={loading || !issueConfirmed || issueTitle.trim().length === 0}
+              disabled={loading || !issueConfirmed || !issueTitleWithinLimit || !issueBodyWithinLimit}
             >
               Create GitHub issue
             </button>

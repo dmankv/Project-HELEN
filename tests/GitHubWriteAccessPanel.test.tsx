@@ -88,4 +88,44 @@ describe('GitHubWriteAccessPanel', () => {
     })
     expect(createGitHubIssue.mock.calls[1][0].idempotencyKey).not.toBe(firstKey)
   })
+
+  it('resets issue confirmation when issue content changes', async () => {
+    render(<GitHubWriteAccessPanel />)
+    const title = await screen.findByLabelText('Issue title')
+    const body = screen.getByLabelText('Issue body (optional)')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+
+    fireEvent.change(title, { target: { value: 'Initial title' } })
+    fireEvent.click(confirmation)
+    expect(confirmation).toBeChecked()
+
+    fireEvent.change(title, { target: { value: 'Updated title' } })
+    expect(confirmation).not.toBeChecked()
+
+    fireEvent.click(confirmation)
+    expect(confirmation).toBeChecked()
+
+    fireEvent.change(body, { target: { value: 'Updated body' } })
+    expect(confirmation).not.toBeChecked()
+  })
+
+  it('disables issue creation when title or body exceed UTF-8 byte limits', async () => {
+    render(<GitHubWriteAccessPanel />)
+    const title = await screen.findByLabelText('Issue title')
+    const body = screen.getByLabelText('Issue body (optional)')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+    const createButton = screen.getByRole('button', { name: 'Create GitHub issue' })
+
+    fireEvent.change(title, { target: { value: 'a' } })
+    fireEvent.click(confirmation)
+    expect(createButton).toBeEnabled()
+
+    fireEvent.change(title, { target: { value: '🙂'.repeat(70) } })
+    expect(createButton).toBeDisabled()
+
+    fireEvent.change(title, { target: { value: 'Valid title' } })
+    fireEvent.click(confirmation)
+    fireEvent.change(body, { target: { value: '€'.repeat(6000) } })
+    expect(createButton).toBeDisabled()
+  })
 })

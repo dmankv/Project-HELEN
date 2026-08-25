@@ -169,6 +169,7 @@ describe('GitHub write server boundaries', () => {
     }
     expect(migration).toContain('GitHub write connection identity is immutable')
     expect(migration).toContain('GitHub write audit records are append-only')
+    expect(migration).toContain('before update on public.github_write_audit')
     expect(migration).toContain("allowed_actions = array['create_issue']::text[]")
     expect(migration).toContain('authorization_expires_at')
     expect(migration).toContain("'connection-mutate'")
@@ -190,6 +191,7 @@ describe('GitHub write server boundaries', () => {
   it('only exposes issue creation and protects retries with an idempotency record', () => {
     expect(sharedFunction).toContain("confirmation !== 'CREATE_GITHUB_ISSUE'")
     expect(sharedFunction).toContain("action: 'create_issue'")
+    expect(sharedFunction).toContain("action: 'repository_connected', connection: refreshedConnection")
     expect(sharedFunction).toContain("status: 'pending'")
     expect(sharedFunction).toContain("status: 'succeeded'")
     expect(sharedFunction).toContain("status: 'unknown'")

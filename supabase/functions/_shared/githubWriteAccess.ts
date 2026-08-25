@@ -993,7 +993,9 @@ export async function connectEligibleGitHubRepository(
       .select('*')
       .maybeSingle()
     if (updateError || !updated) throw new GitHubWriteError('INTERNAL_ERROR', 500)
-    return toConnectionSummary(updated as GitHubWriteConnection)
+    const refreshedConnection = updated as GitHubWriteConnection
+    await writeAudit(service, { userId, action: 'repository_connected', connection: refreshedConnection })
+    return toConnectionSummary(refreshedConnection)
   }
 
   const { data: created, error: createError } = await service
