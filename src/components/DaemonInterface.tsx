@@ -55,6 +55,7 @@ import {
 } from '../services/daemonPersonalityPreferences'
 import type { PersonalityPreferences } from '../services/daemonPersonalityPreferences'
 import PersonalityPreferencesEditor from './PersonalityPreferencesEditor'
+import SupabaseProjectAccessPanel from './SupabaseProjectAccessPanel'
 import '../styles/DaemonInterface.css'
 
 interface Message {
@@ -313,6 +314,7 @@ export default function DaemonInterface({
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const [personalityPrefs, setPersonalityPrefs] = useState<PersonalityPreferences>(() => loadLocalPreferences())
   const [showPreferences, setShowPreferences] = useState(false)
+  const [projectLogContext, setProjectLogContext] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -476,6 +478,10 @@ export default function DaemonInterface({
       abortRef.current = controller
 
       // 1. Supabase Edge Function (authenticated, rate-limited, no browser API keys)
+      // Project logs can only be attached once after an explicit user selection.
+      // They are never persisted with the conversation or sent to the legacy API.
+      const diagnosticContext = projectLogContext ?? undefined
+      if (diagnosticContext) setProjectLogContext(null)
       if (!hasBackend() && !hasEdgeFunction()) {
         cloudFailureForFallback = createEdgeChatFailure('not-configured')
       } else if (hasEdgeFunction() && !currentUser && !hasBackend()) {
@@ -484,7 +490,7 @@ export default function DaemonInterface({
 
       if (hasEdgeFunction() && currentUser) {
         const apiHistory = buildAPIHistory(nextMessages)
-        const edgeResult = await callEdgeFunction(apiHistory, controller.signal)
+        const edgeResult = await callEdgeFunction(apiHistory, controller.signal, diagnosticContext)
         if (typeof edgeResult === 'string') {
           setUsingBackend(true)
           setAuthError(false)
@@ -712,7 +718,7 @@ export default function DaemonInterface({
       setIsThinking(false)
       abortRef.current = null
     }
-  }, [input, isThinking, messages, activeConvId, lastIntent, currentUser, personalityPrefs])
+  }, [input, isThinking, messages, activeConvId, lastIntent, currentUser, personalityPrefs, projectLogContext])
 
   const handleCopySafeDiagnostics = useCallback(async () => {
     const payload = buildSafeDiagnosticsPayload(currentUser, usingBackend, lastCloudAttempt)
@@ -1049,6 +1055,12 @@ export default function DaemonInterface({
                   <li>GitHub Pages deploys the frontend only; it does not deploy the Supabase Edge Function or its secrets.</li>
                 </ul>
               </details>
+            )}
+            {currentUser && (
+              <SupabaseProjectAccessPanel
+                hasQueuedContext={Boolean(projectLogContext)}
+                onUseWithDaemon={context => setProjectLogContext(context)}
+              />
             )}
           </div>
           <div className="sidebar-preferences">

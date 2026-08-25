@@ -169,6 +169,7 @@ export function classifyEdgeTransportFailure(
 export async function callEdgeFunction(
   messages: APIMessage[],
   signal?: AbortSignal,
+  diagnosticContext?: string,
 ): Promise<string | EdgeChatFailure> {
   const client = getClient()
   if (!client) return createEdgeChatFailure('not-configured')
@@ -200,7 +201,10 @@ export async function callEdgeFunction(
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + session.access_token,
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({
+        messages,
+        ...(diagnosticContext ? { diagnosticContext } : {}),
+      }),
       signal: controller.signal,
     })
 
