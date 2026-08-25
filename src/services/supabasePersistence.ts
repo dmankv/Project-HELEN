@@ -135,9 +135,9 @@ export async function deleteCloudConversation(id: string): Promise<boolean> {
 }
 
 /**
- * Delete all conversations visible to the authenticated user in one RLS-safe
- * operation. Ownership is enforced by Supabase row-level security rather than
- * client-supplied user identifiers.
+ * Delete all conversations for the authenticated user in one operation. The
+ * user-ID filter narrows the operation; Supabase row-level security
+ * independently enforces ownership.
  */
 export async function deleteAllCloudConversations(): Promise<boolean> {
   const client = getClient()
