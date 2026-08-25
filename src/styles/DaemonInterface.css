@@ -893,6 +893,93 @@
   padding-left: 1rem;
 }
 
+/* ── GitHub issue access ───────────────────────────────── */
+.github-write-access-panel {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
+}
+
+.github-write-access-panel summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.github-write-access-description,
+.github-write-access-status,
+.github-write-access-connected,
+.github-write-access-preview {
+  margin-top: 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.github-write-access-connect,
+.github-write-access-issue {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+  font-size: 0.72rem;
+}
+
+.github-write-access-connect input[type="checkbox"],
+.github-write-access-connect select,
+.github-write-access-connected input[type="checkbox"],
+.github-write-access-connected select {
+  accent-color: var(--color-primary);
+}
+
+.github-write-access-connect select,
+.github-write-access-issue input,
+.github-write-access-issue textarea,
+.github-write-access-connected select {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-light);
+  color: var(--color-text);
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+}
+
+.github-write-access-issue textarea {
+  resize: vertical;
+}
+
+.github-write-access-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.github-write-access-connect button,
+.github-write-access-connected > button,
+.github-write-access-issue button {
+  min-height: 30px;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+}
+
+.github-write-access-connect button:hover:not(:disabled),
+.github-write-access-connected > button:hover:not(:disabled),
+.github-write-access-issue button:hover:not(:disabled) {
+  color: var(--color-text);
+  background-color: var(--color-surface-light);
+  transform: none;
+  box-shadow: none;
+}
+
+.github-write-access-status a {
+  color: var(--color-primary);
+}
+
 /* ── Welcome hint ────────────────────────────────────── */
 .welcome-hint {
   font-size: 0.8rem;

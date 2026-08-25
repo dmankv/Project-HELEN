@@ -90,6 +90,9 @@ In Supabase Dashboard → SQL Editor, run in order:
 
 -- Migration 5: Private OAuth project-access state, tokens, and audit records
 -- supabase/migrations/20260825083000_supabase_project_access.sql
+
+-- Migration 6: Private GitHub App issue-write state, connections, and audit records
+-- supabase/migrations/20260825162000_github_write_access.sql
 ```
 
 #### 2. Configure GitHub Actions variables (public, browser-safe)
@@ -167,6 +170,46 @@ stores, or logs a secret value.
 
 Disconnect removes the encrypted refresh token immediately, attempts OAuth
 provider revocation when configured, and records only a value-free audit event.
+
+### Optional authenticated GitHub issue writes
+
+The **GitHub issue access** sidebar panel is a separate, opt-in GitHub App
+integration. It is limited to creating an issue in a repository that the
+signed-in user explicitly authorizes; it is not a generic GitHub API proxy.
+
+1. Create a private GitHub App with **Issues: Read and write** and the required
+   **Metadata: Read-only** permission only. Restrict the installation to selected
+   repositories and leave webhooks disabled.
+2. Configure its exact user authorization callback URL:
+   ```text
+   https://<gateway-project-ref>.supabase.co/functions/v1/github-write-access
+   ```
+3. Set only the server-side secrets documented in
+   [`supabase/functions/github-write-access/README.md`](supabase/functions/github-write-access/README.md):
+   `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`,
+   `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WRITE_ACCESS_ENCRYPTION_KEY`,
+   `GITHUB_WRITE_ACCESS_REDIRECT_URI`, and `GITHUB_WRITE_ACCESS_APP_URL`.
+   Do not create `VITE_*` versions of any of these values.
+4. Deploy the functions:
+   ```bash
+   supabase functions deploy github-write-access --no-verify-jwt
+   supabase functions deploy github-write
+   ```
+   Only the callback uses `--no-verify-jwt`; it validates an atomic,
+   short-lived OAuth state itself. `github-write` requires a valid Supabase JWT
+   before it reads issue content.
+5. A user authorizes GitHub, selects a server-verified eligible repository, and
+   explicitly confirms each issue creation. The application mints a
+   repository-narrowed installation token per write and does not store GitHub
+   user tokens, App JWTs, or installation tokens. Repository authorization
+   expires after 24 hours and requires fresh user authorization before another
+   issue can be written.
+
+The migration keeps all GitHub App state, repository selections, connections,
+rate limits, idempotency records, and audit metadata service-role-only. Issue
+title/body content is never written to audit records or function logs. Use a
+non-production repository for the first installation and see the function
+README for revocation and key rotation.
 
 ### Cloud chat diagnostics
 

@@ -59,6 +59,7 @@ import {
 } from '../services/daemonPersonalityPreferences'
 import type { PersonalityPreferences } from '../services/daemonPersonalityPreferences'
 import PersonalityPreferencesEditor from './PersonalityPreferencesEditor'
+import GitHubWriteAccessPanel from './GitHubWriteAccessPanel'
 import SupabaseProjectAccessPanel from './SupabaseProjectAccessPanel'
 import '../styles/DaemonInterface.css'
 
@@ -1107,10 +1108,13 @@ export default function DaemonInterface({
               </details>
             )}
             {currentUser && (
-              <SupabaseProjectAccessPanel
-                hasQueuedContext={Boolean(projectLogContext)}
-                onUseWithDaemon={context => setProjectLogContext(context)}
-              />
+              <>
+                <SupabaseProjectAccessPanel
+                  hasQueuedContext={Boolean(projectLogContext)}
+                  onUseWithDaemon={context => setProjectLogContext(context)}
+                />
+                <GitHubWriteAccessPanel />
+              </>
             )}
           </div>
           <div className="sidebar-preferences">

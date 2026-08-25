@@ -101,6 +101,33 @@ API keys are **only** stored on the server; they are never sent to the browser.
 
 ---
 
+## Optional GitHub issue access
+
+Signed-in users can optionally connect a private GitHub App installation to
+create issues in explicitly selected repositories. The channel creates issues
+only—it cannot commit files, open pull requests, alter workflows, manage
+secrets, or change repository settings.
+
+1. Create a private GitHub App with **Issues: Read and write** and no broader
+   repository permissions.
+2. Apply `supabase/migrations/20260825162000_github_write_access.sql`.
+3. Configure the App callback as
+   `https://<gateway-project-ref>.supabase.co/functions/v1/github-write-access`.
+4. Set GitHub App credentials only as Supabase Function secrets, then deploy:
+   ```bash
+   supabase functions deploy github-write-access --no-verify-jwt
+   supabase functions deploy github-write
+   ```
+5. In the sidebar, authorize GitHub, select an eligible repository, connect it
+   for `create_issue`, then review and explicitly confirm every issue.
+
+The browser never receives a GitHub App private key, OAuth credential, App JWT,
+or installation token. For the complete secret list, PKCS#8 key requirement,
+revocation, and rotation procedure, see
+[`supabase/functions/github-write-access/README.md`](./supabase/functions/github-write-access/README.md).
+
+---
+
 ## Memory
 
 Conversation history is stored in browser `localStorage` by `src/services/daemonMemory.ts`.
