@@ -329,6 +329,8 @@ function validateStrategyMetadata(body: unknown): {
   }
 
   return { valid: true, strategy: parsedStrategy, contextKey: parsedContextKey, interactionId: parsedInteractionId }
+}
+
 function redactDiagnosticContext(value: string): string {
   // Diagnostic data is untrusted. This best-effort second pass supplements
   // server-side project-log redaction before data reaches a model provider.
@@ -395,7 +397,6 @@ async function callProvider(messages: ChatMessage[], strategy?: ResponseStrategy
     } catch {
       throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
     }
->>>>>>> origin/main
     if (!res.ok) {
       logDiagnostic('provider_http_error', { provider, status: res.status })
       throw new EdgeFunctionError('PROVIDER_UNAVAILABLE', 503)
