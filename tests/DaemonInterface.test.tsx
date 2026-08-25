@@ -274,4 +274,142 @@ describe('DaemonInterface', () => {
     expect(localStorage.getItem('helen_messages')).toBeNull()
     expect(localStorage.getItem('helen_conversations')).toBeNull()
   })
+
+  // ── Conversation-selection regression tests ───────────────────────────────
+
+  it('multiple sends in one session yield one conversation with all messages', async () => {
+    render(<DaemonInterface />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    const log = () => screen.getByRole('log')
+
+    fireEvent.change(input, { target: { value: 'first message' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('first message')).toBeInTheDocument(), WAIT_OPTS)
+    // Wait for the component to finish thinking before the second send.
+    await waitFor(() => expect(log()).toHaveAttribute('aria-busy', 'false'), WAIT_OPTS)
+
+    fireEvent.change(input, { target: { value: 'second message' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('second message')).toBeInTheDocument(), WAIT_OPTS)
+    await waitFor(() => expect(log()).toHaveAttribute('aria-busy', 'false'), WAIT_OPTS)
+
+    // Both messages must be in the same single conversation.
+    const storedConvs = JSON.parse(localStorage.getItem('daemon_conversations') ?? '[]') as Array<{ id: string; messages: Array<{ content: string }> }>
+    expect(storedConvs).toHaveLength(1)
+    const msgs = storedConvs[0].messages
+    expect(msgs.some(m => m.content === 'first message')).toBe(true)
+    expect(msgs.some(m => m.content === 'second message')).toBe(true)
+  }, 15000)
+
+  it('reloading with saved conversations restores the active conversation; next send stays in that conversation', async () => {
+    // Pre-populate localStorage with a conversation and mark it active.
+    const convId = 'test-conv-reload'
+    const existingMsgs = [
+      { id: 'msg-1', role: 'user', content: 'Saved message', timestamp: '2026-08-25T00:00:00.000Z' },
+    ]
+    const existingConvs = [{ id: convId, title: 'Saved message', messages: existingMsgs, createdAt: '2026-08-25T00:00:00.000Z' }]
+    localStorage.setItem('daemon_messages', JSON.stringify(existingMsgs))
+    localStorage.setItem('daemon_conversations', JSON.stringify(existingConvs))
+    localStorage.setItem('daemon_active_conv_id', convId)
+
+    render(<DaemonInterface />)
+
+    // Restored message appears in the chat pane (sidebar also shows it as title).
+    expect(screen.getAllByText('Saved message').length).toBeGreaterThanOrEqual(1)
+
+    // Send a new message; it must stay in the same conversation.
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'follow-up message' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('follow-up message')).toBeInTheDocument(), WAIT_OPTS)
+    await waitFor(() => expect(screen.getByRole('log')).toHaveAttribute('aria-busy', 'false'), WAIT_OPTS)
+
+    const storedConvs = JSON.parse(localStorage.getItem('daemon_conversations') ?? '[]') as Array<{ id: string; messages: Array<{ content: string }> }>
+    // Must still be exactly 1 conversation (no new conversation was created).
+    expect(storedConvs).toHaveLength(1)
+    expect(storedConvs[0].id).toBe(convId)
+    expect(storedConvs[0].messages.some(m => m.content === 'follow-up message')).toBe(true)
+  }, 15000)
+
+  it('selecting a sidebar conversation and sending appends to that conversation only', async () => {
+    // Two existing conversations; "older" is not the most-recent.
+    const newerConv = {
+      id: 'conv-newer',
+      title: 'Newer chat',
+      messages: [{ id: 'm-n1', role: 'user', content: 'Newer message', timestamp: '2026-08-25T02:00:00.000Z' }],
+      createdAt: '2026-08-25T02:00:00.000Z',
+    }
+    const olderConv = {
+      id: 'conv-older',
+      title: 'Older chat',
+      messages: [{ id: 'm-o1', role: 'user', content: 'Older message', timestamp: '2026-08-25T01:00:00.000Z' }],
+      createdAt: '2026-08-25T01:00:00.000Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([newerConv, olderConv]))
+    localStorage.setItem('daemon_active_conv_id', newerConv.id)
+    localStorage.setItem('daemon_messages', JSON.stringify(newerConv.messages))
+
+    render(<DaemonInterface />)
+
+    // Select the older conversation in the sidebar.
+    fireEvent.click(screen.getByText('Older chat'))
+
+    // Send a message; it must go to olderConv, not newerConv.
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'reply to older' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('reply to older')).toBeInTheDocument(), WAIT_OPTS)
+    await waitFor(() => expect(screen.getByRole('log')).toHaveAttribute('aria-busy', 'false'), WAIT_OPTS)
+
+    const storedConvs = JSON.parse(localStorage.getItem('daemon_conversations') ?? '[]') as Array<{ id: string; messages: Array<{ content: string }> }>
+    const older = storedConvs.find(c => c.id === 'conv-older')
+    const newer = storedConvs.find(c => c.id === 'conv-newer')
+    // The sent message must be in olderConv.
+    expect(older?.messages.some(m => m.content === 'reply to older')).toBe(true)
+    // newerConv must NOT have the sent message and must remain at 1 message.
+    expect(newer?.messages.some(m => m.content === 'reply to older')).toBeFalsy()
+    expect(newer?.messages).toHaveLength(1)
+  }, 15000)
+
+  it('clicking + New chat clears the pane; next send creates exactly one new conversation', async () => {
+    // Start with an existing conversation.
+    const existingConv = {
+      id: 'conv-existing',
+      title: 'Existing chat',
+      messages: [{ id: 'm1', role: 'user', content: 'Old message', timestamp: '2026-08-25T00:00:00.000Z' }],
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    localStorage.setItem('daemon_conversations', JSON.stringify([existingConv]))
+    localStorage.setItem('daemon_active_conv_id', existingConv.id)
+    localStorage.setItem('daemon_messages', JSON.stringify(existingConv.messages))
+
+    render(<DaemonInterface />)
+
+    expect(screen.getByText('Old message')).toBeInTheDocument()
+
+    // Click + New chat.
+    fireEvent.click(screen.getByRole('button', { name: /New chat/i }))
+
+    // Pane should be empty.
+    expect(screen.queryByText('Old message')).not.toBeInTheDocument()
+    expect(screen.getByText(/Hello, I'm Daemon/i)).toBeInTheDocument()
+
+    // Send a message; it should create a new, separate conversation.
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'brand new message' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    await waitFor(() => expect(screen.getByText('brand new message')).toBeInTheDocument(), WAIT_OPTS)
+    await waitFor(() => expect(screen.getByRole('log')).toHaveAttribute('aria-busy', 'false'), WAIT_OPTS)
+
+    const storedConvs = JSON.parse(localStorage.getItem('daemon_conversations') ?? '[]') as Array<{ id: string; messages: Array<{ content: string }> }>
+    // The new message must be in its own conversation (not conv-existing).
+    const newConv = storedConvs.find(c => c.messages.some(m => m.content === 'brand new message'))
+    expect(newConv).toBeDefined()
+    expect(newConv!.id).not.toBe('conv-existing')
+    // Original conversation must be unchanged.
+    const oldConv = storedConvs.find(c => c.id === 'conv-existing')
+    expect(oldConv).toBeDefined()
+    expect(oldConv!.messages).toHaveLength(1)
+    expect(oldConv!.messages[0].content).toBe('Old message')
+  }, 15000)
 })
