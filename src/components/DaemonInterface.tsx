@@ -62,6 +62,35 @@ interface Conversation {
 
 const MESSAGES_KEY = 'daemon_messages'
 const CONVERSATIONS_KEY = 'daemon_conversations'
+// Persists which conversation is currently open so reloads restore the same chat.
+const ACTIVE_CONV_KEY = 'daemon_active_conv_id'
+
+function loadActiveConvId(conversations: Conversation[]): string | null {
+  try {
+    const saved = localStorage.getItem(ACTIVE_CONV_KEY)
+    if (saved) {
+      // Validate: the stored ID must still exist in the conversation list.
+      if (conversations.some(c => c.id === saved)) return saved
+    }
+  } catch { /* best-effort */ }
+  // Fallback: pick the most-recently-created conversation so the pane is never
+  // unexpectedly blank after a reload when history already exists.
+  if (conversations.length === 0) return null
+  const sorted = [...conversations].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+  return sorted[0].id
+}
+
+function saveActiveConvId(id: string | null): void {
+  try {
+    if (id === null) {
+      localStorage.removeItem(ACTIVE_CONV_KEY)
+    } else {
+      localStorage.setItem(ACTIVE_CONV_KEY, id)
+    }
+  } catch { /* best-effort */ }
+}
 
 // Run the one-time legacy-ID migration before any data is read from localStorage.
 // This is safe to call at module load; it exits early if already complete.
@@ -217,8 +246,13 @@ export default function DaemonInterface({
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen)
-  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
-  const [activeConvId, setActiveConvId] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<Conversation[]>(loadConversations)
+  // Restore the previously-active conversation so that the next send appends to
+  // it rather than creating a new one. Null only when no history exists or the
+  // user explicitly started a new chat via "+ New chat".
+  // `conversations` above is already the result of loadConversations(), so we
+  // re-use it here to avoid a second localStorage parse.
+  const [activeConvId, setActiveConvId] = useState<string | null>(() => loadActiveConvId(conversations))
   const [lastIntent, setLastIntent] = useState<ResponseIntent | undefined>(undefined)
   const [usingBackend, setUsingBackend] = useState(false)
   const [authError, setAuthError] = useState(false)
@@ -247,6 +281,11 @@ export default function DaemonInterface({
     saveSidebarOpen(sidebarOpen)
   }, [sidebarOpen])
 
+  // Persist the active conversation ID so reloads restore the same chat.
+  useEffect(() => {
+    saveActiveConvId(activeConvId)
+  }, [activeConvId])
+
   // Update sync status based on configuration and auth state
   useEffect(() => {
     if (!isPersistenceConfigured()) {
@@ -267,7 +306,13 @@ export default function DaemonInterface({
     void (async () => {
       const hydrated = await hydrateFromCloud()
       if (!hydrated) return
-      // Merge cloud conversations: add ones not already in local state
+      // Merge cloud conversations: add ones not already in local state.
+      // Strategy: cloud data is additive — we never replace or clear local
+      // conversations, and we never reset the currently-active conversation
+      // (activeConvId). A user who is actively chatting should not have their
+      // pane hijacked by a cloud sync. The activeConvId is intentionally left
+      // unchanged here; it was set deterministically on initial load from
+      // localStorage (or from the most-recently-created conversation).
       if (hydrated.conversations.length > 0) {
         setConversations(prev => {
           const existingIds = new Set(prev.map(c => c.id))
@@ -609,6 +654,7 @@ export default function DaemonInterface({
     try {
       localStorage.removeItem(MESSAGES_KEY)
       localStorage.removeItem(CONVERSATIONS_KEY)
+      localStorage.removeItem(ACTIVE_CONV_KEY)
     } catch {
       // best-effort only; UI state is already reset in-memory
     }
