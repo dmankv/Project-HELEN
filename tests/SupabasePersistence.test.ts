@@ -161,6 +161,7 @@ describe('Supabase persistence service – cloud deletion helpers', () => {
     expect(persistenceServiceSrc).toContain("export async function deleteAllCloudConversations")
     expect(persistenceServiceSrc).toContain(".from('conversations')")
     expect(persistenceServiceSrc).toContain(".delete()")
+    expect(persistenceServiceSrc).toContain(".eq('user_id', userId)")
   })
 
   it('does not enumerate cloud conversations inside deleteAllCloudConversations', () => {
@@ -171,7 +172,7 @@ describe('Supabase persistence service – cloud deletion helpers', () => {
     const fnSource = persistenceServiceSrc.slice(start, end)
     expect(fnSource).not.toContain('listConversations')
     expect(fnSource).not.toContain('.select(')
-    expect(fnSource).not.toContain('user_id')
+    expect(fnSource).toContain('getCurrentUserId')
   })
 })
 
