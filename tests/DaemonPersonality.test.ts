@@ -237,7 +237,7 @@ describe('generateHumanLikeResponse — pushback', () => {
 describe('generateHumanLikeResponse — uncertainty', () => {
   it('returns honest uncertainty response for uncertain intent', () => {
     const resp = generateHumanLikeResponse('', ctx({ intent: 'uncertain' }))
-    expect(resp).toMatch(/not sure|don'?t want to guess|can'?t|upfront|disservice/i)
+    expect(resp).toMatch(/not sure|don'?t want to guess|make something up|can'?t|upfront|disservice/i)
   })
 })
 

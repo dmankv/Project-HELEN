@@ -257,7 +257,7 @@ interface CloudAttemptRecord {
 
 function formatCloudAttempt(record: CloudAttemptRecord | null): string {
   if (!record) return 'No cloud-chat attempt recorded in this session.'
-  const details = [record.status, record.mode]
+  const details: string[] = [record.status, record.mode]
   if (record.category) details.push(record.category)
   if (typeof record.statusCode === 'number') details.push(`HTTP ${record.statusCode}`)
   if (record.safeCode) details.push(record.safeCode)
