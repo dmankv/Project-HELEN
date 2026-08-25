@@ -26,6 +26,7 @@ import {
   CUSTOM_GREETING_MAX_LENGTH,
 } from '../services/daemonPersonalityPreferences'
 import type { PersonalityPreferences } from '../services/daemonPersonalityPreferences'
+import AdaptiveProfilePanel from './AdaptiveProfilePanel'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -380,10 +381,13 @@ export default function PersonalityPreferencesEditor({
         </div>
       </form>
 
+      <AdaptiveProfilePanel />
+
       <p className="preferences-footer-note">
         These preferences affect tone and phrasing only. Safety, factuality, and
         crisis handling are not affected by any setting here. Preferences are separate
-        from durable memories (use "forget" commands to manage memories).
+        from durable memories (use "forget" commands to manage memories) and from
+        what Daemon has learned from your feedback (shown above).
       </p>
     </div>
   )

@@ -38,6 +38,16 @@ export function hasEdgeFunction(): boolean {
   return SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0
 }
 
+/** Optional adaptive metadata forwarded to the edge function for this turn. */
+export interface EdgeChatMetadata {
+  /** Approved response strategy selected locally (daemonResponsePolicy). */
+  strategy?: string
+  /** "intent:mood" key the strategy was selected for. */
+  contextKey?: string
+  /** Local interaction id, echoed back so feedback can be attributed. */
+  interactionId?: string
+}
+
 /**
  * Call the daemon-chat Supabase Edge Function.
  * Returns the assistant reply, an APIFailure, or null (not configured / user not signed in).
@@ -45,6 +55,7 @@ export function hasEdgeFunction(): boolean {
 export async function callEdgeFunction(
   messages: APIMessage[],
   signal?: AbortSignal,
+  metadata?: EdgeChatMetadata,
 ): Promise<string | APIFailure | null> {
   const client = getClient()
   if (!client) return null
@@ -67,7 +78,12 @@ export async function callEdgeFunction(
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + session.access_token,
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({
+        messages,
+        ...(metadata?.strategy ? { strategy: metadata.strategy } : {}),
+        ...(metadata?.contextKey ? { context_key: metadata.contextKey } : {}),
+        ...(metadata?.interactionId ? { interaction_id: metadata.interactionId } : {}),
+      }),
       signal: controller.signal,
     })
 

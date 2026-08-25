@@ -94,3 +94,76 @@ describe('Daemon persistence migration', () => {
     expect(rateLimitSection).not.toMatch(/create policy[\s\S]+?on public\.edge_rate_limits[\s\S]+?to authenticated/i)
   })
 })
+
+const adaptiveMigrationPath = path.resolve(
+  process.cwd(),
+  'supabase/migrations/20260825090000_adaptive_profiles.sql',
+)
+
+describe('Supabase adaptive profiles migration', () => {
+  const rawSql = fs.readFileSync(adaptiveMigrationPath, 'utf8')
+  const normalizedSql = rawSql.toLowerCase()
+
+  it('creates adaptive_profiles with the expected columns', () => {
+    expect(normalizedSql).toContain('create table if not exists public.adaptive_profiles')
+    expect(normalizedSql).toContain('user_id        uuid        not null unique references auth.users (id) on delete cascade')
+    expect(normalizedSql).toContain('preferences    jsonb       not null default')
+    expect(normalizedSql).toContain('learning_enabled boolean   not null default true')
+    expect(normalizedSql).toContain('updated_at     timestamptz not null default now()')
+    expect(normalizedSql).toContain('policy_version integer     not null default 1')
+  })
+
+  it('creates adaptive_evidence with the expected columns', () => {
+    expect(normalizedSql).toContain('create table if not exists public.adaptive_evidence')
+    expect(normalizedSql).toContain('preference_key text        not null')
+    expect(normalizedSql).toContain('interaction_id text')
+    expect(normalizedSql).toContain('is_positive    boolean     not null')
+    expect(normalizedSql).toMatch(/adaptive_evidence[\s\S]+?references auth\.users \(id\) on delete cascade/i)
+  })
+
+  it('indexes both tables on user_id', () => {
+    expect(normalizedSql).toContain('create index if not exists adaptive_profiles_user_id_idx')
+    expect(normalizedSql).toContain('create index if not exists adaptive_evidence_user_id_idx')
+    expect(normalizedSql).toContain('create index if not exists adaptive_evidence_user_key_idx')
+  })
+
+  it('enables row level security on both tables', () => {
+    expect(normalizedSql).toContain('alter table public.adaptive_profiles enable row level security;')
+    expect(normalizedSql).toContain('alter table public.adaptive_evidence enable row level security;')
+  })
+
+  it('defines owner-only policies for every operation', () => {
+    for (const table of ['adaptive_profiles', 'adaptive_evidence']) {
+      for (const op of ['select', 'insert', 'update', 'delete']) {
+        expect(normalizedSql).toContain(`create policy "${table}_${op}_own"`)
+      }
+    }
+    expect(normalizedSql.match(/using \(auth\.uid\(\) = user_id\)/g)?.length).toBe(6)
+    expect(normalizedSql.match(/with check \(auth\.uid\(\) = user_id\)/g)?.length).toBe(4)
+  })
+
+  it('has no public (unauthenticated) policies', () => {
+    const policyBlocks = rawSql.match(/create policy[\s\S]+?;/gi) ?? []
+    expect(policyBlocks.length).toBe(8)
+    for (const policy of policyBlocks) {
+      expect(policy.toLowerCase()).not.toMatch(/\bto public\b/)
+      expect(policy.toLowerCase()).not.toMatch(/\bto anon\b/)
+    }
+  })
+
+  it('prevents owner reassignment on adaptive_profiles', () => {
+    expect(rawSql).toMatch(/prevent_adaptive_profile_owner_change/i)
+    expect(rawSql).toMatch(/adaptive profile owner is immutable/i)
+    expect(normalizedSql).toContain('before update on public.adaptive_profiles')
+  })
+
+  it('prevents owner reassignment on adaptive_evidence', () => {
+    expect(rawSql).toMatch(/prevent_adaptive_evidence_owner_change/i)
+    expect(rawSql).toMatch(/adaptive evidence owner is immutable/i)
+    expect(normalizedSql).toContain('before update on public.adaptive_evidence')
+  })
+
+  it('pins a stable search_path on trigger functions', () => {
+    expect(normalizedSql.match(/set search_path = public/g)?.length).toBe(2)
+  })
+})
