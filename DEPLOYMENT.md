@@ -81,6 +81,15 @@ In Supabase Dashboard → SQL Editor, run in order:
 
 -- Migration 2: Daemon persistence tables
 -- supabase/migrations/20260824160000_daemon_persistence.sql
+
+-- Migration 3: Atomic Edge Function rate limiting
+-- supabase/migrations/20260824180000_atomic_rate_limit.sql
+
+-- Migration 4: Personality preferences
+-- supabase/migrations/20260824200000_personality_preferences.sql
+
+-- Migration 5: Private OAuth project-access state, tokens, and audit records
+-- supabase/migrations/20260825083000_supabase_project_access.sql
 ```
 
 #### 2. Configure GitHub Actions variables (public, browser-safe)
@@ -116,11 +125,54 @@ supabase secrets set DAEMON_MODEL=claude-3-5-haiku-20241022  # optional
 
 These secrets are held only in Supabase and are never present in the browser bundle.
 
+### Optional live project diagnostics
+
+The **Supabase project access** sidebar panel is an opt-in, server-side
+integration for a user-selected project. It is not enabled by any `VITE_*`
+variable and does not expose an OAuth or management token to GitHub Pages.
+
+1. Register/configure the server-side OAuth client for the hosted Supabase MCP
+   service, with the exact callback URL:
+   ```
+   https://<gateway-project-ref>.supabase.co/functions/v1/supabase-project-access
+   ```
+2. Set the server-only secrets described in
+   [`supabase/functions/supabase-project-access/README.md`](supabase/functions/supabase-project-access/README.md).
+   In particular, set a unique 32-byte base64url
+   `SUPABASE_PROJECT_ACCESS_ENCRYPTION_KEY`; never reuse or commit it.
+3. Deploy the functions:
+   ```bash
+   supabase functions deploy supabase-project-access --no-verify-jwt
+   supabase functions deploy supabase-project-secret-write
+   ```
+4. A signed-in user explicitly consents before being redirected through OAuth.
+   The read connection is hard-coded to one `project_ref`,
+   `read_only=true`, and `features=debugging`.
+
+Live log access is on-demand only: requests are capped to a one-hour time
+range, 100 displayed entries, and 10 requests per user per minute. Results are
+redacted, marked untrusted, held only in browser memory, and may be attached
+to exactly one subsequent Daemon cloud request. They are never saved in chat
+history or database records.
+
+The integration intentionally does **not** query remote secret inventories:
+some management APIs can include secret values. It reports configured/missing
+metadata only for an allow-listed set of secrets when the selected connection
+is this gateway's own project; other projects report `unavailable`. Secret
+rotation requires a separate `write_secrets` OAuth consent and the isolated
+`supabase-project-secret-write` function. Configure it with a distinct OAuth
+client ID and provider-enforced write scope—not merely a `read_only` URL
+parameter—then it takes an explicit confirmation and never reads, returns,
+stores, or logs a secret value.
+
+Disconnect removes the encrypted refresh token immediately, attempts OAuth
+provider revocation when configured, and records only a value-free audit event.
+
 ### Cloud chat diagnostics
 
 The fallback message “I used local mode for this response” does **not** prove a live outage by
-itself. Without direct access to the project logs/secrets, you can only confirm the code-level
-failure taxonomy below and then inspect the Supabase project directly.
+itself. Without an explicitly connected project, you can only confirm the
+code-level failure taxonomy below and then inspect the Supabase project directly.
 
 #### Verified client-visible categories
 
@@ -191,6 +243,7 @@ errors, stack traces, prompt contents, tokens, or secret values.
 | Secrets | Provider keys in Supabase Function secrets only |
 | CORS | Only `https://dmankv.github.io` and localhost (dev) |
 | Error masking | Provider errors are logged server-side; generic message to client |
+| Project diagnostics | Separate OAuth callback, one project/ref, read-only MCP debugging tools, redaction, and audit-only metadata |
 
 ---
 

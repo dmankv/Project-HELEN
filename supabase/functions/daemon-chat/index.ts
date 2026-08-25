@@ -248,6 +248,8 @@ function validateMessages(body: unknown): { valid: boolean; messages?: ChatMessa
 }
 
 function redactDiagnosticContext(value: string): string {
+  // Diagnostic data is untrusted. This best-effort second pass supplements
+  // server-side project-log redaction before data reaches a model provider.
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/gi, '******')
     .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|sk-ant-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED]')
@@ -256,6 +258,9 @@ function redactDiagnosticContext(value: string): string {
       /((?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|authorization|password|passwd|secret|service[_-]?role)[\s"'=:]+)([^\s,"'}\]]+)/gi,
       '$1[REDACTED]',
     )
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[REDACTED_IP]')
+    .replace(/\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi, '[REDACTED_IP]')
 }
 
 function validateDiagnosticContext(body: unknown): { valid: boolean; context?: string } {

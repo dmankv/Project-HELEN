@@ -153,6 +153,25 @@ forms show a clear "not configured" notice; the rest of the app (local Daemon ch
 - Emergency recovery when no admins remain: use Supabase Dashboard SQL Editor as project admin and
   promote a trusted account with the same `update ... set role = 'admin' ...` query above.
 
+### Optional Supabase project diagnostics
+
+Signed-in users can opt into a **read-only, project-scoped** Supabase MCP
+connection for on-demand logs. The OAuth callback and log proxy run only in
+Supabase Edge Functions; the GitHub Pages bundle receives neither OAuth tokens
+nor management credentials.
+
+- Connections are limited to one project reference with `read_only=true` and
+  `features=debugging`.
+- Logs have bounded time/result windows, are redacted and labeled untrusted,
+  and are retained only in browser memory for one optional Daemon request.
+- Secret values cannot be read. The health view returns allow-listed
+  configured/missing metadata only for the gateway's own project.
+- Secret rotation is isolated behind separately consented write access and an
+  explicit, write-only confirmation flow.
+
+See [the deployment guide](DEPLOYMENT.md#optional-live-project-diagnostics) and
+the [Edge Function instructions](supabase/functions/supabase-project-access/README.md).
+
 ### Self-hosted auth (optional fallback)
 
 The `server/` Node API provides authentication endpoints for operators who want to run their own

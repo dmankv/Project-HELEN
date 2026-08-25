@@ -336,6 +336,14 @@ export default function DaemonInterface({
     saveSidebarOpen(sidebarOpen)
   }, [sidebarOpen])
 
+  // A selected log context is ephemeral: it can be used in one Edge Function
+  // request and is discarded after five minutes even if the user never sends.
+  useEffect(() => {
+    if (!projectLogContext) return
+    const timer = window.setTimeout(() => setProjectLogContext(null), 5 * 60 * 1000)
+    return () => window.clearTimeout(timer)
+  }, [projectLogContext])
+
   // Persist the active conversation ID so reloads restore the same chat.
   useEffect(() => {
     saveActiveConvId(activeConvId)
@@ -481,7 +489,6 @@ export default function DaemonInterface({
       // Project logs can only be attached once after an explicit user selection.
       // They are never persisted with the conversation or sent to the legacy API.
       const diagnosticContext = projectLogContext ?? undefined
-      if (diagnosticContext) setProjectLogContext(null)
       if (!hasBackend() && !hasEdgeFunction()) {
         cloudFailureForFallback = createEdgeChatFailure('not-configured')
       } else if (hasEdgeFunction() && !currentUser && !hasBackend()) {
@@ -490,6 +497,9 @@ export default function DaemonInterface({
 
       if (hasEdgeFunction() && currentUser) {
         const apiHistory = buildAPIHistory(nextMessages)
+        // Clear only when this request actually dispatches the selected context
+        // to the Supabase Edge Function. Local/legacy fallback leaves it queued.
+        if (diagnosticContext) setProjectLogContext(null)
         const edgeResult = await callEdgeFunction(apiHistory, controller.signal, diagnosticContext)
         if (typeof edgeResult === 'string') {
           setUsingBackend(true)

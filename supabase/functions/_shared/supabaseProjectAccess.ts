@@ -21,7 +21,6 @@ interface RuntimeConfig {
 
 interface OAuthConfig {
   clientId: string
-  clientSecret: string | null
   authorizationEndpoint: string
   tokenEndpoint: string
   revocationEndpoint: string | null
@@ -381,16 +380,36 @@ function callbackUri(): string {
   return `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/${PROJECT_ACCESS_FUNCTION_NAME}`
 }
 
-function oauthConfig(): OAuthConfig {
-  const clientId = Deno.env.get('SUPABASE_MCP_OAUTH_CLIENT_ID') ?? ''
+function oauthClientCredentials(accessMode: AccessMode): { clientId: string; clientSecret: string | null } {
+  const readClientId = Deno.env.get('SUPABASE_MCP_OAUTH_CLIENT_ID') ?? ''
+  const clientId = accessMode === 'write_secrets'
+    ? Deno.env.get('SUPABASE_MCP_SECRET_WRITE_CLIENT_ID') ?? ''
+    : readClientId
   if (!clientId || clientId.length > 512) {
     throw new ProjectAccessError('FUNCTION_CONFIG_ERROR', 503)
   }
-  const scopes = Deno.env.get('SUPABASE_MCP_OAUTH_SCOPES') ?? 'offline_access'
-  if (scopes.length > 512) throw new ProjectAccessError('FUNCTION_CONFIG_ERROR', 503)
+  // A distinct OAuth client is mandatory for secret writes. `read_only` and
+  // MCP feature URL parameters constrain this application, not the provider's
+  // issued token, so they are not a substitute for provider-enforced scopes.
+  if (accessMode === 'write_secrets' && clientId === readClientId) {
+    throw new ProjectAccessError('FUNCTION_CONFIG_ERROR', 503)
+  }
   return {
     clientId,
-    clientSecret: Deno.env.get('SUPABASE_MCP_OAUTH_CLIENT_SECRET') || null,
+    clientSecret: accessMode === 'write_secrets'
+      ? Deno.env.get('SUPABASE_MCP_SECRET_WRITE_CLIENT_SECRET') || null
+      : Deno.env.get('SUPABASE_MCP_OAUTH_CLIENT_SECRET') || null,
+  }
+}
+
+function oauthConfig(accessMode: AccessMode): OAuthConfig {
+  const credentials = oauthClientCredentials(accessMode)
+  const scopes = accessMode === 'write_secrets'
+    ? Deno.env.get('SUPABASE_MCP_SECRET_WRITE_OAUTH_SCOPES') ?? 'offline_access'
+    : Deno.env.get('SUPABASE_MCP_OAUTH_SCOPES') ?? 'offline_access'
+  if (scopes.length > 512) throw new ProjectAccessError('FUNCTION_CONFIG_ERROR', 503)
+  return {
+    clientId: credentials.clientId,
     authorizationEndpoint: trustedSupabaseUrl(Deno.env.get('SUPABASE_MCP_OAUTH_AUTHORIZATION_ENDPOINT')),
     tokenEndpoint: trustedSupabaseUrl(Deno.env.get('SUPABASE_MCP_OAUTH_TOKEN_ENDPOINT')),
     revocationEndpoint: Deno.env.get('SUPABASE_MCP_OAUTH_REVOCATION_ENDPOINT')
@@ -401,18 +420,18 @@ function oauthConfig(): OAuthConfig {
   }
 }
 
-function mcpUrl(projectRef: string, accessMode: AccessMode): string {
+function mcpUrl(projectRef: string): string {
   const url = new URL(MCP_HOSTED_URL)
   url.searchParams.set('project_ref', projectRef)
-  if (accessMode === 'read_logs') {
-    url.searchParams.set('read_only', 'true')
-    url.searchParams.set('features', 'debugging')
-  } else {
-    // Write access is deliberately isolated from the normal read-only
-    // connection and requires a new OAuth consent flow.
-    url.searchParams.set('features', 'functions')
-  }
+  url.searchParams.set('read_only', 'true')
+  url.searchParams.set('features', 'debugging')
   return url.toString()
+}
+
+function oauthResource(projectRef: string, accessMode: AccessMode): string {
+  return accessMode === 'read_logs'
+    ? mcpUrl(projectRef)
+    : 'https://api.supabase.com/'
 }
 
 function isValidOAuthCode(value: string | null): value is string {
@@ -426,8 +445,8 @@ function callbackRedirect(outcome: 'connected' | 'denied' | 'failed'): Response 
     const url = new URL(configured)
     const host = url.hostname.toLowerCase()
     const allowed =
-      url.protocol === 'https:' && host === 'dmankv.github.io' ||
-      url.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1')
+      (url.protocol === 'https:' && host === 'dmankv.github.io') ||
+      (url.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1'))
     if (allowed) {
       url.hash = `/?supabase_project_access=${outcome}`
       location = url.toString()
@@ -495,7 +514,7 @@ export async function startOAuthConnection(
   if (request.consent !== true) throw new ProjectAccessError('BAD_REQUEST', 400)
   const projectRef = assertProjectRef(request.projectRef)
   const accessMode = assertAccessMode(request.accessMode ?? 'read_logs')
-  const config = oauthConfig()
+  const config = oauthConfig(accessMode)
   const state = randomToken(32)
   const verifier = randomToken(48)
   const challenge = base64UrlEncode(await sha256(verifier))
@@ -532,7 +551,7 @@ export async function startOAuthConnection(
   authorizationUrl.searchParams.set('code_challenge_method', 'S256')
   authorizationUrl.searchParams.set('code_challenge', challenge)
   authorizationUrl.searchParams.set('state', state)
-  authorizationUrl.searchParams.set('resource', mcpUrl(projectRef, accessMode))
+  authorizationUrl.searchParams.set('resource', oauthResource(projectRef, accessMode))
   if (config.scopes) authorizationUrl.searchParams.set('scope', config.scopes)
 
   return { authorizationUrl: authorizationUrl.toString(), expiresAt }
@@ -550,7 +569,7 @@ async function exchangeOAuthCode(
     client_id: state.oauth_client_id,
     code_verifier: verifier,
   })
-  const clientSecret = Deno.env.get('SUPABASE_MCP_OAUTH_CLIENT_SECRET')
+  const clientSecret = oauthClientCredentials(state.access_mode).clientSecret
   if (clientSecret) params.set('client_secret', clientSecret)
   let response: Response
   try {
@@ -694,7 +713,7 @@ async function refreshAccessToken(
     refresh_token: refreshToken,
     client_id: connection.oauth_client_id,
   })
-  const clientSecret = Deno.env.get('SUPABASE_MCP_OAUTH_CLIENT_SECRET')
+  const clientSecret = oauthClientCredentials(connection.access_mode).clientSecret
   if (clientSecret) params.set('client_secret', clientSecret)
   let response: Response
   try {
@@ -844,6 +863,8 @@ function mcpResult(payload: unknown): unknown {
 }
 
 function redactText(value: string): string {
+  // This is defense in depth, not a complete PII classifier. Logs remain
+  // untrusted even after redaction and are never persisted by this function.
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/gi, '******')
     .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|sk-ant-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED]')
@@ -854,6 +875,7 @@ function redactText(value: string): string {
     )
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
     .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[REDACTED_IP]')
+    .replace(/\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi, '[REDACTED_IP]')
 }
 
 function sensitiveKey(key: string): boolean {
@@ -946,10 +968,10 @@ export async function readProjectLogs(
   body: unknown,
 ): Promise<SanitizedLogResult> {
   const request = validateLogRequest(body)
-  await enforceRateLimit(service, userId, 'logs')
   const connection = await getOwnedConnection(service, userId, connectionId, 'read_logs')
+  await enforceRateLimit(service, userId, 'logs')
   const accessToken = await refreshAccessToken(service, connection)
-  const endpoint = mcpUrl(connection.project_ref, 'read_logs')
+  const endpoint = mcpUrl(connection.project_ref)
 
   const initialization = await mcpRequest(endpoint, accessToken, {
     jsonrpc: '2.0',
@@ -1051,7 +1073,7 @@ async function revokeOAuthToken(connection: ProjectConnection): Promise<void> {
       token_type_hint: 'refresh_token',
       client_id: connection.oauth_client_id,
     })
-    const clientSecret = Deno.env.get('SUPABASE_MCP_OAUTH_CLIENT_SECRET')
+    const clientSecret = oauthClientCredentials(connection.access_mode).clientSecret
     if (clientSecret) params.set('client_secret', clientSecret)
     const response = await fetch(connection.oauth_revocation_endpoint, {
       method: 'POST',

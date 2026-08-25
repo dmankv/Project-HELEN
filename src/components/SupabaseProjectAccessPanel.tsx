@@ -65,13 +65,16 @@ export default function SupabaseProjectAccessPanel({
   const [projectRef, setProjectRef] = useState('')
   const [consent, setConsent] = useState(false)
   const [service, setService] = useState<ProjectLogService>('edge-function-runtime')
+  const [selectedConnectionId, setSelectedConnectionId] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
   const [logs, setLogs] = useState<ProjectLogs | null>(null)
   const [health, setHealth] = useState<ProjectSecretHealth | null>(null)
 
   const readConnections = connections.filter(connection => connection.access_mode === 'read_logs')
-  const selectedConnection = readConnections[0] ?? null
+  const selectedConnection = readConnections.find(connection => connection.id === selectedConnectionId)
+    ?? readConnections[0]
+    ?? null
 
   const refreshConnections = async () => {
     const result = await getProjectAccessConnections()
@@ -196,6 +199,20 @@ export default function SupabaseProjectAccessPanel({
           <p>
             Connected project: <code>{selectedConnection.project_ref}</code>
           </p>
+          {readConnections.length > 1 && (
+            <>
+              <label htmlFor="supabase-project-connection">Connected project</label>
+              <select
+                id="supabase-project-connection"
+                value={selectedConnection.id}
+                onChange={event => setSelectedConnectionId(event.target.value)}
+              >
+                {readConnections.map(connection => (
+                  <option key={connection.id} value={connection.id}>{connection.project_ref}</option>
+                ))}
+              </select>
+            </>
+          )}
           <label htmlFor="supabase-log-service">Log service</label>
           <select
             id="supabase-log-service"

@@ -10,8 +10,16 @@
 import { createClient } from '@supabase/supabase-js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-const SUPABASE_URL = (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL ?? ''
-const SUPABASE_ANON_KEY = (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY ?? ''
+function publicEnvironment(name: string): string {
+  const viteEnvironment = (import.meta as { env?: Record<string, string> }).env
+  const nodeEnvironment = (globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> }
+  }).process?.env
+  return viteEnvironment?.[name] || nodeEnvironment?.[name] || ''
+}
+
+const SUPABASE_URL = publicEnvironment('VITE_SUPABASE_URL')
+const SUPABASE_ANON_KEY = publicEnvironment('VITE_SUPABASE_ANON_KEY')
 const ACCESS_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/supabase-project-access`
 const SECRET_WRITE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/supabase-project-secret-write`
 const MAX_AGENT_CONTEXT_BYTES = 64_000
@@ -228,6 +236,8 @@ export async function writeProjectSecret(
 }
 
 function redactAgentContext(value: string): string {
+  // This is a second, best-effort defense. The server already redacts logs and
+  // labels them untrusted; this client never treats the output as safe content.
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/gi, '******')
     .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|sk-ant-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED]')
@@ -236,6 +246,9 @@ function redactAgentContext(value: string): string {
       /((?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|authorization|password|passwd|secret|service[_-]?role)[\s"'=:]+)([^\s,"'}\]]+)/gi,
       '$1[REDACTED]',
     )
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[REDACTED_IP]')
+    .replace(/\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi, '[REDACTED_IP]')
 }
 
 /**

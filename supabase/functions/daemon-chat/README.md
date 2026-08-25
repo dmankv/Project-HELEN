@@ -10,6 +10,7 @@ Supabase Edge Function for authenticated, rate-limited Daemon AI chat.
 - **Calls** OpenAI or Anthropic using secrets stored only in Supabase Function secrets
 - **Returns** a narrowly defined `{ message: string }` response
 - **Applies CORS** only for `https://dmankv.github.io` and localhost (dev)
+- **Accepts** only bounded, redacted, explicitly selected diagnostic context as untrusted data for one request
 
 ## One-time deployment steps
 
@@ -76,6 +77,12 @@ curl -X POST https://<project>.supabase.co/functions/v1/daemon-chat \
 
 The function does **not** return provider bodies, stack traces, SQL errors, tokens, or prompt
 contents to the browser.
+
+When a user explicitly selects redacted Supabase project logs in the UI, they
+may be attached to one cloud-chat request as untrusted diagnostic data. The
+chat function applies a second redaction pass, does not log the context, and
+instructs the provider to treat it as data rather than instructions. The
+context is not persisted in conversations or messages.
 
 ## Operator checks
 
