@@ -344,7 +344,10 @@ export default function GitHubWriteAccessPanel() {
               <input
                 type="checkbox"
                 checked={issueConfirmed}
-                onChange={event => setIssueConfirmed(event.target.checked)}
+                onChange={event => {
+                  if (!event.target.checked) resetIssueAttempt()
+                  setIssueConfirmed(event.target.checked)
+                }}
               />
               I reviewed this issue and confirm creation in {selectedConnection.repositoryFullName}.
             </label>

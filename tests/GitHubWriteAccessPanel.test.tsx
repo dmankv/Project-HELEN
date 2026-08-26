@@ -112,6 +112,28 @@ describe('GitHubWriteAccessPanel', () => {
     expect(confirmation).not.toBeChecked()
   })
 
+  it('resets idempotency key when user unchecks issue confirmation after an unknown outcome', async () => {
+    render(<GitHubWriteAccessPanel />)
+    const title = await screen.findByLabelText('Issue title')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+
+    fireEvent.change(title, { target: { value: 'My issue' } })
+    fireEvent.click(confirmation)
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub issue' }))
+    await waitFor(() => expect(createGitHubIssue).toHaveBeenCalledTimes(1))
+    const firstKey = createGitHubIssue.mock.calls[0][0].idempotencyKey
+
+    // Withdraw confirmation — must reset the idempotency key
+    fireEvent.click(confirmation)
+    expect(confirmation).not.toBeChecked()
+
+    // Re-confirm with identical title/body/repository; must generate a fresh key
+    fireEvent.click(confirmation)
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub issue' }))
+    await waitFor(() => expect(createGitHubIssue).toHaveBeenCalledTimes(2))
+    expect(createGitHubIssue.mock.calls[1][0].idempotencyKey).not.toBe(firstKey)
+  })
+
   it('disables issue creation when title or body exceed UTF-8 byte limits', async () => {
     render(<GitHubWriteAccessPanel />)
     const title = await screen.findByLabelText('Issue title')

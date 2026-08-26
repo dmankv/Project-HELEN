@@ -91,7 +91,7 @@ vi.mock('../src/services/supabasePersistence', async (importActual) => {
 
 // Import the component after mocks are registered.
 import DaemonInterface from '../src/components/DaemonInterface'
-import { saveMemory, listMemories, forgetById, forgetAll, forgetLast } from '../src/services/daemonMemory'
+import { saveMemory, listMemories, forgetById, forgetAll, forgetLast, forgetByText } from '../src/services/daemonMemory'
 import learningSystem from '../src/services/daemon_learning_integration'
 import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonChatAPI'
 import { callEdgeFunction, hasEdgeFunction, createEdgeChatFailure } from '../src/services/supabaseEdgeChat'
@@ -467,6 +467,71 @@ describe('DaemonInterface', () => {
 
     await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith('550e8400-e29b-41d4-a716-446655440099'), WAIT_OPTS)
     expect(screen.getByText('Newest hydrated memory')).toBeInTheDocument()
+  }, 8000)
+
+  it('"forget this" deletes the most recent cloud-only memory when local storage is empty', async () => {
+    const cloudOnlyId = '550e8400-e29b-41d4-a716-446655440080'
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(hydrateFromCloud).mockResolvedValue({
+      conversations: [],
+      messagesByConversation: {},
+      memories: [{
+        id: cloudOnlyId,
+        user_id: 'user-1',
+        text: 'Cloud-only latest memory',
+        tags: [],
+        created_at: '2026-08-26T00:00:00.000Z',
+      }],
+      learningInteractions: [],
+    })
+    vi.mocked(forgetLast).mockReturnValue(null)
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    expect(await screen.findByText('Cloud-only latest memory')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText(/Message Daemon/i), { target: { value: 'forget this' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyId), WAIT_OPTS)
+    await waitFor(() => expect(screen.queryByText('Cloud-only latest memory')).not.toBeInTheDocument(), WAIT_OPTS)
+    await waitFor(() => expect(screen.getByText(/Forgotten: "Cloud-only latest memory"/)).toBeInTheDocument(), WAIT_OPTS)
+  }, 8000)
+
+  it('"forget: <text>" deletes cloud-only memories matching the phrase when local storage has no match', async () => {
+    const cloudOnlyId = '550e8400-e29b-41d4-a716-446655440081'
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(hydrateFromCloud).mockResolvedValue({
+      conversations: [],
+      messagesByConversation: {},
+      memories: [
+        {
+          id: cloudOnlyId,
+          user_id: 'user-1',
+          text: 'Cloud-only tagged memory',
+          tags: [],
+          created_at: '2026-08-26T00:00:00.000Z',
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440082',
+          user_id: 'user-1',
+          text: 'Unrelated cloud memory',
+          tags: [],
+          created_at: '2026-08-25T00:00:00.000Z',
+        },
+      ],
+      learningInteractions: [],
+    })
+    vi.mocked(forgetByText).mockReturnValue([])
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    expect(await screen.findByText('Cloud-only tagged memory')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText(/Message Daemon/i), { target: { value: 'forget: tagged' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyId), WAIT_OPTS)
+    await waitFor(() => expect(screen.queryByText('Cloud-only tagged memory')).not.toBeInTheDocument(), WAIT_OPTS)
+    expect(screen.getByText('Unrelated cloud memory')).toBeInTheDocument()
   }, 8000)
 
   // ── Clear All button ──────────────────────────────────────────────────────

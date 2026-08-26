@@ -691,3 +691,56 @@ When connecting the frontend to a hosted backend, follow these steps **in order*
 4. After the deployment workflow succeeds, register, verify, and log into an account before
    sending cloud chat requests. Requests without an active session show `⚠️ Auth error` and
    fall back to local responses.
+
+---
+
+## GitHub App authorization and issue-write feature
+
+> **Scope note (PR #59 and beyond):** In addition to the diagnostics and CI
+> improvements described elsewhere in this file, this repository includes a
+> full GitHub OAuth/issue-write subsystem. The following documents its security
+> model and test coverage.
+
+### What it is
+
+The GitHub issue-write feature allows authenticated users to connect a GitHub
+App installation to Project-HELEN and create GitHub issues directly from the
+Daemon UI. It is intentionally scoped to the minimum viable operation:
+
+- **Allowed action:** `create_issue` only. File edits, pull-request updates,
+  workflow triggers, secret writes, and repository-settings changes are
+  explicitly disallowed.
+- **24-hour authorization window:** Each repository connection carries a
+  time-bounded GitHub App authorization that expires automatically. Users must
+  re-authorize to continue after expiry.
+- **Owner-only data:** All connection records are stored in Supabase with
+  row-level security policies that enforce owner-only read and write access.
+
+### Components
+
+| Path | Role |
+|------|------|
+| `src/services/githubWriteAccess.ts` | Frontend service — calls Supabase Edge Functions |
+| `src/components/GitHubWriteAccessPanel.tsx` | UI panel — consent checkboxes, issue form, idempotency guard |
+| `supabase/functions/github-write-access/` | OAuth initiation and callback Edge Function |
+| `supabase/functions/github-write/` | Issue-creation Edge Function |
+| `supabase/functions/_shared/githubWriteAccess.ts` | Shared validation and GitHub API logic |
+| `supabase/migrations/20260825162000_github_write_access.sql` | Supabase table + RLS |
+
+### Security boundaries
+
+- **OAuth callback binding:** the state token is browser-bound; replayed
+  callbacks from a different browser session are rejected.
+- **Idempotency:** each issue-creation attempt carries a UUID key. Withdrawing
+  confirmation (unchecking the issue-confirm checkbox) resets the key so
+  re-confirming always constitutes a fresh request, even with identical
+  title/body/repository.
+- **No secrets in the frontend:** all GitHub tokens are stored and used
+  exclusively in Supabase Edge Functions with service-role secrets.
+
+### Test coverage
+
+- `tests/GitHubWriteAccess.test.ts` — service-layer unit tests
+- `tests/GitHubWriteAccessPanel.test.tsx` — UI panel integration tests,
+  including idempotency key reset on confirmation withdrawal and on repository
+  selection change

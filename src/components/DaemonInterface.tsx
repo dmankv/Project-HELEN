@@ -357,6 +357,10 @@ export default function DaemonInterface({
   const messagesRef = useRef(messages)
   const conversationsRef = useRef(conversations)
   const activeConvIdRef = useRef(activeConvId)
+  // Tracks the latest hydratedMemories so handleSend can read it without
+  // adding it to the useCallback dependency array (which would rebuild the
+  // callback on every hydration update).
+  const hydratedMemoriesRef = useRef(hydratedMemories)
   // Maps message id → learning interaction id (ephemeral; not persisted across page loads).
   const msgToInteractionRef = useRef<Map<string, string>>(new Map())
   // Maps an assistant message to the approved strategy that produced it, so
@@ -378,6 +382,10 @@ export default function DaemonInterface({
   useEffect(() => {
     activeConvIdRef.current = activeConvId
   }, [activeConvId])
+
+  useEffect(() => {
+    hydratedMemoriesRef.current = hydratedMemories
+  }, [hydratedMemories])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -553,7 +561,38 @@ export default function DaemonInterface({
       const memCmd = parseMemoryCommand(text)
       if (memCmd) {
         await new Promise(r => setTimeout(r, 400))
-        const { responseText, affectedMemoryIds } = handleMemoryCommand(memCmd)
+        const memResult = handleMemoryCommand(memCmd)
+        let responseText = memResult.responseText
+        const localAffectedIds = memResult.affectedMemoryIds
+
+        // Derive cloud-only IDs from the merged (local + hydrated) memory view
+        // so that forget commands work even when a memory lives only in the cloud.
+        let cloudOnlyIds: string[] = []
+        if (memCmd.type === 'forget-last' && localAffectedIds.length === 0) {
+          // Nothing in local storage; fall back to the most recent hydrated entry.
+          const sorted = [...hydratedMemoriesRef.current].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          )
+          if (sorted.length > 0) {
+            cloudOnlyIds = [sorted[0].id]
+            responseText = `Forgotten: "${sorted[0].text}"`
+          }
+        } else if (memCmd.type === 'forget-text') {
+          const lower = memCmd.payload.toLowerCase().trim()
+          const localIds = new Set(localAffectedIds)
+          const cloudMatches = hydratedMemoriesRef.current.filter(
+            m => !localIds.has(m.id) && m.text.toLowerCase().includes(lower),
+          )
+          cloudOnlyIds = cloudMatches.map(m => m.id)
+          if (localAffectedIds.length === 0 && cloudMatches.length > 0) {
+            const names = cloudMatches.map(m => `"${m.text}"`).join(', ')
+            responseText =
+              `Forgotten ${cloudMatches.length} memor${cloudMatches.length > 1 ? 'ies' : 'y'}: ${names}`
+          }
+        }
+
+        const allAffectedIds = [...localAffectedIds, ...cloudOnlyIds]
+
         // Cloud-persist new memory if user is authenticated
         if (memCmd.type === 'remember' && isPersistenceConfigured() && currentUser) {
           const mems = listMemories()
@@ -566,14 +605,13 @@ export default function DaemonInterface({
         // does not show stale entries when persistence is not configured or the
         // user is not signed in.
         if (memCmd.type === 'forget-last') {
-          setHydratedMemories(previous => {
-            if (affectedMemoryIds.length === 0) return previous
-            const affected = new Set(affectedMemoryIds)
-            return previous.filter(memory => !affected.has(memory.id))
-          })
+          if (allAffectedIds.length > 0) {
+            const affected = new Set(allAffectedIds)
+            setHydratedMemories(previous => previous.filter(memory => !affected.has(memory.id)))
+          }
         } else if (memCmd.type === 'forget-text') {
-          if (affectedMemoryIds.length > 0) {
-            const affected = new Set(affectedMemoryIds)
+          if (allAffectedIds.length > 0) {
+            const affected = new Set(allAffectedIds)
             setHydratedMemories(previous => previous.filter(memory => !affected.has(memory.id)))
           }
         } else if (memCmd.type === 'forget-all') {
@@ -582,11 +620,9 @@ export default function DaemonInterface({
         // Mirror memory deletions to cloud
         if (isPersistenceConfigured() && currentUser) {
           if (memCmd.type === 'forget-last') {
-            if (affectedMemoryIds[0]) void deleteCloudMemory(affectedMemoryIds[0])
+            if (allAffectedIds[0]) void deleteCloudMemory(allAffectedIds[0])
           } else if (memCmd.type === 'forget-text') {
-            if (affectedMemoryIds.length > 0) {
-              for (const memoryId of affectedMemoryIds) void deleteCloudMemory(memoryId)
-            }
+            for (const memoryId of allAffectedIds) void deleteCloudMemory(memoryId)
           } else if (memCmd.type === 'forget-all') {
             void deleteAllCloudMemories()
           }
