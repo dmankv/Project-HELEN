@@ -149,7 +149,6 @@ export class GitHubWriteError extends Error {
 export const GITHUB_WRITE_ACCESS_FUNCTION_NAME = 'github-write-access'
 export const GITHUB_WRITE_FUNCTION_NAME = 'github-write'
 
-const ALLOWED_ORIGINS = new Set(['https://dmankv.github.io'])
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
 const GITHUB_API_ORIGIN = 'https://api.github.com'
@@ -175,7 +174,20 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 
 export function getAllowedGitHubWriteOrigin(requestOrigin: string | null): string | null {
   if (!requestOrigin) return null
-  if (ALLOWED_ORIGINS.has(requestOrigin)) return requestOrigin
+  const configured = Deno.env.get('GITHUB_WRITE_ACCESS_ALLOWED_ORIGIN') ?? ''
+  const allowedOrigins = new Set(
+    configured
+      .split(',')
+      .map(o => o.trim())
+      .filter(o => {
+        try {
+          return new URL(o).origin === o
+        } catch {
+          return false
+        }
+      }),
+  )
+  if (allowedOrigins.has(requestOrigin)) return requestOrigin
   if (/^http:\/\/localhost(:\d+)?$/.test(requestOrigin)) return requestOrigin
   if (/^http:\/\/127\.0\.0\.1(:\d+)?$/.test(requestOrigin)) return requestOrigin
   return null
@@ -505,17 +517,23 @@ function callbackRedirect(
   outcome: 'authorized' | 'denied' | 'failed',
   cookieHeader?: string,
 ): Response {
-  const fallback = 'https://dmankv.github.io/Project-HELEN/#/?github_write=failed'
-  const configured = Deno.env.get('GITHUB_WRITE_ACCESS_APP_URL') ?? 'https://dmankv.github.io/Project-HELEN/'
-  let location = fallback
+  const configured = Deno.env.get('GITHUB_WRITE_ACCESS_APP_URL') ?? ''
+  let location: string | null = null
   try {
-    const url = new URL(configured)
-    if (getAllowedGitHubWriteOrigin(url.origin)) {
-      url.hash = `/?github_write=${outcome}`
-      location = url.toString()
+    if (configured) {
+      const url = new URL(configured)
+      if (getAllowedGitHubWriteOrigin(url.origin)) {
+        url.hash = `/?github_write=${outcome}`
+        location = url.toString()
+      }
     }
   } catch {
-    // The fixed GitHub Pages fallback is used for invalid configuration.
+    // Fall through to error response below.
+  }
+  if (!location) {
+    return new Response('GITHUB_WRITE_ACCESS_APP_URL is not configured or its origin is not in GITHUB_WRITE_ACCESS_ALLOWED_ORIGIN.', {
+      status: 500,
+    })
   }
   return new Response(null, {
     status: 303,

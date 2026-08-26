@@ -166,12 +166,12 @@ export default function GitHubWriteAccessPanel() {
       setStatus(safeFailureMessage(result.code))
       return
     }
-    setSelectedConnectionId(result.data.connection.id)
     setConnectionConsent(false)
     setIssueConfirmed(false)
     resetIssueAttempt()
     setStatus(`Connected ${result.data.connection.repositoryFullName} for issue creation only.`)
     await refresh()
+    setSelectedConnectionId(result.data.connection.id)
   }
 
   const handleDisconnect = async () => {

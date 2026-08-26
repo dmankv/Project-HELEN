@@ -423,17 +423,19 @@ export default function DaemonInterface({
     const hydrationVersion = memoryMutationVersionRef.current
     const localMems = listMemories()
     setHydratedMemories([])
-    void migrateLocalMemoriesToCloud(localMems)
+    void migrateLocalMemoriesToCloud(localMems, id => listMemories().some(m => m.id === id))
     // Hydrate cloud data into local state non-disruptively
     void (async () => {
       const hydrated = await hydrateFromCloud()
-      if (!active || !hydrated || memoryMutationVersionRef.current !== hydrationVersion) return
-      setHydratedMemories(hydrated.memories.map(memory => ({
-        id: memory.id,
-        text: memory.text,
-        tags: memory.tags,
-        createdAt: memory.created_at,
-      })))
+      if (!active || !hydrated) return
+      if (memoryMutationVersionRef.current === hydrationVersion) {
+        setHydratedMemories(hydrated.memories.map(memory => ({
+          id: memory.id,
+          text: memory.text,
+          tags: memory.tags,
+          createdAt: memory.created_at,
+        })))
+      }
       // Merge cloud conversations: add ones not already in local state.
       // Strategy: cloud data is additive — we never replace or clear local
       // conversations, and we never reset the currently-active conversation

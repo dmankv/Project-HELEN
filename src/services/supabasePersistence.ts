@@ -387,6 +387,7 @@ function markCloudMigrationDone(userId: string): void {
  */
 export async function migrateLocalMemoriesToCloud(
   localMemories: Array<{ id: string; text: string; tags?: string[]; createdAt: string }>,
+  isStillLocal?: (id: string) => boolean,
 ): Promise<void> {
   const client = getClient()
   if (!client) return
@@ -405,6 +406,7 @@ export async function migrateLocalMemoriesToCloud(
   }
 
   for (const mem of localMemories) {
+    if (isStillLocal && !isStillLocal(mem.id)) continue
     await insertCloudMemory(mem)
   }
   markCloudMigrationDone(userId)
