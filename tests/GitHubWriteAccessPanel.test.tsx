@@ -286,4 +286,46 @@ describe('GitHubWriteAccessPanel', () => {
     // A fresh idempotency key must be used on the retry
     expect(createGitHubIssue.mock.calls[1][0].idempotencyKey).not.toBe(firstKey)
   })
+
+  it('refreshes connections and resets attempt on WRITE_NOT_CONFIRMED so stale repository name is not resubmitted', async () => {
+    const updatedConnection = {
+      id: '00000000-0000-4000-8000-000000000001',
+      repositoryFullName: 'owner/repository-a-renamed',
+      allowedActions: ['create_issue'] as ['create_issue'],
+      authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
+      connectedAt: '2026-08-25T00:00:00.000Z',
+      lastUsedAt: null,
+    }
+    createGitHubIssue.mockResolvedValueOnce({ ok: false, code: 'WRITE_NOT_CONFIRMED' })
+    getGitHubWriteConnections
+      .mockResolvedValueOnce({ ok: true, data: { connections: [{
+        id: '00000000-0000-4000-8000-000000000001',
+        repositoryFullName: 'owner/repository-a',
+        allowedActions: ['create_issue'],
+        authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
+        connectedAt: '2026-08-25T00:00:00.000Z',
+        lastUsedAt: null,
+      }] } })
+      .mockResolvedValue({ ok: true, data: { connections: [updatedConnection] } })
+
+    render(<GitHubWriteAccessPanel />)
+    const title = await screen.findByLabelText('Issue title')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+
+    fireEvent.change(title, { target: { value: 'Test issue' } })
+    fireEvent.click(confirmation)
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub issue' }))
+    await waitFor(() => expect(createGitHubIssue).toHaveBeenCalledTimes(1))
+    const firstKey = createGitHubIssue.mock.calls[0][0].idempotencyKey
+
+    // Confirmation is cleared and connections are refreshed with the renamed repo
+    await waitFor(() => expect(confirmation).not.toBeChecked())
+    await waitFor(() => expect(getGitHubWriteConnections).toHaveBeenCalledTimes(2))
+
+    // Re-confirm and submit — a fresh key must be used, not the stale one
+    fireEvent.click(screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a-renamed/))
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub issue' }))
+    await waitFor(() => expect(createGitHubIssue).toHaveBeenCalledTimes(2))
+    expect(createGitHubIssue.mock.calls[1][0].idempotencyKey).not.toBe(firstKey)
+  })
 })

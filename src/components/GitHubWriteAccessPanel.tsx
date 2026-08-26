@@ -84,6 +84,10 @@ function clearGitHubWriteOAuthCallback(): void {
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
 }
 
+// Module-level slot so React.StrictMode double-invocation (setup→cleanup→setup)
+// can reattach to the in-flight OAuth completion promise rather than silently dropping it.
+let pendingOAuthCompletion: Promise<GitHubWriteResult<{ authorized: true }>> | null = null
+
 export default function GitHubWriteAccessPanel() {
   const [connections, setConnections] = useState<GitHubWriteConnectionSummary[]>([])
   const [eligibleRepositories, setEligibleRepositories] = useState<GitHubEligibleRepository[]>([])
@@ -155,8 +159,31 @@ export default function GitHubWriteAccessPanel() {
         return () => { active = false }
       }
       setLoading(true)
+      const p = completeGitHubWriteAuthorization(callback.state!, callback.code!)
+      pendingOAuthCompletion = p
       void (async () => {
-        const result = await completeGitHubWriteAuthorization(callback.state!, callback.code!)
+        const result = await p
+        if (pendingOAuthCompletion === p) pendingOAuthCompletion = null
+        if (!active) return
+        setLoading(false)
+        if (!result.ok) {
+          setStatus(safeFailureMessage(result.code))
+          return
+        }
+        setStatus('GitHub authorization completed.')
+        await refresh(() => active)
+        if (!active) return
+      })()
+      return () => { active = false }
+    }
+    // StrictMode second run: callback was already cleared by the first setup;
+    // if a completion is still in flight reattach to it so the result is not lost.
+    if (pendingOAuthCompletion) {
+      const p = pendingOAuthCompletion
+      setLoading(true)
+      void (async () => {
+        const result = await p
+        if (pendingOAuthCompletion === p) pendingOAuthCompletion = null
         if (!active) return
         setLoading(false)
         if (!result.ok) {
@@ -273,6 +300,11 @@ export default function GitHubWriteAccessPanel() {
       if (result.code === 'IDEMPOTENCY_CONFLICT') {
         resetIssueAttempt()
         setIssueConfirmed(false)
+      }
+      if (result.code === 'WRITE_NOT_CONFIRMED') {
+        resetIssueAttempt()
+        setIssueConfirmed(false)
+        await refreshConnections()
       }
       setStatus(safeFailureMessage(result.code))
       return

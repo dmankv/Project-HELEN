@@ -586,7 +586,10 @@ export default function DaemonInterface({
       if (memCmd) {
         await new Promise(r => setTimeout(r, 400))
         const { responseText, affectedMemoryIds } = handleMemoryCommand(memCmd)
-        if (memCmd.type === 'forget-last' || memCmd.type === 'forget-text' || memCmd.type === 'forget-all') {
+        if (memCmd.type === 'forget-all' || (
+          (memCmd.type === 'forget-last' || memCmd.type === 'forget-text') &&
+          affectedMemoryIds.length > 0
+        )) {
           memoryMutationVersionRef.current += 1
         }
         // Cloud-persist new memory if user is authenticated
