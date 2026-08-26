@@ -59,11 +59,11 @@ supabase secrets set GITHUB_APP_PRIVATE_KEY="$(cat /secure/path/github-app-priva
 # 32 random bytes encoded as base64url. Keep it distinct from all other keys.
 supabase secrets set GITHUB_WRITE_ACCESS_ENCRYPTION_KEY=...
 
-# Exact GitHub App callback and approved browser destination.
+# Exact GitHub App callback and dedicated browser destination.
 supabase secrets set \
   GITHUB_WRITE_ACCESS_REDIRECT_URI=https://<gateway-project-ref>.supabase.co/functions/v1/github-write-access
 supabase secrets set \
-  GITHUB_WRITE_ACCESS_APP_URL=https://dmankv.github.io/Project-HELEN/
+  GITHUB_WRITE_ACCESS_APP_URL=https://github-write.example.com/
 ```
 
 Generate the encryption value with a secure local command and store it only in
@@ -72,6 +72,14 @@ the Supabase secret manager, for example:
 ```bash
 openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 ```
+
+Host the write-enabled frontend on a dedicated HTTPS custom origin such as
+`https://github-write.example.com/`. Do **not** configure
+`GITHUB_WRITE_ACCESS_APP_URL` as a `github.io` project site: GitHub Pages
+projects under one account share an origin and browser storage. The functions
+fail closed for `*.github.io`; until a dedicated origin is available, leave
+GitHub issue writes disabled. An explicitly configured `http://localhost` or
+`http://127.0.0.1` origin is accepted only for local development.
 
 Deploy the OAuth callback with gateway JWT verification disabled because
 GitHub's redirect cannot carry the application's Supabase JWT. The function

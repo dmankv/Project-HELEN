@@ -108,6 +108,10 @@ create issues in explicitly selected repositories. The channel creates issues
 only—it cannot commit files, open pull requests, alter workflows, manage
 secrets, or change repository settings.
 
+Host the write-enabled frontend on a dedicated HTTPS custom origin, not a
+`github.io` project site. GitHub Pages projects share browser storage for an
+account-wide origin, so GitHub issue writes remain disabled there.
+
 1. Create a private GitHub App with **Issues: Read and write** and no broader
    repository permissions.
 2. Apply `supabase/migrations/20260825162000_github_write_access.sql`.

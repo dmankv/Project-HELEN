@@ -251,15 +251,12 @@ signed-in user explicitly authorizes; it is not a generic GitHub API proxy.
    [`supabase/functions/github-write-access/README.md`](supabase/functions/github-write-access/README.md):
    `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`,
    `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WRITE_ACCESS_ENCRYPTION_KEY`,
-   `GITHUB_WRITE_ACCESS_REDIRECT_URI`, `GITHUB_WRITE_ACCESS_APP_URL`,
-   and `GITHUB_WRITE_ACCESS_ALLOWED_ORIGIN`.
-   `GITHUB_WRITE_ACCESS_ALLOWED_ORIGIN` must be set to the exact origin
-   of your custom domain (e.g. `https://app.example.com`).
-   **Do not set it to `https://dmankv.github.io`** — that origin is shared
-   by all GitHub Pages project sites under the same account, so any sibling
-   project could reach the write boundary. A dedicated origin or custom
-   domain is required before enabling this feature.
-   Do not create `VITE_*` versions of any of these values.
+   `GITHUB_WRITE_ACCESS_REDIRECT_URI`, and `GITHUB_WRITE_ACCESS_APP_URL`.
+   Set `GITHUB_WRITE_ACCESS_APP_URL` to the dedicated HTTPS custom origin that
+   hosts the write-enabled frontend, never a `github.io` project-site URL.
+   GitHub Pages projects share an origin and browser storage, so the functions
+   reject `*.github.io` for issue writes. Do not create `VITE_*` versions of
+   any of these values.
 4. Deploy the functions:
    ```bash
    supabase functions deploy github-write-access --no-verify-jwt
@@ -354,7 +351,7 @@ errors, stack traces, prompt contents, tokens, or secret values.
 | Rate limit | Per-user count in `public.edge_rate_limits` via service_role |
 | Schema | Message array, role validation, size/count limits |
 | Secrets | Provider keys in Supabase Function secrets only |
-| CORS | Only the origin configured in `GITHUB_WRITE_ACCESS_ALLOWED_ORIGIN` and localhost (dev); requires a dedicated origin — not shared GitHub Pages origins |
+| CORS | Only `https://dmankv.github.io` and localhost (dev) |
 | Error masking | Provider errors are logged server-side; generic message to client |
 | Project diagnostics | Separate OAuth callback, one project/ref, read-only MCP debugging tools, redaction, and audit-only metadata |
 

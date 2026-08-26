@@ -102,6 +102,7 @@ import {
   deleteCloudMemory,
   hydrateFromCloud,
   listConversations,
+  migrateLocalMemoriesToCloud,
 } from '../src/services/supabasePersistence'
 
 // ---------------------------------------------------------------------------
@@ -122,6 +123,8 @@ beforeEach(() => {
   vi.mocked(deleteCloudMemory).mockResolvedValue(true)
   vi.mocked(listConversations).mockResolvedValue([])
   vi.mocked(listMemories).mockReturnValue([])
+  vi.mocked(migrateLocalMemoriesToCloud).mockResolvedValue(undefined)
+  vi.mocked(hydrateFromCloud).mockResolvedValue(null)
   vi.mocked(forgetById).mockReturnValue(false)
   vi.mocked(learningSystem.getLearningInsights).mockReturnValue({
     totalInteractions: 0,
@@ -387,7 +390,7 @@ describe('DaemonInterface', () => {
     linkClick.mockRestore()
   })
 
-  it('forgets an individual durable memory and mirrors it to cloud storage', () => {
+  it('forgets an individual durable memory and mirrors it to cloud storage', async () => {
     const memory = {
       id: '550e8400-e29b-41d4-a716-446655440011',
       text: 'Use concise answers.',
@@ -402,7 +405,7 @@ describe('DaemonInterface', () => {
     fireEvent.click(screen.getByRole('button', { name: /Forget memory: Use concise answers\./i }))
 
     expect(forgetById).toHaveBeenCalledWith(memory.id)
-    expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id)
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id), WAIT_OPTS)
   })
 
   it('shows hydrated durable memories and can delete cloud-only entries', async () => {
@@ -427,7 +430,7 @@ describe('DaemonInterface', () => {
     expect(await screen.findByText('Cloud-only durable memory')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Forget memory: Cloud-only durable memory/i }))
 
-    expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId)
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId), WAIT_OPTS)
   })
 
   it('does not restore a deleted memory from stale hydration results', async () => {
@@ -466,7 +469,7 @@ describe('DaemonInterface', () => {
     expect(screen.getByText(memory.text)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Forget memory: Delete me before hydration finishes\./i }))
 
-    expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id)
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id), WAIT_OPTS)
     await waitFor(() => expect(screen.queryByText(memory.text)).not.toBeInTheDocument(), WAIT_OPTS)
 
     resolveHydration?.({
@@ -483,6 +486,85 @@ describe('DaemonInterface', () => {
     })
 
     await waitFor(() => expect(screen.queryByText(memory.text)).not.toBeInTheDocument(), WAIT_OPTS)
+  })
+
+  it('still merges cloud conversations after a memory mutation during hydration', async () => {
+    type HydrationResult = NonNullable<Awaited<ReturnType<typeof hydrateFromCloud>>>
+    let resolveHydration: ((value: HydrationResult) => void) | null = null
+    const memory = {
+      id: '550e8400-e29b-41d4-a716-446655440056',
+      text: 'Remove this before cloud hydration finishes.',
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    let localMemories = [memory]
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(listMemories).mockImplementation(() => localMemories)
+    vi.mocked(forgetById).mockImplementation(memoryId => {
+      if (memoryId !== memory.id) return false
+      localMemories = []
+      return true
+    })
+    vi.mocked(hydrateFromCloud).mockReturnValue(new Promise(resolve => {
+      resolveHydration = resolve as (value: HydrationResult) => void
+    }))
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: Remove this before cloud hydration finishes\./i }))
+    await act(async () => {
+      resolveHydration?.({
+        conversations: [{
+          id: '550e8400-e29b-41d4-a716-446655440057',
+          user_id: 'user-1',
+          title: 'Cloud conversation after memory deletion',
+          created_at: '2026-08-25T00:00:00.000Z',
+          updated_at: '2026-08-25T00:00:00.000Z',
+        }],
+        messagesByConversation: {},
+        memories: [{
+          id: memory.id,
+          user_id: 'user-1',
+          text: memory.text,
+          tags: [],
+          created_at: memory.createdAt,
+        }],
+        learningInteractions: [],
+      })
+    })
+
+    expect(await screen.findByText('Cloud conversation after memory deletion')).toBeInTheDocument()
+    expect(screen.queryByText(memory.text)).not.toBeInTheDocument()
+  })
+
+  it('waits for the initial memory migration before deleting from cloud', async () => {
+    let finishMigration: (() => void) | null = null
+    const memory = {
+      id: '550e8400-e29b-41d4-a716-446655440058',
+      text: 'Do not restore this after migration.',
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    let localMemories = [memory]
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(listMemories).mockImplementation(() => localMemories)
+    vi.mocked(forgetById).mockImplementation(memoryId => {
+      if (memoryId !== memory.id) return false
+      localMemories = []
+      return true
+    })
+    vi.mocked(migrateLocalMemoriesToCloud).mockReturnValue(new Promise(resolve => {
+      finishMigration = resolve
+    }))
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    await waitFor(() => expect(migrateLocalMemoriesToCloud).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: Do not restore this after migration\./i }))
+    expect(deleteCloudMemory).not.toHaveBeenCalled()
+
+    await act(async () => {
+      finishMigration?.()
+    })
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id), WAIT_OPTS)
   })
 
   it('forgets the exact memory returned by forgetLast without dropping the newest hydrated entry', async () => {

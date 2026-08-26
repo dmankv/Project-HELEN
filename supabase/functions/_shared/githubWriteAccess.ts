@@ -172,25 +172,32 @@ const MAX_GITHUB_ID = 9_007_199_254_740_991n
 const REPOSITORY_FULL_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+function configuredGitHubWriteAppUrl(): URL | null {
+  const configured = Deno.env.get('GITHUB_WRITE_ACCESS_APP_URL')
+  if (!configured) return null
+  try {
+    const url = new URL(configured)
+    const isConfiguredLocalhost = (
+      url.protocol === 'http:'
+      && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+    )
+    const isDedicatedHttpsOrigin = (
+      url.protocol === 'https:'
+      && url.hostname !== 'github.io'
+      && !url.hostname.endsWith('.github.io')
+    )
+    if ((!isConfiguredLocalhost && !isDedicatedHttpsOrigin) || url.username || url.password) {
+      return null
+    }
+    return url
+  } catch {
+    return null
+  }
+}
+
 export function getAllowedGitHubWriteOrigin(requestOrigin: string | null): string | null {
-  if (!requestOrigin) return null
-  const configured = Deno.env.get('GITHUB_WRITE_ACCESS_ALLOWED_ORIGIN') ?? ''
-  const allowedOrigins = new Set(
-    configured
-      .split(',')
-      .map(o => o.trim())
-      .filter(o => {
-        try {
-          return new URL(o).origin === o
-        } catch {
-          return false
-        }
-      }),
-  )
-  if (allowedOrigins.has(requestOrigin)) return requestOrigin
-  if (/^http:\/\/localhost(:\d+)?$/.test(requestOrigin)) return requestOrigin
-  if (/^http:\/\/127\.0\.0\.1(:\d+)?$/.test(requestOrigin)) return requestOrigin
-  return null
+  const appUrl = configuredGitHubWriteAppUrl()
+  return requestOrigin && appUrl?.origin === requestOrigin ? requestOrigin : null
 }
 
 export function githubWriteCorsHeaders(origin: string): Record<string, string> {
@@ -517,28 +524,22 @@ function callbackRedirect(
   outcome: 'authorized' | 'denied' | 'failed',
   cookieHeader?: string,
 ): Response {
-  const configured = Deno.env.get('GITHUB_WRITE_ACCESS_APP_URL') ?? ''
-  let location: string | null = null
-  try {
-    if (configured) {
-      const url = new URL(configured)
-      if (getAllowedGitHubWriteOrigin(url.origin)) {
-        url.hash = `/?github_write=${outcome}`
-        location = url.toString()
-      }
-    }
-  } catch {
-    // Fall through to error response below.
-  }
-  if (!location) {
-    return new Response('GITHUB_WRITE_ACCESS_APP_URL is not configured or its origin is not in GITHUB_WRITE_ACCESS_ALLOWED_ORIGIN.', {
-      status: 500,
+  const url = configuredGitHubWriteAppUrl()
+  if (!url) {
+    return new Response(null, {
+      status: 503,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+        ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {}),
+      },
     })
   }
+  url.hash = `/?github_write=${outcome}`
   return new Response(null, {
     status: 303,
     headers: {
-      Location: location,
+      Location: url.toString(),
       'Cache-Control': 'no-store',
       'Referrer-Policy': 'no-referrer',
       ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {}),

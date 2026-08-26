@@ -322,6 +322,7 @@ export default function DaemonInterface({
   onLogoutClick,
   currentUser = null,
 }: DaemonInterfaceProps = {}) {
+  const cloudUserKey = currentUser?.id ?? currentUser?.email ?? null
   const currentUserRoleLabel = currentUser?.role === 'admin'
     ? 'Admin'
     : currentUser?.role === 'user'
@@ -352,6 +353,8 @@ export default function DaemonInterface({
   const [showPreferences, setShowPreferences] = useState(false)
   const [projectLogContext, setProjectLogContext] = useState<string | null>(null)
   const memoryMutationVersionRef = useRef(0)
+  const memoryWriteTailsRef = useRef(new Map<string, Promise<void>>())
+  const liveCloudUserKeyRef = useRef(cloudUserKey)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -379,6 +382,10 @@ export default function DaemonInterface({
   useEffect(() => {
     activeConvIdRef.current = activeConvId
   }, [activeConvId])
+
+  useEffect(() => {
+    liveCloudUserKeyRef.current = cloudUserKey
+  }, [cloudUserKey])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -416,14 +423,35 @@ export default function DaemonInterface({
     }
   }, [currentUser])
 
+  const queueCloudMemoryWrite = useCallback((operation: () => Promise<unknown>) => {
+    if (!isPersistenceConfigured() || !cloudUserKey) return
+    const previous = memoryWriteTailsRef.current.get(cloudUserKey) ?? Promise.resolve()
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (liveCloudUserKeyRef.current !== cloudUserKey) return
+        try {
+          await operation()
+        } catch {
+          // Cloud-memory operations are best effort.
+        }
+      })
+    memoryWriteTailsRef.current.set(cloudUserKey, next)
+    void next.then(() => {
+      if (memoryWriteTailsRef.current.get(cloudUserKey) === next) {
+        memoryWriteTailsRef.current.delete(cloudUserKey)
+      }
+    })
+  }, [cloudUserKey])
+
   // One-time local-to-cloud memory migration + cloud hydration when user first signs in
   useEffect(() => {
-    if (!isPersistenceConfigured() || !currentUser) return
+    if (!isPersistenceConfigured() || !cloudUserKey) return
     let active = true
     const hydrationVersion = memoryMutationVersionRef.current
     const localMems = listMemories()
     setHydratedMemories([])
-    void migrateLocalMemoriesToCloud(localMems, id => listMemories().some(m => m.id === id))
+    queueCloudMemoryWrite(() => migrateLocalMemoriesToCloud(localMems))
     // Hydrate cloud data into local state non-disruptively
     void (async () => {
       const hydrated = await hydrateFromCloud()
@@ -470,7 +498,7 @@ export default function DaemonInterface({
     return () => {
       active = false
     }
-  }, [currentUser])
+  }, [cloudUserKey, queueCloudMemoryWrite])
 
   // Load cloud personality preferences when the user signs in.
   useEffect(() => {
@@ -562,11 +590,16 @@ export default function DaemonInterface({
           memoryMutationVersionRef.current += 1
         }
         // Cloud-persist new memory if user is authenticated
-        if (memCmd.type === 'remember' && isPersistenceConfigured() && currentUser) {
+        if (memCmd.type === 'remember') {
           const mems = listMemories()
           const latest = mems[0]
           if (latest) {
-            void insertCloudMemory({ id: latest.id, text: latest.text, tags: latest.tags, createdAt: latest.createdAt })
+            queueCloudMemoryWrite(() => insertCloudMemory({
+              id: latest.id,
+              text: latest.text,
+              tags: latest.tags,
+              createdAt: latest.createdAt,
+            }))
           }
         }
         // Always clear hydrated memories for deletion commands so the panel
@@ -587,16 +620,16 @@ export default function DaemonInterface({
           setHydratedMemories([])
         }
         // Mirror memory deletions to cloud
-        if (isPersistenceConfigured() && currentUser) {
-          if (memCmd.type === 'forget-last') {
-            if (affectedMemoryIds[0]) void deleteCloudMemory(affectedMemoryIds[0])
-          } else if (memCmd.type === 'forget-text') {
-            if (affectedMemoryIds.length > 0) {
-              for (const memoryId of affectedMemoryIds) void deleteCloudMemory(memoryId)
-            }
-          } else if (memCmd.type === 'forget-all') {
-            void deleteAllCloudMemories()
+        if (memCmd.type === 'forget-last') {
+          if (affectedMemoryIds[0]) {
+            queueCloudMemoryWrite(() => deleteCloudMemory(affectedMemoryIds[0]))
           }
+        } else if (memCmd.type === 'forget-text') {
+          for (const memoryId of affectedMemoryIds) {
+            queueCloudMemoryWrite(() => deleteCloudMemory(memoryId))
+          }
+        } else if (memCmd.type === 'forget-all') {
+          queueCloudMemoryWrite(deleteAllCloudMemories)
         }
         if (memCmd.type !== 'recall') {
           setDataRevision(revision => revision + 1)
@@ -1020,10 +1053,8 @@ export default function DaemonInterface({
       setHydratedMemories(previous => previous.filter(memory => memory.id !== memoryId))
     }
     setDataRevision(revision => revision + 1)
-    if (isPersistenceConfigured() && currentUser) {
-      void deleteCloudMemory(memoryId)
-    }
-  }, [currentUser, hydratedMemories])
+    queueCloudMemoryWrite(() => deleteCloudMemory(memoryId))
+  }, [hydratedMemories, queueCloudMemoryWrite])
 
   const handleExportLearningData = useCallback(() => {
     try {

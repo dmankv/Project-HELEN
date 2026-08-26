@@ -222,9 +222,17 @@ describe('GitHub write server boundaries', () => {
     expect(browserClient).not.toContain('github.com/login/oauth')
     expect(browserClient).toContain("confirmation: 'CREATE_GITHUB_ISSUE'")
   })
+
+  it('derives the write CORS origin from the dedicated app URL', () => {
+    expect(sharedFunction).toContain("Deno.env.get('GITHUB_WRITE_ACCESS_APP_URL')")
+    expect(sharedFunction).toContain("url.hostname.endsWith('.github.io')")
+    expect(sharedFunction).not.toContain("https://dmankv.github.io")
+  })
 })
 
 describe('GitHub write issue creation behavior', () => {
+  const serverEnvironment: Record<string, string> = {}
+
   type Connection = {
     id: string
     user_id: string
@@ -408,22 +416,41 @@ describe('GitHub write issue creation behavior', () => {
       .privateKey
       .export({ type: 'pkcs8', format: 'pem' })
       .toString()
+    Object.assign(serverEnvironment, {
+      SUPABASE_URL: 'https://project-helen.supabase.co',
+      SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+      SUPABASE_ANON_KEY: 'anon-key',
+      GITHUB_WRITE_ACCESS_ENCRYPTION_KEY: encryptionKey,
+      GITHUB_APP_ID: '1',
+      GITHUB_APP_CLIENT_ID: 'client-id',
+      GITHUB_APP_CLIENT_SECRET: 'client-secret',
+      GITHUB_APP_PRIVATE_KEY: privateKey,
+      GITHUB_WRITE_ACCESS_APP_URL: 'https://github-write.example.com/',
+    })
     vi.stubGlobal('Deno', {
       env: {
-        get: (key: string) => ({
-          SUPABASE_URL: 'https://project-helen.supabase.co',
-          SUPABASE_SERVICE_ROLE_KEY: 'service-role',
-          SUPABASE_ANON_KEY: 'anon-key',
-          GITHUB_WRITE_ACCESS_ENCRYPTION_KEY: encryptionKey,
-          GITHUB_APP_ID: '1',
-          GITHUB_APP_CLIENT_ID: 'client-id',
-          GITHUB_APP_CLIENT_SECRET: 'client-secret',
-          GITHUB_APP_PRIVATE_KEY: privateKey,
-        }[key] ?? ''),
+        get: (key: string) => serverEnvironment[key] ?? '',
       },
     })
     vi.stubGlobal('__githubWriteTestDeps', { createClient: vi.fn() })
     vi.stubGlobal('fetch', vi.fn())
+  })
+
+  it('allows only the configured dedicated browser origin', async () => {
+    const { getAllowedGitHubWriteOrigin } = await loadGitHubWriteServerModule()
+    expect(getAllowedGitHubWriteOrigin('https://github-write.example.com')).toBe(
+      'https://github-write.example.com',
+    )
+    expect(getAllowedGitHubWriteOrigin('https://dmankv.github.io')).toBeNull()
+    expect(getAllowedGitHubWriteOrigin('https://other-project.github.io')).toBeNull()
+
+    serverEnvironment.GITHUB_WRITE_ACCESS_APP_URL = 'https://dmankv.github.io/Project-HELEN/'
+    const invalidOriginModule = await loadGitHubWriteServerModule()
+    expect(invalidOriginModule.getAllowedGitHubWriteOrigin('https://dmankv.github.io')).toBeNull()
+
+    serverEnvironment.GITHUB_WRITE_ACCESS_APP_URL = ''
+    const missingOriginModule = await loadGitHubWriteServerModule()
+    expect(missingOriginModule.getAllowedGitHubWriteOrigin('https://github-write.example.com')).toBeNull()
   })
 
   it('enforces ownership and current authorization before creating issues', async () => {

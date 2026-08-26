@@ -387,7 +387,6 @@ function markCloudMigrationDone(userId: string): void {
  */
 export async function migrateLocalMemoriesToCloud(
   localMemories: Array<{ id: string; text: string; tags?: string[]; createdAt: string }>,
-  isStillLocal?: (id: string) => boolean,
 ): Promise<void> {
   const client = getClient()
   if (!client) return
@@ -406,8 +405,14 @@ export async function migrateLocalMemoriesToCloud(
   }
 
   for (const mem of localMemories) {
-    if (isStillLocal && !isStillLocal(mem.id)) continue
-    await insertCloudMemory(mem)
+    if (await getCurrentUserId() !== userId) return
+    const { error } = await client
+      .from('durable_memories')
+      .insert({ id: mem.id, user_id: userId, text: mem.text, tags: mem.tags ?? [], created_at: mem.createdAt })
+    if (error) {
+      console.warn('[daemon-persistence] migrateLocalMemoriesToCloud:', error.message)
+      return
+    }
   }
   markCloudMigrationDone(userId)
 }

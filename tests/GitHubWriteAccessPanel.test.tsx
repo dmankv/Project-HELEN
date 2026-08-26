@@ -1,14 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { createGitHubIssue, disconnectGitHubWriteConnection } = vi.hoisted(() => ({
+const {
+  connectGitHubWriteRepository,
+  createGitHubIssue,
+  disconnectGitHubWriteConnection,
+  getGitHubWriteConnections,
+} = vi.hoisted(() => ({
+  connectGitHubWriteRepository: vi.fn(),
   createGitHubIssue: vi.fn(),
   disconnectGitHubWriteConnection: vi.fn(),
+  getGitHubWriteConnections: vi.fn(),
 }))
 
 vi.mock('../src/services/githubWriteAccess', () => ({
   beginGitHubWriteAuthorization: vi.fn(),
-  connectGitHubWriteRepository: vi.fn(),
+  connectGitHubWriteRepository,
   createGitHubIssue,
   disconnectGitHubWriteConnection,
   getEligibleGitHubRepositories: vi.fn().mockResolvedValue({
@@ -20,29 +27,7 @@ vi.mock('../src/services/githubWriteAccess', () => ({
       ],
     },
   }),
-  getGitHubWriteConnections: vi.fn().mockResolvedValue({
-    ok: true,
-    data: {
-      connections: [
-        {
-          id: '00000000-0000-4000-8000-000000000001',
-          repositoryFullName: 'owner/repository-a',
-          allowedActions: ['create_issue'],
-          authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
-          connectedAt: '2026-08-25T00:00:00.000Z',
-          lastUsedAt: null,
-        },
-        {
-          id: '00000000-0000-4000-8000-000000000002',
-          repositoryFullName: 'owner/repository-b',
-          allowedActions: ['create_issue'],
-          authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
-          connectedAt: '2026-08-25T00:00:00.000Z',
-          lastUsedAt: null,
-        },
-      ],
-    },
-  }),
+  getGitHubWriteConnections,
   isGitHubWriteAccessConfigured: () => true,
 }))
 
@@ -50,10 +35,36 @@ import GitHubWriteAccessPanel from '../src/components/GitHubWriteAccessPanel'
 
 describe('GitHubWriteAccessPanel', () => {
   beforeEach(() => {
+    connectGitHubWriteRepository.mockReset()
+    connectGitHubWriteRepository.mockResolvedValue({ ok: false, code: 'unavailable' })
     createGitHubIssue.mockReset()
     createGitHubIssue.mockResolvedValue({ ok: false, code: 'GITHUB_UNAVAILABLE' })
     disconnectGitHubWriteConnection.mockReset()
     disconnectGitHubWriteConnection.mockResolvedValue({ ok: true, data: { disconnected: true } })
+    getGitHubWriteConnections.mockReset()
+    getGitHubWriteConnections.mockResolvedValue({
+      ok: true,
+      data: {
+        connections: [
+          {
+            id: '00000000-0000-4000-8000-000000000001',
+            repositoryFullName: 'owner/repository-a',
+            allowedActions: ['create_issue'],
+            authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
+            connectedAt: '2026-08-25T00:00:00.000Z',
+            lastUsedAt: null,
+          },
+          {
+            id: '00000000-0000-4000-8000-000000000002',
+            repositoryFullName: 'owner/repository-b',
+            allowedActions: ['create_issue'],
+            authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
+            connectedAt: '2026-08-25T00:00:00.000Z',
+            lastUsedAt: null,
+          },
+        ],
+      },
+    })
   })
 
   it('disables mutable repository and issue controls while issue creation is in flight', async () => {
@@ -187,6 +198,46 @@ describe('GitHubWriteAccessPanel', () => {
     await waitFor(() => {
       expect(disconnectGitHubWriteConnection).toHaveBeenCalledTimes(1)
       expect(screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)).not.toBeChecked()
+    })
+  })
+
+  it('selects a newly connected repository after its refresh completes', async () => {
+    const existingConnection = {
+      id: '00000000-0000-4000-8000-000000000001',
+      repositoryFullName: 'owner/repository-a',
+      allowedActions: ['create_issue'] as ['create_issue'],
+      authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
+      connectedAt: '2026-08-25T00:00:00.000Z',
+      lastUsedAt: null,
+    }
+    const newConnection = {
+      id: '00000000-0000-4000-8000-000000000003',
+      repositoryFullName: 'owner/repository-b',
+      allowedActions: ['create_issue'] as ['create_issue'],
+      authorizationExpiresAt: '2026-08-26T00:00:00.000Z',
+      connectedAt: '2026-08-26T00:00:00.000Z',
+      lastUsedAt: null,
+    }
+    type Connection = typeof existingConnection
+    let resolveRefresh: ((value: { ok: true; data: { connections: Connection[] } }) => void) | null = null
+    getGitHubWriteConnections
+      .mockResolvedValueOnce({ ok: true, data: { connections: [existingConnection] } })
+      .mockReturnValueOnce(new Promise<{ ok: true; data: { connections: Connection[] } }>(resolve => {
+        resolveRefresh = resolve
+      }))
+    connectGitHubWriteRepository.mockResolvedValue({ ok: true, data: { connection: newConnection } })
+
+    render(<GitHubWriteAccessPanel />)
+    const repository = await screen.findByLabelText('Eligible GitHub repository')
+    fireEvent.change(repository, { target: { value: '2' } })
+    fireEvent.click(screen.getByLabelText(/I authorize issue creation only for owner\/repository-b/))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect repository' }))
+
+    await waitFor(() => expect(connectGitHubWriteRepository).toHaveBeenCalledTimes(1))
+    resolveRefresh?.({ ok: true, data: { connections: [newConnection, existingConnection] } })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Connected repository')).toHaveValue(newConnection.id)
     })
   })
 })
