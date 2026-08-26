@@ -21,7 +21,7 @@ interface SupabaseRuntimeConfig {
 
 interface OAuthStateSecret {
   verifier: string
-  browserBinding: string | null
+  browserBinding: string
 }
 
 function encodeOAuthStateSecret(verifier: string, browserBinding: string): string {
@@ -29,22 +29,20 @@ function encodeOAuthStateSecret(verifier: string, browserBinding: string): strin
 }
 
 function decodeOAuthStateSecret(value: string): OAuthStateSecret {
-  if (value.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(value) as Record<string, unknown>
-      if (
-        typeof parsed.verifier === 'string'
-        && typeof parsed.browserBinding === 'string'
-        && /^[A-Za-z0-9_-]{16,256}$/.test(parsed.browserBinding)
-      ) {
-        return { verifier: parsed.verifier, browserBinding: parsed.browserBinding }
-      }
-    } catch {
-      throw new GitHubWriteError('OAUTH_DENIED', 401)
+  if (!value.startsWith('{')) throw new GitHubWriteError('OAUTH_DENIED', 401)
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    if (
+      typeof parsed.verifier === 'string'
+      && typeof parsed.browserBinding === 'string'
+      && /^[A-Za-z0-9_-]{16,256}$/.test(parsed.browserBinding)
+    ) {
+      return { verifier: parsed.verifier, browserBinding: parsed.browserBinding }
     }
+  } catch {
     throw new GitHubWriteError('OAUTH_DENIED', 401)
   }
-  return { verifier: value, browserBinding: null }
+  throw new GitHubWriteError('OAUTH_DENIED', 401)
 }
 
 interface GitHubAppRuntimeConfig extends SupabaseRuntimeConfig {
@@ -940,7 +938,7 @@ export async function handleGitHubWriteOAuthCallback(req: Request): Promise<Resp
   try {
     const secret = decodeOAuthStateSecret(await decryptGitHubWriteState(state.code_verifier_ciphertext))
     const cookieBinding = readCookie(req.headers.get('cookie'), OAUTH_BINDING_COOKIE_NAME)
-    if (secret.browserBinding && cookieBinding !== secret.browserBinding) {
+    if (cookieBinding !== secret.browserBinding) {
       await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
       return callbackRedirect('failed', clearBindingCookie)
     }
