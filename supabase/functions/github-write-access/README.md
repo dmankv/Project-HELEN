@@ -42,10 +42,10 @@ openssl pkcs8 -topk8 -nocrypt \
 
 ## Apply storage and deploy
 
-Apply `supabase/migrations/20260825162000_github_write_access.sql` before
-deploying either function. It creates service-role-only OAuth state,
-server-verified eligibility, repository connections, rate limits, idempotency,
-and append-only audit records.
+Apply `supabase/migrations/20260825162000_github_write_access.sql` and all
+later migrations before deploying either function. They create
+service-role-only OAuth state, server-verified eligibility, repository
+connections, rate limits, idempotency, and append-only audit records.
 
 Set the following as **Supabase Function secrets**, never as `VITE_*` values:
 
@@ -84,8 +84,9 @@ development.
 
 Deploy the OAuth callback with gateway JWT verification disabled because
 GitHub's redirect cannot carry the application's Supabase JWT. The function
-consumes a one-time, server-stored state instead. The mutation function keeps
-normal gateway JWT verification enabled and also validates the caller itself.
+completes the one-time, server-stored state only after the browser returns with
+a signed-in Supabase session. The mutation function keeps normal gateway JWT
+verification enabled and also validates the caller itself.
 
 ```bash
 supabase functions deploy github-write-access --no-verify-jwt
@@ -99,20 +100,25 @@ Function or configure these secrets.
 
 1. A signed-in Supabase user explicitly starts GitHub App authorization.
 2. The function stores only a SHA-256 state hash and AES-GCM-encrypted PKCE
-   verifier, each with a ten-minute expiry.
-3. The callback atomically consumes the state, exchanges the authorization code
-   server-side, reads the immutable GitHub user ID, and obtains repositories
-   eligible to that GitHub user and App installation.
-4. The short-lived GitHub user token is discarded. No user access token, refresh
+   verifier plus a browser binding, each with a ten-minute expiry.
+3. The callback returns the state and authorization code only in a
+   no-referrer URL fragment. The frontend removes that fragment immediately,
+   retrieves the matching binding from session-only storage, and completes
+   authorization with its signed-in Supabase session.
+4. The function atomically consumes the state only after the signed-in user and
+   session binding match, then exchanges the authorization code server-side,
+   reads the immutable GitHub user ID, and obtains repositories eligible to that
+   GitHub user and App installation.
+5. The short-lived GitHub user token is discarded. No user access token, refresh
    token, GitHub App JWT, or installation token is stored.
-5. The user explicitly selects one cached, server-verified repository and
+6. The user explicitly selects one cached, server-verified repository and
    confirms the `create_issue`-only connection. A connection expires after 24
    hours, requiring fresh GitHub user authorization and repository selection
    before another issue can be written; this bounds stale organization access.
-6. Before each issue write, the function verifies the Supabase owner, explicit
+7. Before each issue write, the function verifies the Supabase owner, explicit
    action and repository confirmation, server-side rate limit, idempotency key,
    and repository membership in the installation.
-7. The function mints a short-lived installation token narrowed to the selected
+8. The function mints a short-lived installation token narrowed to the selected
    repository, creates one issue, discards the token, and returns only the issue
    number and URL.
 

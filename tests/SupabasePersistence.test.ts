@@ -390,6 +390,137 @@ describe('User-scoped cloud migration marker', () => {
   })
 })
 
+describe('Local durable-memory migration reconciliation', () => {
+  const userId = '00000000-0000-4000-8000-000000000999'
+  const firstMemory = {
+    id: '00000000-0000-4000-8000-000000000001',
+    text: 'first memory',
+    createdAt: '2026-08-26T00:00:00.000Z',
+  }
+  const secondMemory = {
+    id: '00000000-0000-4000-8000-000000000002',
+    text: 'second memory',
+    createdAt: '2026-08-26T00:00:01.000Z',
+  }
+  const cloudMemories = new Map<string, {
+    id: string
+    user_id: string
+    text: string
+    tags: string[]
+    created_at: string
+  }>()
+  let failedMemoryId: string | null = null
+  let insertAttempts: string[] = []
+
+  function durableMemoryBuilder() {
+    const state = {
+      userId: '',
+      memoryIds: [] as string[],
+      insert: null as {
+        id: string
+        user_id: string
+        text: string
+        tags: string[]
+        created_at: string
+      } | null,
+    }
+    const execute = async () => {
+      if (state.insert) {
+        insertAttempts.push(state.insert.id)
+        if (state.insert.id === failedMemoryId) {
+          return { data: null, error: { message: 'temporary failure' } }
+        }
+        cloudMemories.set(state.insert.id, state.insert)
+        return { data: state.insert, error: null }
+      }
+      return {
+        data: Array.from(cloudMemories.values())
+          .filter(memory => memory.user_id === state.userId && state.memoryIds.includes(memory.id))
+          .map(memory => ({ id: memory.id })),
+        error: null,
+      }
+    }
+    const builder = {
+      select: () => builder,
+      insert: (memory: typeof state.insert) => {
+        state.insert = memory
+        return builder
+      },
+      eq: (column: string, value: string) => {
+        if (column === 'user_id') state.userId = value
+        return builder
+      },
+      in: (_column: string, values: string[]) => {
+        state.memoryIds = values
+        return builder
+      },
+      maybeSingle: () => execute(),
+      then: (
+        resolve: (value: Awaited<ReturnType<typeof execute>>) => unknown,
+        reject?: (reason: unknown) => unknown,
+      ) => execute().then(resolve, reject),
+    }
+    return builder
+  }
+
+  async function loadPersistenceService() {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project-helen.supabase.co')
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key')
+    vi.doUnmock('../src/services/supabasePersistence')
+    vi.resetModules()
+    return import('../src/services/supabasePersistence')
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    cloudMemories.clear()
+    failedMemoryId = null
+    insertAttempts = []
+    mockGetSession.mockResolvedValue({
+      data: { session: { user: { id: userId } } },
+    })
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'durable_memories') throw new Error(`unexpected table: ${table}`)
+      return durableMemoryBuilder()
+    })
+  })
+
+  it('does not treat unrelated cloud data as completion', async () => {
+    cloudMemories.set('00000000-0000-4000-8000-000000000003', {
+      id: '00000000-0000-4000-8000-000000000003',
+      user_id: userId,
+      text: 'unrelated memory',
+      tags: [],
+      created_at: '2026-08-25T00:00:00.000Z',
+    })
+    const persistence = await loadPersistenceService()
+
+    expect(persistence.isPersistenceConfigured()).toBe(true)
+    await persistence.migrateLocalMemoriesToCloud([firstMemory, secondMemory])
+
+    expect(insertAttempts).toEqual([firstMemory.id, secondMemory.id])
+    expect(persistence.isCloudMigrationDone(userId)).toBe(true)
+  })
+
+  it('retries only missing memory IDs after a partial migration failure', async () => {
+    const persistence = await loadPersistenceService()
+    failedMemoryId = secondMemory.id
+
+    await persistence.migrateLocalMemoriesToCloud([firstMemory, secondMemory])
+
+    expect(cloudMemories.has(firstMemory.id)).toBe(true)
+    expect(cloudMemories.has(secondMemory.id)).toBe(false)
+    expect(persistence.isCloudMigrationDone(userId)).toBe(false)
+
+    failedMemoryId = null
+    await persistence.migrateLocalMemoriesToCloud([firstMemory, secondMemory])
+
+    expect(insertAttempts).toEqual([firstMemory.id, secondMemory.id, secondMemory.id])
+    expect(cloudMemories.has(secondMemory.id)).toBe(true)
+    expect(persistence.isCloudMigrationDone(userId)).toBe(true)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // null/false persistence results → sync error state
 // ---------------------------------------------------------------------------

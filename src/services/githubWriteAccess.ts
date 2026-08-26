@@ -24,6 +24,9 @@ const WRITE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/github-write`
 const REPOSITORY_ID = /^[1-9][0-9]{0,15}$/
 const REPOSITORY_FULL_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const OAUTH_STATE_OR_BINDING = /^[A-Za-z0-9_-]{16,256}$/
+const OAUTH_AUTHORIZATION_CODE = /^[A-Za-z0-9._~-]{8,4096}$/
+const OAUTH_BINDING_STORAGE_PREFIX = 'project-helen-github-write-oauth-binding:'
 
 export interface GitHubWriteConnectionSummary {
   id: string
@@ -123,7 +126,7 @@ async function invoke<T>(
   try {
     const response = await fetch(url, {
       method: 'POST',
-      credentials: 'include',
+      credentials: 'omit',
       headers: {
         'Content-Type': 'application/json',
         Authorization: ['Bearer', accessToken].join(' '),
@@ -143,11 +146,76 @@ async function invoke<T>(
   }
 }
 
+function storeOAuthBrowserBinding(authorizationUrl: string, browserBinding: unknown): boolean {
+  if (typeof browserBinding !== 'string' || !OAUTH_STATE_OR_BINDING.test(browserBinding)) return false
+  let state: string | null
+  try {
+    state = new URL(authorizationUrl).searchParams.get('state')
+  } catch {
+    return false
+  }
+  if (!state || !OAUTH_STATE_OR_BINDING.test(state)) return false
+  try {
+    sessionStorage.setItem(`${OAUTH_BINDING_STORAGE_PREFIX}${state}`, browserBinding)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function takeOAuthBrowserBinding(state: string): string | null {
+  try {
+    const key = `${OAUTH_BINDING_STORAGE_PREFIX}${state}`
+    const binding = sessionStorage.getItem(key)
+    sessionStorage.removeItem(key)
+    return binding && OAUTH_STATE_OR_BINDING.test(binding) ? binding : null
+  } catch {
+    return null
+  }
+}
+
+interface GitHubWriteAuthorizationResponse {
+  authorizationUrl: string
+  expiresAt: string
+  browserBinding: string
+}
+
 export async function beginGitHubWriteAuthorization(
   consent: boolean,
 ): Promise<GitHubWriteResult<{ authorizationUrl: string; expiresAt: string }>> {
   if (!consent) return { ok: false, code: 'WRITE_NOT_CONFIRMED' }
-  return invoke(ACCESS_FUNCTION_URL, { action: 'authorize', consent: true })
+  const result = await invoke<GitHubWriteAuthorizationResponse>(
+    ACCESS_FUNCTION_URL,
+    { action: 'authorize', consent: true },
+  )
+  if (!result.ok) return result
+  if (!storeOAuthBrowserBinding(result.data.authorizationUrl, result.data.browserBinding)) {
+    return { ok: false, code: 'unavailable' }
+  }
+  return {
+    ok: true,
+    data: {
+      authorizationUrl: result.data.authorizationUrl,
+      expiresAt: result.data.expiresAt,
+    },
+  }
+}
+
+export async function completeGitHubWriteAuthorization(
+  state: string,
+  code: string,
+): Promise<GitHubWriteResult<{ authorized: true }>> {
+  if (!OAUTH_STATE_OR_BINDING.test(state) || !OAUTH_AUTHORIZATION_CODE.test(code)) {
+    return { ok: false, code: 'BAD_REQUEST' }
+  }
+  const browserBinding = takeOAuthBrowserBinding(state)
+  if (!browserBinding) return { ok: false, code: 'OAUTH_DENIED' }
+  return invoke(ACCESS_FUNCTION_URL, {
+    action: 'complete-authorization',
+    state,
+    code,
+    browserBinding,
+  })
 }
 
 export async function getEligibleGitHubRepositories(): Promise<GitHubWriteResult<{

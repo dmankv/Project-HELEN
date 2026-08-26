@@ -12,6 +12,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 type ServiceClient = ReturnType<typeof createClient>
 type GitHubRateScope = 'connect' | 'connection-mutate' | 'issue-create'
+const OAUTH_STATE_OR_BINDING = /^[A-Za-z0-9_-]{16,256}$/
 
 interface SupabaseRuntimeConfig {
   supabaseUrl: string
@@ -35,7 +36,7 @@ function decodeOAuthStateSecret(value: string): OAuthStateSecret {
     if (
       typeof parsed.verifier === 'string'
       && typeof parsed.browserBinding === 'string'
-      && /^[A-Za-z0-9_-]{16,256}$/.test(parsed.browserBinding)
+      && OAUTH_STATE_OR_BINDING.test(parsed.browserBinding)
     ) {
       return { verifier: parsed.verifier, browserBinding: parsed.browserBinding }
     }
@@ -166,8 +167,6 @@ const MAX_ISSUE_TITLE_BYTES = 256
 const MAX_ISSUE_BODY_BYTES = 16 * 1024
 const CONNECTION_AUTHORIZATION_TTL_MS = 24 * 60 * 60 * 1000
 const IDEMPOTENCY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
-const OAUTH_BINDING_COOKIE_NAME = '__Host-project-helen-github-write-oauth-binding'
-const OAUTH_BINDING_COOKIE_MAX_AGE_SECONDS = Math.max(60, Math.floor(OAUTH_STATE_TTL_MS / 1000))
 const MAX_GITHUB_ID = 9_007_199_254_740_991n
 const REPOSITORY_FULL_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -203,7 +202,6 @@ export function getAllowedGitHubWriteOrigin(requestOrigin: string | null): strin
 export function githubWriteCorsHeaders(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'authorization, content-type',
     'Access-Control-Max-Age': '86400',
@@ -486,43 +484,9 @@ function callbackUri(): string {
   }
 }
 
-function oauthBindingCookie(value: string): string {
-  return [
-    `${OAUTH_BINDING_COOKIE_NAME}=${value}`,
-    `Max-Age=${OAUTH_BINDING_COOKIE_MAX_AGE_SECONDS}`,
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=None',
-  ].join('; ')
-}
-
-function clearOAuthBindingCookie(): string {
-  return [
-    `${OAUTH_BINDING_COOKIE_NAME}=`,
-    'Max-Age=0',
-    'Path=/',
-    'HttpOnly',
-    'Secure',
-    'SameSite=None',
-  ].join('; ')
-}
-
-function readCookie(cookiesHeader: string | null, name: string): string | null {
-  if (!cookiesHeader) return null
-  const entries = cookiesHeader.split(';')
-  for (const entry of entries) {
-    const trimmed = entry.trim()
-    if (!trimmed.startsWith(`${name}=`)) continue
-    const value = trimmed.slice(name.length + 1).trim()
-    return value.length > 0 ? value : null
-  }
-  return null
-}
-
 function callbackRedirect(
-  outcome: 'authorized' | 'denied' | 'failed',
-  cookieHeader?: string,
+  outcome: 'complete' | 'denied' | 'failed',
+  parameters: Record<string, string> = {},
 ): Response {
   const url = configuredGitHubWriteAppUrl()
   if (!url) {
@@ -531,18 +495,16 @@ function callbackRedirect(
       headers: {
         'Cache-Control': 'no-store',
         'Referrer-Policy': 'no-referrer',
-        ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {}),
       },
     })
   }
-  url.hash = `/?github_write=${outcome}`
+  url.hash = `/?${new URLSearchParams({ github_write: outcome, ...parameters }).toString()}`
   return new Response(null, {
     status: 303,
     headers: {
       Location: url.toString(),
       'Cache-Control': 'no-store',
       'Referrer-Policy': 'no-referrer',
-      ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {}),
     },
   })
 }
@@ -710,7 +672,7 @@ export async function startGitHubWriteAuthorization(
   service: ServiceClient,
   userId: string,
   body: unknown,
-): Promise<{ authorizationUrl: string; expiresAt: string; cookie: string }> {
+): Promise<{ authorizationUrl: string; expiresAt: string; browserBinding: string }> {
   const request = assertConfirmedObject(body)
   if (request.consent !== true) throw new GitHubWriteError('WRITE_NOT_CONFIRMED', 403)
   await enforceRateLimit(service, userId, 'connect')
@@ -740,11 +702,15 @@ export async function startGitHubWriteAuthorization(
   authorizationUrl.searchParams.set('state', state)
   authorizationUrl.searchParams.set('code_challenge_method', 'S256')
   authorizationUrl.searchParams.set('code_challenge', challenge)
-  return { authorizationUrl: authorizationUrl.toString(), expiresAt, cookie: oauthBindingCookie(browserBinding) }
+  return { authorizationUrl: authorizationUrl.toString(), expiresAt, browserBinding }
 }
 
 function validAuthorizationCode(value: string | null): value is string {
   return Boolean(value && value.length >= 8 && value.length <= 4096 && /^[A-Za-z0-9._~-]+$/.test(value))
+}
+
+function validOAuthStateOrBinding(value: unknown): value is string {
+  return typeof value === 'string' && OAUTH_STATE_OR_BINDING.test(value)
 }
 
 async function readBoundedJson(
@@ -927,55 +893,67 @@ async function replaceEligibleRepositories(
 }
 
 export async function handleGitHubWriteOAuthCallback(req: Request): Promise<Response> {
-  const clearBindingCookie = clearOAuthBindingCookie()
   const callbackUrl = new URL(req.url)
   const stateValue = callbackUrl.searchParams.get('state')
-  if (!stateValue || stateValue.length > 256 || !/^[A-Za-z0-9_-]+$/.test(stateValue)) {
-    return callbackRedirect('failed', clearBindingCookie)
-  }
-
-  let service: ServiceClient
-  try {
-    service = serviceClient()
-  } catch {
-    return callbackRedirect('failed', clearBindingCookie)
-  }
-
-  await cleanupExpiredRecords(service)
-  const stateHash = await sha256Hex(stateValue)
-  const { data, error } = await service
-    .from('github_write_oauth_states')
-    .delete()
-    .eq('state_hash', stateHash)
-    .gt('expires_at', new Date().toISOString())
-    .select('*')
-    .maybeSingle()
-  const state = data as OAuthState | null
-  if (error || !state) return callbackRedirect('failed', clearBindingCookie)
-
-  let verifier: string
-  try {
-    const secret = decodeOAuthStateSecret(await decryptGitHubWriteState(state.code_verifier_ciphertext))
-    const cookieBinding = readCookie(req.headers.get('cookie'), OAUTH_BINDING_COOKIE_NAME)
-    if (cookieBinding !== secret.browserBinding) {
-      await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
-      return callbackRedirect('failed', clearBindingCookie)
-    }
-    verifier = secret.verifier
-  } catch {
-    await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
-    return callbackRedirect('failed', clearBindingCookie)
+  if (!validOAuthStateOrBinding(stateValue)) {
+    return callbackRedirect('failed')
   }
 
   const suppliedError = callbackUrl.searchParams.get('error')
   const code = callbackUrl.searchParams.get('code')
   if (suppliedError || !validAuthorizationCode(code)) {
-    await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
-    return callbackRedirect('denied', clearBindingCookie)
+    return callbackRedirect('denied')
+  }
+  return callbackRedirect('complete', {
+    github_write_state: stateValue,
+    github_write_code: code,
+  })
+}
+
+export async function completeGitHubWriteAuthorization(
+  service: ServiceClient,
+  userId: string,
+  body: unknown,
+): Promise<void> {
+  const request = assertConfirmedObject(body)
+  const stateValue = request.state
+  const authorizationCode = typeof request.code === 'string' ? request.code : null
+  const browserBinding = request.browserBinding
+  if (
+    !validOAuthStateOrBinding(stateValue)
+    || !validOAuthStateOrBinding(browserBinding)
+    || !validAuthorizationCode(authorizationCode)
+  ) {
+    throw new GitHubWriteError('BAD_REQUEST', 400)
   }
 
+  await cleanupExpiredRecords(service)
+  const stateHash = await sha256Hex(stateValue)
+  const now = new Date().toISOString()
+  const { data, error } = await service
+    .from('github_write_oauth_states')
+    .select('*')
+    .eq('state_hash', stateHash)
+    .eq('user_id', userId)
+    .gt('expires_at', now)
+    .maybeSingle()
+  const state = data as OAuthState | null
+  if (error || !state) throw new GitHubWriteError('OAUTH_DENIED', 401)
+
   try {
-    const userToken = await exchangeGitHubAuthorizationCode(verifier, code)
+    const secret = decodeOAuthStateSecret(await decryptGitHubWriteState(state.code_verifier_ciphertext))
+    if (secret.browserBinding !== browserBinding) throw new GitHubWriteError('OAUTH_DENIED', 401)
+    const { data: consumed, error: consumeError } = await service
+      .from('github_write_oauth_states')
+      .delete()
+      .eq('state_hash', stateHash)
+      .eq('user_id', userId)
+      .gt('expires_at', new Date().toISOString())
+      .select('*')
+      .maybeSingle()
+    if (consumeError || !consumed) throw new GitHubWriteError('OAUTH_DENIED', 401)
+
+    const userToken = await exchangeGitHubAuthorizationCode(secret.verifier, authorizationCode)
     const eligible = await findEligibleRepositories(state.user_id, userToken)
     await replaceEligibleRepositories(service, state.user_id, eligible.repositories)
     await writeAudit(service, {
@@ -983,10 +961,10 @@ export async function handleGitHubWriteOAuthCallback(req: Request): Promise<Resp
       action: 'oauth_authorized',
       githubUserId: eligible.githubUserId,
     })
-    return callbackRedirect('authorized', clearBindingCookie)
-  } catch {
+  } catch (error) {
     await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
-    return callbackRedirect('failed', clearBindingCookie)
+    if (error instanceof GitHubWriteError) throw error
+    throw new GitHubWriteError('INTERNAL_ERROR', 500)
   }
 }
 

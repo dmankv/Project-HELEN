@@ -46,6 +46,7 @@ describe('GitHub write browser client', () => {
     vi.clearAllMocks()
     vi.unstubAllEnvs()
     vi.stubGlobal('fetch', vi.fn())
+    sessionStorage.clear()
     mockGetSession.mockResolvedValue({
       data: { session: { access_token: 'user-session-token' } },
     })
@@ -80,10 +81,13 @@ describe('GitHub write browser client', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('uses only the signed-in Supabase token to begin consented authorization', async () => {
+  it('stores a session-only binding before beginning consented authorization', async () => {
+    const state = 'oauth-state-token-for-browser-binding-123456'
+    const browserBinding = 'oauth-browser-binding-token-for-session-123'
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
-      authorizationUrl: 'https://github.com/login/oauth/authorize',
+      authorizationUrl: `https://github.com/login/oauth/authorize?state=${state}`,
       expiresAt: '2026-08-25T17:00:00.000Z',
+      browserBinding,
     }), { status: 200 }))
     const { beginGitHubWriteAuthorization } = await loadModule()
 
@@ -92,20 +96,62 @@ describe('GitHub write browser client', () => {
     expect(result).toEqual({
       ok: true,
       data: {
-        authorizationUrl: 'https://github.com/login/oauth/authorize',
+        authorizationUrl: `https://github.com/login/oauth/authorize?state=${state}`,
         expiresAt: '2026-08-25T17:00:00.000Z',
       },
     })
+    expect(sessionStorage.getItem(`project-helen-github-write-oauth-binding:${state}`)).toBe(browserBinding)
     expect(fetch).toHaveBeenCalledWith(
       'https://gateway.supabase.co/functions/v1/github-write-access',
       expect.objectContaining({
         method: 'POST',
-        credentials: 'include',
+        credentials: 'omit',
         headers: expect.objectContaining({
           Authorization: ['Bearer', 'user-session-token'].join(' '),
         }),
       }),
     )
+  })
+
+  it('completes authorization with and removes the session-only binding', async () => {
+    const state = 'oauth-state-token-for-browser-binding-123456'
+    const code = 'github-authorization-code-123456'
+    const browserBinding = 'oauth-browser-binding-token-for-session-123'
+    sessionStorage.setItem(`project-helen-github-write-oauth-binding:${state}`, browserBinding)
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      authorized: true,
+    }), { status: 200 }))
+    const { completeGitHubWriteAuthorization } = await loadModule()
+
+    const result = await completeGitHubWriteAuthorization(state, code)
+
+    expect(result).toEqual({ ok: true, data: { authorized: true } })
+    expect(sessionStorage.getItem(`project-helen-github-write-oauth-binding:${state}`)).toBeNull()
+    expect(fetch).toHaveBeenCalledWith(
+      'https://gateway.supabase.co/functions/v1/github-write-access',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'omit',
+        body: JSON.stringify({
+          action: 'complete-authorization',
+          state,
+          code,
+          browserBinding,
+        }),
+      }),
+    )
+  })
+
+  it('rejects an OAuth callback that has no session-only binding', async () => {
+    const { completeGitHubWriteAuthorization } = await loadModule()
+
+    const result = await completeGitHubWriteAuthorization(
+      'oauth-state-token-for-browser-binding-123456',
+      'github-authorization-code-123456',
+    )
+
+    expect(result).toEqual({ ok: false, code: 'OAUTH_DENIED' })
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('does not surface unrecognized server failure codes', async () => {
@@ -183,9 +229,21 @@ describe('GitHub write server boundaries', () => {
     expect(sharedFunction).toContain("GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'")
     expect(sharedFunction).toContain("code_challenge_method', 'S256'")
     expect(sharedFunction).toContain('code_verifier_ciphertext')
-    expect(sharedFunction).toContain('OAUTH_BINDING_COOKIE_NAME')
-    expect(sharedFunction).toContain('readCookie(req.headers.get(\'cookie\'), OAUTH_BINDING_COOKIE_NAME)')
-    expect(sharedFunction).toContain('Set-Cookie')
+    expect(sharedFunction).toContain('browserBinding')
+    expect(sharedFunction).toContain('completeGitHubWriteAuthorization')
+    expect(sharedFunction).not.toContain('OAUTH_BINDING_COOKIE_NAME')
+    expect(sharedFunction).not.toContain('SameSite=None')
+    expect(accessFunction).toContain("case 'complete-authorization'")
+    expect(browserClient).toContain('sessionStorage')
+    expect(browserClient).toContain("credentials: 'omit'")
+    const completionStart = sharedFunction.indexOf('export async function completeGitHubWriteAuthorization')
+    const completionEnd = sharedFunction.indexOf('export async function listEligibleGitHubRepositories', completionStart)
+    const completion = sharedFunction.slice(completionStart, completionEnd)
+    expect(completion).toContain(".eq('user_id', userId)")
+    expect(completion).toContain('secret.browserBinding !== browserBinding')
+    expect(completion.indexOf('.select(')).toBeLessThan(completion.indexOf('.delete()'))
+    expect(completion).toContain(".gt('expires_at', now)")
+    expect(completion).toContain(".gt('expires_at', new Date().toISOString())")
     expect(sharedFunction).toContain('GITHUB_WRITE_ACCESS_ENCRYPTION_KEY')
     expect(sharedFunction).toContain(".from('github_write_oauth_states')")
     expect(sharedFunction).toContain('.delete()')
@@ -458,6 +516,25 @@ describe('GitHub write issue creation behavior', () => {
     serverEnvironment.GITHUB_WRITE_ACCESS_APP_URL = ''
     const missingOriginModule = await loadGitHubWriteServerModule()
     expect(missingOriginModule.getAllowedGitHubWriteOrigin('https://github-write.example.com')).toBeNull()
+  })
+
+  it('returns OAuth callback values only in a fragment for authenticated completion', async () => {
+    const { handleGitHubWriteOAuthCallback } = await loadGitHubWriteServerModule()
+    const state = 'oauth-state-token-for-browser-binding-123456'
+    const code = 'github-authorization-code-123456'
+
+    const response = await handleGitHubWriteOAuthCallback(new Request(
+      `https://project-helen.supabase.co/functions/v1/github-write-access?state=${state}&code=${code}`,
+    ))
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('set-cookie')).toBeNull()
+    const redirect = new URL(response.headers.get('location') ?? '')
+    expect(redirect.search).toBe('')
+    const parameters = new URLSearchParams(redirect.hash.slice(redirect.hash.indexOf('?') + 1))
+    expect(parameters.get('github_write')).toBe('complete')
+    expect(parameters.get('github_write_state')).toBe(state)
+    expect(parameters.get('github_write_code')).toBe(code)
   })
 
   it('enforces ownership and current authorization before creating issues', async () => {

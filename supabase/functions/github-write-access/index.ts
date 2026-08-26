@@ -2,11 +2,13 @@
  * GitHub App OAuth connection boundary.
  *
  * Browser POSTs require a Supabase session. The only unauthenticated request is
- * GitHub's OAuth callback, which consumes a one-time, server-stored state.
+ * GitHub's OAuth callback, which returns a transient response for authenticated
+ * completion.
  */
 
 import {
   authenticateGitHubWriteRequest,
+  completeGitHubWriteAuthorization,
   connectEligibleGitHubRepository,
   disconnectGitHubWriteConnection,
   getAllowedGitHubWriteOrigin,
@@ -31,7 +33,7 @@ function parseAction(body: unknown): { action: string; request: Record<string, u
 
 Deno.serve(async (req: Request) => {
   // GitHub's redirect cannot carry the application's Supabase JWT. The callback
-  // is instead authenticated by an atomic, one-time state record.
+  // returns to the browser, which completes authorization with its JWT.
   if (req.method === 'GET') return handleGitHubWriteOAuthCallback(req)
 
   const allowedOrigin = getAllowedGitHubWriteOrigin(req.headers.get('origin'))
@@ -75,10 +77,18 @@ Deno.serve(async (req: Request) => {
       case 'authorize': {
         const result = await startGitHubWriteAuthorization(service, userId, request)
         return githubWriteJsonResponse(
-          { authorizationUrl: result.authorizationUrl, expiresAt: result.expiresAt },
+          {
+            authorizationUrl: result.authorizationUrl,
+            expiresAt: result.expiresAt,
+            browserBinding: result.browserBinding,
+          },
           200,
-          { ...headers, 'Set-Cookie': result.cookie },
+          headers,
         )
+      }
+      case 'complete-authorization': {
+        await completeGitHubWriteAuthorization(service, userId, request)
+        return githubWriteJsonResponse({ authorized: true }, 200, headers)
       }
       case 'eligible-repositories': {
         const repositories = await listEligibleGitHubRepositories(service, userId)

@@ -46,6 +46,13 @@ export interface CloudDurableMemory {
   created_at: string
 }
 
+type LocalDurableMemory = {
+  id: string
+  text: string
+  tags?: string[]
+  createdAt: string
+}
+
 export interface CloudLearningInteraction {
   id: string
   user_id: string
@@ -68,8 +75,16 @@ export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error' | 'offline' | '
 // Supabase client (anon key only, protected by RLS)
 // ---------------------------------------------------------------------------
 
-const SUPABASE_URL = (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL ?? ''
-const SUPABASE_ANON_KEY = (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY ?? ''
+function publicEnvironment(name: string): string {
+  const viteEnvironment = (import.meta as { env?: Record<string, string> }).env
+  const nodeEnvironment = (globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> }
+  }).process?.env
+  return viteEnvironment?.[name] || nodeEnvironment?.[name] || ''
+}
+
+const SUPABASE_URL = publicEnvironment('VITE_SUPABASE_URL')
+const SUPABASE_ANON_KEY = publicEnvironment('VITE_SUPABASE_ANON_KEY')
 
 /** True when Supabase environment config is present at build time. */
 export function isPersistenceConfigured(): boolean {
@@ -218,7 +233,7 @@ export async function listCloudMemories(): Promise<CloudDurableMemory[] | null> 
 async function insertCloudMemoryForUser(
   client: SupabaseClient,
   userId: string,
-  mem: { id: string; text: string; tags?: string[]; createdAt: string },
+  mem: LocalDurableMemory,
 ): Promise<{ memory: CloudDurableMemory | null; succeeded: boolean }> {
   const { data, error } = await client
     .from('durable_memories')
@@ -233,7 +248,7 @@ async function insertCloudMemoryForUser(
 }
 
 export async function insertCloudMemory(
-  mem: { id: string; text: string; tags?: string[]; createdAt: string },
+  mem: LocalDurableMemory,
 ): Promise<CloudDurableMemory | null> {
   const client = getClient()
   if (!client) return null
@@ -391,13 +406,36 @@ function markCloudMigrationDone(userId: string): void {
   try { localStorage.setItem(migrationDoneKey(userId), '1') } catch { /* ignore */ }
 }
 
+async function cloudMemoryIds(
+  client: SupabaseClient,
+  userId: string,
+  memoryIds: string[],
+): Promise<Set<string> | null> {
+  const found = new Set<string>()
+  for (let index = 0; index < memoryIds.length; index += 100) {
+    const { data, error } = await client
+      .from('durable_memories')
+      .select('id')
+      .eq('user_id', userId)
+      .in('id', memoryIds.slice(index, index + 100))
+    if (error) {
+      console.warn('[daemon-persistence] cloudMemoryIds:', error.message)
+      return null
+    }
+    for (const memory of data ?? []) {
+      if (typeof memory.id === 'string') found.add(memory.id)
+    }
+  }
+  return found
+}
+
 /**
  * Migrate local durable memories to Supabase. Only runs once per browser
  * profile per user account (tracked via per-user localStorage flag).
  * Errors are non-fatal.
  */
 export async function migrateLocalMemoriesToCloud(
-  localMemories: Array<{ id: string; text: string; tags?: string[]; createdAt: string }>,
+  localMemories: LocalDurableMemory[],
 ): Promise<void> {
   const client = getClient()
   if (!client) return
@@ -405,20 +443,20 @@ export async function migrateLocalMemoriesToCloud(
   if (!userId) return
   if (isCloudMigrationDone(userId)) return
 
-  // Check if user already has cloud memories (don't duplicate)
-  const { data: existing } = await client
-    .from('durable_memories')
-    .select('id')
-    .limit(1)
-  if (existing && existing.length > 0) {
-    markCloudMigrationDone(userId)
-    return
-  }
+  const memories = Array.from(new Map(localMemories.map(memory => [memory.id, memory])).values())
+  const memoryIds = memories.map(memory => memory.id)
+  const existingMemoryIds = await cloudMemoryIds(client, userId, memoryIds)
+  if (!existingMemoryIds) return
 
-  for (const mem of localMemories) {
+  for (const mem of memories) {
     if (await getCurrentUserId() !== userId) return
+    if (existingMemoryIds.has(mem.id)) continue
     if (!(await insertCloudMemoryForUser(client, userId, mem)).succeeded) return
   }
+
+  if (await getCurrentUserId() !== userId) return
+  const completedMemoryIds = await cloudMemoryIds(client, userId, memoryIds)
+  if (!completedMemoryIds || !memories.every(memory => completedMemoryIds.has(memory.id))) return
   markCloudMigrationDone(userId)
 }
 

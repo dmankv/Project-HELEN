@@ -2,11 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
+  completeGitHubWriteAuthorization,
   connectGitHubWriteRepository,
   createGitHubIssue,
   disconnectGitHubWriteConnection,
   getGitHubWriteConnections,
 } = vi.hoisted(() => ({
+  completeGitHubWriteAuthorization: vi.fn(),
   connectGitHubWriteRepository: vi.fn(),
   createGitHubIssue: vi.fn(),
   disconnectGitHubWriteConnection: vi.fn(),
@@ -15,6 +17,7 @@ const {
 
 vi.mock('../src/services/githubWriteAccess', () => ({
   beginGitHubWriteAuthorization: vi.fn(),
+  completeGitHubWriteAuthorization,
   connectGitHubWriteRepository,
   createGitHubIssue,
   disconnectGitHubWriteConnection,
@@ -35,6 +38,9 @@ import GitHubWriteAccessPanel from '../src/components/GitHubWriteAccessPanel'
 
 describe('GitHubWriteAccessPanel', () => {
   beforeEach(() => {
+    window.history.replaceState(null, '', '/')
+    completeGitHubWriteAuthorization.mockReset()
+    completeGitHubWriteAuthorization.mockResolvedValue({ ok: true, data: { authorized: true } })
     connectGitHubWriteRepository.mockReset()
     connectGitHubWriteRepository.mockResolvedValue({ ok: false, code: 'unavailable' })
     createGitHubIssue.mockReset()
@@ -94,6 +100,19 @@ describe('GitHubWriteAccessPanel', () => {
 
     resolveIssue?.({ ok: false, code: 'GITHUB_UNAVAILABLE' })
     await waitFor(() => expect(title).not.toBeDisabled())
+  })
+
+  it('completes a callback from a scrubbed URL fragment', async () => {
+    const state = 'oauth-state-token-for-browser-binding-123456'
+    const code = 'github-authorization-code-123456'
+    window.location.hash = `/?github_write=complete&github_write_state=${state}&github_write_code=${code}`
+
+    render(<GitHubWriteAccessPanel />)
+
+    await waitFor(() => {
+      expect(completeGitHubWriteAuthorization).toHaveBeenCalledWith(state, code)
+    })
+    expect(window.location.hash).toBe('')
   })
 
   it('resets repository authorization consent when its target changes', async () => {

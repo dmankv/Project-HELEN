@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   beginGitHubWriteAuthorization,
+  completeGitHubWriteAuthorization,
   connectGitHubWriteRepository,
   createGitHubIssue,
   disconnectGitHubWriteConnection,
@@ -62,6 +63,27 @@ function utf8ByteLength(value: string): number {
   return UTF8_ENCODER.encode(value).byteLength
 }
 
+function readGitHubWriteOAuthCallback(): {
+  outcome: string
+  state: string | null
+  code: string | null
+} | null {
+  const queryStart = window.location.hash.indexOf('?')
+  if (queryStart < 0) return null
+  const parameters = new URLSearchParams(window.location.hash.slice(queryStart + 1))
+  const outcome = parameters.get('github_write')
+  if (!outcome) return null
+  return {
+    outcome,
+    state: parameters.get('github_write_state'),
+    code: parameters.get('github_write_code'),
+  }
+}
+
+function clearGitHubWriteOAuthCallback(): void {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+}
+
 export default function GitHubWriteAccessPanel() {
   const [connections, setConnections] = useState<GitHubWriteConnectionSummary[]>([])
   const [eligibleRepositories, setEligibleRepositories] = useState<GitHubEligibleRepository[]>([])
@@ -93,27 +115,28 @@ export default function GitHubWriteAccessPanel() {
   )
   const issueBodyWithinLimit = issueBodyBytes <= MAX_ISSUE_BODY_BYTES
 
-  const refreshConnections = async (): Promise<GitHubWriteResult<{
+  const refreshConnections = async (shouldUpdate: () => boolean = () => true): Promise<GitHubWriteResult<{
     connections: GitHubWriteConnectionSummary[]
   }>> => {
     const result = await getGitHubWriteConnections()
-    if (result.ok) setConnections(result.data.connections)
+    if (result.ok && shouldUpdate()) setConnections(result.data.connections)
     return result
   }
 
-  const refreshEligibleRepositories = async (): Promise<GitHubWriteResult<{
+  const refreshEligibleRepositories = async (shouldUpdate: () => boolean = () => true): Promise<GitHubWriteResult<{
     repositories: GitHubEligibleRepository[]
   }>> => {
     const result = await getEligibleGitHubRepositories()
-    if (result.ok) setEligibleRepositories(result.data.repositories)
+    if (result.ok && shouldUpdate()) setEligibleRepositories(result.data.repositories)
     return result
   }
 
-  const refresh = async () => {
+  const refresh = async (shouldUpdate: () => boolean = () => true) => {
     const [connectionResult, eligibleResult] = await Promise.all([
-      refreshConnections(),
-      refreshEligibleRepositories(),
+      refreshConnections(shouldUpdate),
+      refreshEligibleRepositories(shouldUpdate),
     ])
+    if (!shouldUpdate()) return
     if (!connectionResult.ok) {
       setStatus(safeFailureMessage(connectionResult.code))
       return
@@ -122,8 +145,40 @@ export default function GitHubWriteAccessPanel() {
   }
 
   useEffect(() => {
-    if (!isGitHubWriteAccessConfigured()) return
+    let active = true
+    if (!isGitHubWriteAccessConfigured()) return () => { active = false }
+    const callback = readGitHubWriteOAuthCallback()
+    if (callback?.outcome === 'complete') {
+      clearGitHubWriteOAuthCallback()
+      if (!callback.state || !callback.code) {
+        setStatus(safeFailureMessage('OAUTH_DENIED'))
+        return () => { active = false }
+      }
+      setLoading(true)
+      void (async () => {
+        const result = await completeGitHubWriteAuthorization(callback.state!, callback.code!)
+        if (!active) return
+        setLoading(false)
+        if (!result.ok) {
+          setStatus(safeFailureMessage(result.code))
+          return
+        }
+        setStatus('GitHub authorization completed.')
+        await refresh(() => active)
+        if (!active) return
+      })()
+      return () => { active = false }
+    }
+    if (callback) {
+      clearGitHubWriteOAuthCallback()
+      if (callback.outcome === 'denied') {
+        setStatus(safeFailureMessage('OAUTH_DENIED'))
+      } else if (callback.outcome === 'failed') {
+        setStatus(safeFailureMessage('unavailable'))
+      }
+    }
     void refresh()
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
