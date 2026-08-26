@@ -259,4 +259,31 @@ describe('GitHubWriteAccessPanel', () => {
       expect(screen.getByLabelText('Connected repository')).toHaveValue(newConnection.id)
     })
   })
+
+  it('clears attempt key and confirmation after IDEMPOTENCY_CONFLICT so reconfirmation creates a fresh key', async () => {
+    createGitHubIssue
+      .mockResolvedValueOnce({ ok: false, code: 'IDEMPOTENCY_CONFLICT' })
+      .mockResolvedValue({ ok: true, data: { issueNumber: 1, issueUrl: 'https://github.com/owner/repository-a/issues/1' } })
+
+    render(<GitHubWriteAccessPanel />)
+    const title = await screen.findByLabelText('Issue title')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+
+    fireEvent.change(title, { target: { value: 'Issue title' } })
+    fireEvent.click(confirmation)
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub issue' }))
+    await waitFor(() => expect(createGitHubIssue).toHaveBeenCalledTimes(1))
+    const firstKey = createGitHubIssue.mock.calls[0][0].idempotencyKey
+
+    // After IDEMPOTENCY_CONFLICT, confirmation is cleared so the user must re-confirm
+    await waitFor(() => expect(confirmation).not.toBeChecked())
+
+    // Re-confirm to enable the button
+    fireEvent.click(confirmation)
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub issue' }))
+    await waitFor(() => expect(createGitHubIssue).toHaveBeenCalledTimes(2))
+
+    // A fresh idempotency key must be used on the retry
+    expect(createGitHubIssue.mock.calls[1][0].idempotencyKey).not.toBe(firstKey)
+  })
 })

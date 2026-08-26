@@ -270,6 +270,10 @@ export default function GitHubWriteAccessPanel() {
     })
     setLoading(false)
     if (!result.ok) {
+      if (result.code === 'IDEMPOTENCY_CONFLICT') {
+        resetIssueAttempt()
+        setIssueConfirmed(false)
+      }
       setStatus(safeFailureMessage(result.code))
       return
     }
