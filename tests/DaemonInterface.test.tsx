@@ -91,7 +91,7 @@ vi.mock('../src/services/supabasePersistence', async (importActual) => {
 
 // Import the component after mocks are registered.
 import DaemonInterface from '../src/components/DaemonInterface'
-import { saveMemory, listMemories, forgetById, forgetAll } from '../src/services/daemonMemory'
+import { saveMemory, listMemories, forgetById, forgetAll, forgetLast } from '../src/services/daemonMemory'
 import learningSystem from '../src/services/daemon_learning_integration'
 import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonChatAPI'
 import { callEdgeFunction, hasEdgeFunction, createEdgeChatFailure } from '../src/services/supabaseEdgeChat'
@@ -429,6 +429,45 @@ describe('DaemonInterface', () => {
 
     expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId)
   })
+
+  it('forgets the exact memory returned by forgetLast without dropping the newest hydrated entry', async () => {
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(hydrateFromCloud).mockResolvedValue({
+      conversations: [],
+      messagesByConversation: {},
+      memories: [
+        {
+          id: '550e8400-e29b-41d4-a716-446655440021',
+          user_id: 'user-1',
+          text: 'Older hydrated memory',
+          tags: [],
+          created_at: '2026-08-25T00:00:00.000Z',
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440022',
+          user_id: 'user-1',
+          text: 'Newest hydrated memory',
+          tags: [],
+          created_at: '2026-08-26T00:00:00.000Z',
+        },
+      ],
+      learningInteractions: [],
+    })
+    vi.mocked(forgetLast).mockReturnValue({
+      id: '550e8400-e29b-41d4-a716-446655440099',
+      text: 'Local-only latest memory',
+      createdAt: '2026-08-27T00:00:00.000Z',
+    })
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    expect(await screen.findByText('Newest hydrated memory')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText(/Message Daemon/i), { target: { value: 'forget this' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith('550e8400-e29b-41d4-a716-446655440099'), WAIT_OPTS)
+    expect(screen.getByText('Newest hydrated memory')).toBeInTheDocument()
+  }, 8000)
 
   // ── Clear All button ──────────────────────────────────────────────────────
 

@@ -19,6 +19,34 @@ interface SupabaseRuntimeConfig {
   anonKey: string
 }
 
+interface OAuthStateSecret {
+  verifier: string
+  browserBinding: string | null
+}
+
+function encodeOAuthStateSecret(verifier: string, browserBinding: string): string {
+  return JSON.stringify({ verifier, browserBinding })
+}
+
+function decodeOAuthStateSecret(value: string): OAuthStateSecret {
+  if (value.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>
+      if (
+        typeof parsed.verifier === 'string'
+        && typeof parsed.browserBinding === 'string'
+        && /^[A-Za-z0-9_-]{16,256}$/.test(parsed.browserBinding)
+      ) {
+        return { verifier: parsed.verifier, browserBinding: parsed.browserBinding }
+      }
+    } catch {
+      throw new GitHubWriteError('OAUTH_DENIED', 401)
+    }
+    throw new GitHubWriteError('OAUTH_DENIED', 401)
+  }
+  return { verifier: value, browserBinding: null }
+}
+
 interface GitHubAppRuntimeConfig extends SupabaseRuntimeConfig {
   appId: string
   clientId: string
@@ -141,6 +169,8 @@ const MAX_ISSUE_TITLE_BYTES = 256
 const MAX_ISSUE_BODY_BYTES = 16 * 1024
 const CONNECTION_AUTHORIZATION_TTL_MS = 24 * 60 * 60 * 1000
 const IDEMPOTENCY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const OAUTH_BINDING_COOKIE_NAME = '__Host-project-helen-github-write-oauth-binding'
+const OAUTH_BINDING_COOKIE_MAX_AGE_SECONDS = Math.max(60, Math.floor(OAUTH_STATE_TTL_MS / 1000))
 const MAX_GITHUB_ID = 9_007_199_254_740_991n
 const REPOSITORY_FULL_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -156,6 +186,7 @@ export function getAllowedGitHubWriteOrigin(requestOrigin: string | null): strin
 export function githubWriteCorsHeaders(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'authorization, content-type',
     'Access-Control-Max-Age': '86400',
@@ -438,7 +469,44 @@ function callbackUri(): string {
   }
 }
 
-function callbackRedirect(outcome: 'authorized' | 'denied' | 'failed'): Response {
+function oauthBindingCookie(value: string): string {
+  return [
+    `${OAUTH_BINDING_COOKIE_NAME}=${value}`,
+    `Max-Age=${OAUTH_BINDING_COOKIE_MAX_AGE_SECONDS}`,
+    'Path=/',
+    'HttpOnly',
+    'Secure',
+    'SameSite=None',
+  ].join('; ')
+}
+
+function clearOAuthBindingCookie(): string {
+  return [
+    `${OAUTH_BINDING_COOKIE_NAME}=`,
+    'Max-Age=0',
+    'Path=/',
+    'HttpOnly',
+    'Secure',
+    'SameSite=None',
+  ].join('; ')
+}
+
+function readCookie(cookiesHeader: string | null, name: string): string | null {
+  if (!cookiesHeader) return null
+  const entries = cookiesHeader.split(';')
+  for (const entry of entries) {
+    const trimmed = entry.trim()
+    if (!trimmed.startsWith(`${name}=`)) continue
+    const value = trimmed.slice(name.length + 1).trim()
+    return value.length > 0 ? value : null
+  }
+  return null
+}
+
+function callbackRedirect(
+  outcome: 'authorized' | 'denied' | 'failed',
+  cookieHeader?: string,
+): Response {
   const fallback = 'https://dmankv.github.io/Project-HELEN/#/?github_write=failed'
   const configured = Deno.env.get('GITHUB_WRITE_ACCESS_APP_URL') ?? 'https://dmankv.github.io/Project-HELEN/'
   let location = fallback
@@ -457,6 +525,7 @@ function callbackRedirect(outcome: 'authorized' | 'denied' | 'failed'): Response
       Location: location,
       'Cache-Control': 'no-store',
       'Referrer-Policy': 'no-referrer',
+      ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {}),
     },
   })
 }
@@ -624,7 +693,7 @@ export async function startGitHubWriteAuthorization(
   service: ServiceClient,
   userId: string,
   body: unknown,
-): Promise<{ authorizationUrl: string; expiresAt: string }> {
+): Promise<{ authorizationUrl: string; expiresAt: string; cookie: string }> {
   const request = assertConfirmedObject(body)
   if (request.consent !== true) throw new GitHubWriteError('WRITE_NOT_CONFIRMED', 403)
   await enforceRateLimit(service, userId, 'connect')
@@ -633,13 +702,16 @@ export async function startGitHubWriteAuthorization(
   const config = githubAppRuntimeConfig()
   const state = randomToken(32)
   const verifier = randomToken(48)
+  const browserBinding = randomToken(32)
   const stateHash = await sha256Hex(state)
   const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString()
   const challenge = base64UrlEncode(await sha256(verifier))
   const { error } = await service.from('github_write_oauth_states').insert({
     state_hash: stateHash,
     user_id: userId,
-    code_verifier_ciphertext: await encryptGitHubWriteState(verifier),
+    code_verifier_ciphertext: await encryptGitHubWriteState(
+      encodeOAuthStateSecret(verifier, browserBinding),
+    ),
     expires_at: expiresAt,
   })
   if (error) throw new GitHubWriteError('INTERNAL_ERROR', 500)
@@ -651,7 +723,7 @@ export async function startGitHubWriteAuthorization(
   authorizationUrl.searchParams.set('state', state)
   authorizationUrl.searchParams.set('code_challenge_method', 'S256')
   authorizationUrl.searchParams.set('code_challenge', challenge)
-  return { authorizationUrl: authorizationUrl.toString(), expiresAt }
+  return { authorizationUrl: authorizationUrl.toString(), expiresAt, cookie: oauthBindingCookie(browserBinding) }
 }
 
 function validAuthorizationCode(value: string | null): value is string {
@@ -688,9 +760,8 @@ async function readBoundedJson(
   }
 }
 
-async function exchangeGitHubAuthorizationCode(state: OAuthState, code: string): Promise<string> {
+async function exchangeGitHubAuthorizationCode(verifier: string, code: string): Promise<string> {
   const config = githubAppRuntimeConfig()
-  const verifier = await decryptGitHubWriteState(state.code_verifier_ciphertext)
   let response: Response
   try {
     response = await fetch(GITHUB_TOKEN_URL, {
@@ -839,17 +910,18 @@ async function replaceEligibleRepositories(
 }
 
 export async function handleGitHubWriteOAuthCallback(req: Request): Promise<Response> {
+  const clearBindingCookie = clearOAuthBindingCookie()
   const callbackUrl = new URL(req.url)
   const stateValue = callbackUrl.searchParams.get('state')
   if (!stateValue || stateValue.length > 256 || !/^[A-Za-z0-9_-]+$/.test(stateValue)) {
-    return callbackRedirect('failed')
+    return callbackRedirect('failed', clearBindingCookie)
   }
 
   let service: ServiceClient
   try {
     service = serviceClient()
   } catch {
-    return callbackRedirect('failed')
+    return callbackRedirect('failed', clearBindingCookie)
   }
 
   await cleanupExpiredRecords(service)
@@ -862,17 +934,31 @@ export async function handleGitHubWriteOAuthCallback(req: Request): Promise<Resp
     .select('*')
     .maybeSingle()
   const state = data as OAuthState | null
-  if (error || !state) return callbackRedirect('failed')
+  if (error || !state) return callbackRedirect('failed', clearBindingCookie)
+
+  let verifier: string
+  try {
+    const secret = decodeOAuthStateSecret(await decryptGitHubWriteState(state.code_verifier_ciphertext))
+    const cookieBinding = readCookie(req.headers.get('cookie'), OAUTH_BINDING_COOKIE_NAME)
+    if (secret.browserBinding && cookieBinding !== secret.browserBinding) {
+      await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
+      return callbackRedirect('failed', clearBindingCookie)
+    }
+    verifier = secret.verifier
+  } catch {
+    await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
+    return callbackRedirect('failed', clearBindingCookie)
+  }
 
   const suppliedError = callbackUrl.searchParams.get('error')
   const code = callbackUrl.searchParams.get('code')
   if (suppliedError || !validAuthorizationCode(code)) {
     await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
-    return callbackRedirect('denied')
+    return callbackRedirect('denied', clearBindingCookie)
   }
 
   try {
-    const userToken = await exchangeGitHubAuthorizationCode(state, code)
+    const userToken = await exchangeGitHubAuthorizationCode(verifier, code)
     const eligible = await findEligibleRepositories(state.user_id, userToken)
     await replaceEligibleRepositories(service, state.user_id, eligible.repositories)
     await writeAudit(service, {
@@ -880,10 +966,10 @@ export async function handleGitHubWriteOAuthCallback(req: Request): Promise<Resp
       action: 'oauth_authorized',
       githubUserId: eligible.githubUserId,
     })
-    return callbackRedirect('authorized')
+    return callbackRedirect('authorized', clearBindingCookie)
   } catch {
     await writeAudit(service, { userId: state.user_id, action: 'oauth_denied' })
-    return callbackRedirect('failed')
+    return callbackRedirect('failed', clearBindingCookie)
   }
 }
 

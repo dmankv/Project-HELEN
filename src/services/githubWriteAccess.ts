@@ -123,6 +123,7 @@ async function invoke<T>(
   try {
     const response = await fetch(url, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         Authorization: ['Bearer', accessToken].join(' '),

@@ -187,7 +187,7 @@ for (const legacyFile of [
       }, '0')
       const addedFiles = execFileSync(
         'git',
-        ['diff', '--name-only', '--diff-filter=A', `${mergeBase}..HEAD`, '--', 'supabase/migrations'],
+        ['diff', '--name-only', '--no-renames', '--diff-filter=A', `${mergeBase}..HEAD`, '--', 'supabase/migrations'],
         { cwd: root, encoding: 'utf8' },
       ).trim().split('\n').filter(Boolean)
 

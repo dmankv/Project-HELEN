@@ -100,6 +100,7 @@ describe('GitHub write browser client', () => {
       'https://gateway.supabase.co/functions/v1/github-write-access',
       expect.objectContaining({
         method: 'POST',
+        credentials: 'include',
         headers: expect.objectContaining({
           Authorization: ['Bearer', 'user-session-token'].join(' '),
         }),
@@ -181,6 +182,9 @@ describe('GitHub write server boundaries', () => {
     expect(sharedFunction).toContain("GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'")
     expect(sharedFunction).toContain("code_challenge_method', 'S256'")
     expect(sharedFunction).toContain('code_verifier_ciphertext')
+    expect(sharedFunction).toContain('OAUTH_BINDING_COOKIE_NAME')
+    expect(sharedFunction).toContain('readCookie(req.headers.get(\'cookie\'), OAUTH_BINDING_COOKIE_NAME)')
+    expect(sharedFunction).toContain('Set-Cookie')
     expect(sharedFunction).toContain('GITHUB_WRITE_ACCESS_ENCRYPTION_KEY')
     expect(sharedFunction).toContain(".from('github_write_oauth_states')")
     expect(sharedFunction).toContain('.delete()')

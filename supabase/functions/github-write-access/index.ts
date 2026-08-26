@@ -69,7 +69,11 @@ Deno.serve(async (req: Request) => {
     switch (action) {
       case 'authorize': {
         const result = await startGitHubWriteAuthorization(service, userId, request)
-        return githubWriteJsonResponse(result, 200, headers)
+        return githubWriteJsonResponse(
+          { authorizationUrl: result.authorizationUrl, expiresAt: result.expiresAt },
+          200,
+          { ...headers, 'Set-Cookie': result.cookie },
+        )
       }
       case 'eligible-repositories': {
         const repositories = await listEligibleGitHubRepositories(service, userId)

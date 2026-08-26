@@ -83,9 +83,14 @@ export default function GitHubWriteAccessPanel() {
   const selectedRepository = eligibleRepositories.find(repository => repository.repositoryId === selectedRepositoryId)
     ?? eligibleRepositories[0]
     ?? null
-  const issueTitleBytes = utf8ByteLength(issueTitle)
+  const trimmedIssueTitle = issueTitle.trim()
+  const issueTitleBytes = utf8ByteLength(trimmedIssueTitle)
   const issueBodyBytes = utf8ByteLength(issueBody)
-  const issueTitleWithinLimit = issueTitleBytes > 0 && issueTitleBytes <= MAX_ISSUE_TITLE_BYTES
+  const issueTitleWithinLimit = (
+    issueTitleBytes > 0
+    && issueTitleBytes <= MAX_ISSUE_TITLE_BYTES
+    && !/[\u0000-\u001F\u007F]/.test(trimmedIssueTitle)
+  )
   const issueBodyWithinLimit = issueBodyBytes <= MAX_ISSUE_BODY_BYTES
 
   const refreshConnections = async (): Promise<GitHubWriteResult<{
@@ -179,8 +184,8 @@ export default function GitHubWriteAccessPanel() {
       setStatus(safeFailureMessage(result.code))
       return
     }
-    issueAttemptKeyRef.current = null
-    setCreatedIssue(null)
+    resetIssueAttempt()
+    setIssueConfirmed(false)
     setStatus('GitHub repository access was disconnected locally.')
     await refresh()
   }
@@ -203,7 +208,7 @@ export default function GitHubWriteAccessPanel() {
     const result = await createGitHubIssue({
       connectionId: selectedConnection.id,
       idempotencyKey,
-      title: issueTitle,
+      title: trimmedIssueTitle,
       body: issueBody,
       confirmRepository: selectedConnection.repositoryFullName,
       confirmed: issueConfirmed,

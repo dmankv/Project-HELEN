@@ -41,8 +41,6 @@ import {
   upsertConversation,
   insertMessage,
   insertCloudMemory,
-  deleteLastCloudMemory,
-  deleteCloudMemoriesByText,
   deleteAllCloudMemories,
   updateLearningFeedback,
   insertLearningInteraction,
@@ -190,6 +188,11 @@ type MemoryCommand =
   | { type: 'forget-all' }
   | { type: 'recall' }
 
+interface MemoryCommandResult {
+  responseText: string
+  affectedMemoryIds: string[]
+}
+
 function parseMemoryCommand(text: string): MemoryCommand | null {
   const t = text.trim()
   const rememberMatch = /^remember(?:\s+this)?[:-]?\s*(.+)$/i.exec(t)
@@ -206,33 +209,44 @@ function parseMemoryCommand(text: string): MemoryCommand | null {
   return null
 }
 
-function handleMemoryCommand(cmd: MemoryCommand): string {
+function handleMemoryCommand(cmd: MemoryCommand): MemoryCommandResult {
   switch (cmd.type) {
     case 'remember': {
       const mem = saveMemory(cmd.payload)
-      return 'Got it — I\'ll remember: "' + mem.text + '"'
+      return { responseText: 'Got it — I\'ll remember: "' + mem.text + '"', affectedMemoryIds: [] }
     }
     case 'forget-last': {
       const removed = forgetLast()
-      return removed
-        ? 'Forgotten: "' + removed.text + '"'
-        : "I don't have any memories to forget right now."
+      return {
+        responseText: removed
+          ? 'Forgotten: "' + removed.text + '"'
+          : "I don't have any memories to forget right now.",
+        affectedMemoryIds: removed ? [removed.id] : [],
+      }
     }
     case 'forget-text': {
       const removed = forgetByText(cmd.payload)
-      if (removed.length === 0) return 'I couldn\'t find any memory matching "' + cmd.payload + '".'
+      if (removed.length === 0) {
+        return { responseText: 'I couldn\'t find any memory matching "' + cmd.payload + '".', affectedMemoryIds: [] }
+      }
       const names = removed.map(m => '"' + m.text + '"').join(', ')
-      return 'Forgotten ' + removed.length + ' memor' + (removed.length > 1 ? 'ies' : 'y') + ': ' + names
+      return {
+        responseText: 'Forgotten ' + removed.length + ' memor' + (removed.length > 1 ? 'ies' : 'y') + ': ' + names,
+        affectedMemoryIds: removed.map(memory => memory.id),
+      }
     }
     case 'forget-all': {
       forgetAll()
-      return 'All memories cleared.'
+      return { responseText: 'All memories cleared.', affectedMemoryIds: [] }
     }
     case 'recall': {
       const mems = listMemories()
-      return mems.length === 0
-        ? 'I don\'t have any durable memories yet. You can say "remember this: <text>" to add one.'
-        : 'Here\'s what I remember:\n\n' + formatMemoriesForContext(mems)
+      return {
+        responseText: mems.length === 0
+          ? 'I don\'t have any durable memories yet. You can say "remember this: <text>" to add one.'
+          : 'Here\'s what I remember:\n\n' + formatMemoriesForContext(mems),
+        affectedMemoryIds: [],
+      }
     }
   }
 }
@@ -539,7 +553,7 @@ export default function DaemonInterface({
       const memCmd = parseMemoryCommand(text)
       if (memCmd) {
         await new Promise(r => setTimeout(r, 400))
-        const responseText = handleMemoryCommand(memCmd)
+        const { responseText, affectedMemoryIds } = handleMemoryCommand(memCmd)
         // Cloud-persist new memory if user is authenticated
         if (memCmd.type === 'remember' && isPersistenceConfigured() && currentUser) {
           const mems = listMemories()
@@ -553,24 +567,26 @@ export default function DaemonInterface({
         // user is not signed in.
         if (memCmd.type === 'forget-last') {
           setHydratedMemories(previous => {
-            if (previous.length === 0) return previous
-            const latest = previous.reduce((a, b) => (
-              new Date(a.createdAt).getTime() >= new Date(b.createdAt).getTime() ? a : b
-            ))
-            return previous.filter(memory => memory.id !== latest.id)
+            if (affectedMemoryIds.length === 0) return previous
+            const affected = new Set(affectedMemoryIds)
+            return previous.filter(memory => !affected.has(memory.id))
           })
         } else if (memCmd.type === 'forget-text') {
-          const needle = memCmd.payload.toLowerCase().trim()
-          setHydratedMemories(previous => previous.filter(memory => !memory.text.toLowerCase().includes(needle)))
+          if (affectedMemoryIds.length > 0) {
+            const affected = new Set(affectedMemoryIds)
+            setHydratedMemories(previous => previous.filter(memory => !affected.has(memory.id)))
+          }
         } else if (memCmd.type === 'forget-all') {
           setHydratedMemories([])
         }
         // Mirror memory deletions to cloud
         if (isPersistenceConfigured() && currentUser) {
           if (memCmd.type === 'forget-last') {
-            void deleteLastCloudMemory()
+            if (affectedMemoryIds[0]) void deleteCloudMemory(affectedMemoryIds[0])
           } else if (memCmd.type === 'forget-text') {
-            void deleteCloudMemoriesByText(memCmd.payload)
+            if (affectedMemoryIds.length > 0) {
+              for (const memoryId of affectedMemoryIds) void deleteCloudMemory(memoryId)
+            }
           } else if (memCmd.type === 'forget-all') {
             void deleteAllCloudMemories()
           }

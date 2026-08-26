@@ -1,15 +1,16 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { createGitHubIssue } = vi.hoisted(() => ({
+const { createGitHubIssue, disconnectGitHubWriteConnection } = vi.hoisted(() => ({
   createGitHubIssue: vi.fn(),
+  disconnectGitHubWriteConnection: vi.fn(),
 }))
 
 vi.mock('../src/services/githubWriteAccess', () => ({
   beginGitHubWriteAuthorization: vi.fn(),
   connectGitHubWriteRepository: vi.fn(),
   createGitHubIssue,
-  disconnectGitHubWriteConnection: vi.fn(),
+  disconnectGitHubWriteConnection,
   getEligibleGitHubRepositories: vi.fn().mockResolvedValue({
     ok: true,
     data: {
@@ -51,6 +52,8 @@ describe('GitHubWriteAccessPanel', () => {
   beforeEach(() => {
     createGitHubIssue.mockReset()
     createGitHubIssue.mockResolvedValue({ ok: false, code: 'GITHUB_UNAVAILABLE' })
+    disconnectGitHubWriteConnection.mockReset()
+    disconnectGitHubWriteConnection.mockResolvedValue({ ok: true, data: { disconnected: true } })
   })
 
   it('resets repository authorization consent when its target changes', async () => {
@@ -127,5 +130,34 @@ describe('GitHubWriteAccessPanel', () => {
     fireEvent.click(confirmation)
     fireEvent.change(body, { target: { value: '€'.repeat(6000) } })
     expect(createButton).toBeDisabled()
+  })
+
+  it('disables issue creation for a whitespace-only title', async () => {
+    render(<GitHubWriteAccessPanel />)
+    const title = await screen.findByLabelText('Issue title')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+    const createButton = screen.getByRole('button', { name: 'Create GitHub issue' })
+
+    fireEvent.change(title, { target: { value: '   ' } })
+    fireEvent.click(confirmation)
+
+    expect(createButton).toBeDisabled()
+  })
+
+  it('clears issue confirmation after disconnecting the selected connection', async () => {
+    render(<GitHubWriteAccessPanel />)
+    const title = await screen.findByLabelText('Issue title')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+
+    fireEvent.change(title, { target: { value: 'Issue title' } })
+    fireEvent.click(confirmation)
+    expect(confirmation).toBeChecked()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
+
+    await waitFor(() => {
+      expect(disconnectGitHubWriteConnection).toHaveBeenCalledTimes(1)
+      expect(screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)).not.toBeChecked()
+    })
   })
 })
