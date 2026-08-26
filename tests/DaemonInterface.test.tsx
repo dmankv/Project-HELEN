@@ -430,6 +430,61 @@ describe('DaemonInterface', () => {
     expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId)
   })
 
+  it('does not restore a deleted memory from stale hydration results', async () => {
+    type HydrationResult = {
+      conversations: []
+      messagesByConversation: Record<string, never[]>
+      memories: Array<{
+        id: string
+        user_id: string
+        text: string
+        tags: string[]
+        created_at: string
+      }>
+      learningInteractions: []
+    }
+    let resolveHydration: ((value: HydrationResult) => void) | null = null
+    const memory = {
+      id: '550e8400-e29b-41d4-a716-446655440055',
+      text: 'Delete me before hydration finishes.',
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    let localMemories = [memory]
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(listMemories).mockImplementation(() => localMemories)
+    vi.mocked(forgetById).mockImplementation(memoryId => {
+      if (memoryId !== memory.id) return false
+      localMemories = []
+      return true
+    })
+    vi.mocked(hydrateFromCloud).mockReturnValue(new Promise(resolve => {
+      resolveHydration = resolve as (value: HydrationResult) => void
+    }))
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    expect(screen.getByText(memory.text)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: Delete me before hydration finishes\./i }))
+
+    expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id)
+    await waitFor(() => expect(screen.queryByText(memory.text)).not.toBeInTheDocument(), WAIT_OPTS)
+
+    resolveHydration?.({
+      conversations: [],
+      messagesByConversation: {},
+      memories: [{
+        id: memory.id,
+        user_id: 'user-1',
+        text: memory.text,
+        tags: [],
+        created_at: memory.createdAt,
+      }],
+      learningInteractions: [],
+    })
+
+    await waitFor(() => expect(screen.queryByText(memory.text)).not.toBeInTheDocument(), WAIT_OPTS)
+  })
+
   it('forgets the exact memory returned by forgetLast without dropping the newest hydrated entry', async () => {
     vi.mocked(isPersistenceConfigured).mockReturnValue(true)
     vi.mocked(hydrateFromCloud).mockResolvedValue({

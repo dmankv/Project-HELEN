@@ -56,6 +56,35 @@ describe('GitHubWriteAccessPanel', () => {
     disconnectGitHubWriteConnection.mockResolvedValue({ ok: true, data: { disconnected: true } })
   })
 
+  it('disables mutable repository and issue controls while issue creation is in flight', async () => {
+    let resolveIssue: ((value: { ok: false; code: string }) => void) | null = null
+    createGitHubIssue.mockReturnValue(new Promise(resolve => {
+      resolveIssue = resolve
+    }))
+    render(<GitHubWriteAccessPanel />)
+    const repository = await screen.findByLabelText('Eligible GitHub repository')
+    const repositoryConsent = screen.getByLabelText(/I authorize issue creation only for owner\/repository-a/)
+    const connection = screen.getByLabelText('Connected repository')
+    const title = screen.getByLabelText('Issue title')
+    const body = screen.getByLabelText('Issue body (optional)')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+
+    fireEvent.change(title, { target: { value: 'Issue title' } })
+    fireEvent.click(confirmation)
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub issue' }))
+
+    await waitFor(() => expect(createGitHubIssue).toHaveBeenCalledTimes(1))
+    expect(repository).toBeDisabled()
+    expect(repositoryConsent).toBeDisabled()
+    expect(connection).toBeDisabled()
+    expect(title).toBeDisabled()
+    expect(body).toBeDisabled()
+    expect(confirmation).toBeDisabled()
+
+    resolveIssue?.({ ok: false, code: 'GITHUB_UNAVAILABLE' })
+    await waitFor(() => expect(title).not.toBeDisabled())
+  })
+
   it('resets repository authorization consent when its target changes', async () => {
     render(<GitHubWriteAccessPanel />)
     const repository = await screen.findByLabelText('Eligible GitHub repository')

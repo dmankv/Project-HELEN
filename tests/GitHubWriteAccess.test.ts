@@ -175,6 +175,7 @@ describe('GitHub write server boundaries', () => {
     expect(migration).toContain('authorization_expires_at')
     expect(migration).toContain("'connection-mutate'")
     expect(migration).toContain('increment_github_write_rate_limit')
+    expect(migration).toContain('returning public.github_write_rate_limits.request_count into v_count;')
   })
 
   it('uses an atomic OAuth state, PKCE, GitHub API allowlisting, and installation narrowing', () => {

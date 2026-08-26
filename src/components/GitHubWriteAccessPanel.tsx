@@ -242,6 +242,7 @@ export default function GitHubWriteAccessPanel() {
           <input
             type="checkbox"
             checked={authorizationConsent}
+            disabled={loading}
             onChange={event => setAuthorizationConsent(event.target.checked)}
           />
           I consent to GitHub App authorization so I can choose an eligible repository.
@@ -257,6 +258,7 @@ export default function GitHubWriteAccessPanel() {
           <select
             id="github-write-eligible-repository"
             value={selectedRepository?.repositoryId ?? ''}
+            disabled={loading}
             onChange={event => {
               setSelectedRepositoryId(event.target.value)
               setConnectionConsent(false)
@@ -272,6 +274,7 @@ export default function GitHubWriteAccessPanel() {
             <input
               type="checkbox"
               checked={connectionConsent}
+              disabled={loading}
               onChange={event => setConnectionConsent(event.target.checked)}
             />
             I authorize issue creation only for {selectedRepository?.repositoryFullName ?? 'this repository'}.
@@ -288,6 +291,7 @@ export default function GitHubWriteAccessPanel() {
           <select
             id="github-write-connection"
             value={selectedConnection.id}
+            disabled={loading}
             onChange={event => {
               setSelectedConnectionId(event.target.value)
               setIssueConfirmed(false)
@@ -315,6 +319,7 @@ export default function GitHubWriteAccessPanel() {
             <input
               id="github-write-issue-title"
               value={issueTitle}
+              disabled={loading}
               onChange={event => {
                 setIssueTitle(event.target.value)
                 setIssueConfirmed(false)
@@ -326,6 +331,7 @@ export default function GitHubWriteAccessPanel() {
             <textarea
               id="github-write-issue-body"
               value={issueBody}
+              disabled={loading}
               onChange={event => {
                 setIssueBody(event.target.value)
                 setIssueConfirmed(false)
@@ -344,6 +350,7 @@ export default function GitHubWriteAccessPanel() {
               <input
                 type="checkbox"
                 checked={issueConfirmed}
+                disabled={loading}
                 onChange={event => setIssueConfirmed(event.target.checked)}
               />
               I reviewed this issue and confirm creation in {selectedConnection.repositoryFullName}.

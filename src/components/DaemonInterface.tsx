@@ -351,6 +351,7 @@ export default function DaemonInterface({
   const [personalityPrefs, setPersonalityPrefs] = useState<PersonalityPreferences>(() => loadLocalPreferences())
   const [showPreferences, setShowPreferences] = useState(false)
   const [projectLogContext, setProjectLogContext] = useState<string | null>(null)
+  const memoryMutationVersionRef = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -419,13 +420,14 @@ export default function DaemonInterface({
   useEffect(() => {
     if (!isPersistenceConfigured() || !currentUser) return
     let active = true
+    const hydrationVersion = memoryMutationVersionRef.current
     const localMems = listMemories()
     setHydratedMemories([])
     void migrateLocalMemoriesToCloud(localMems)
     // Hydrate cloud data into local state non-disruptively
     void (async () => {
       const hydrated = await hydrateFromCloud()
-      if (!active || !hydrated) return
+      if (!active || !hydrated || memoryMutationVersionRef.current !== hydrationVersion) return
       setHydratedMemories(hydrated.memories.map(memory => ({
         id: memory.id,
         text: memory.text,
@@ -554,6 +556,9 @@ export default function DaemonInterface({
       if (memCmd) {
         await new Promise(r => setTimeout(r, 400))
         const { responseText, affectedMemoryIds } = handleMemoryCommand(memCmd)
+        if (memCmd.type === 'forget-last' || memCmd.type === 'forget-text' || memCmd.type === 'forget-all') {
+          memoryMutationVersionRef.current += 1
+        }
         // Cloud-persist new memory if user is authenticated
         if (memCmd.type === 'remember' && isPersistenceConfigured() && currentUser) {
           const mems = listMemories()
@@ -1008,6 +1013,7 @@ export default function DaemonInterface({
     const deletedLocal = forgetById(memoryId)
     const deletedHydrated = hydratedMemories.some(memory => memory.id === memoryId)
     if (!deletedLocal && !deletedHydrated) return
+    memoryMutationVersionRef.current += 1
     if (deletedHydrated) {
       setHydratedMemories(previous => previous.filter(memory => memory.id !== memoryId))
     }

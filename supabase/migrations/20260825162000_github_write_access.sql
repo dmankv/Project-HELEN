@@ -136,7 +136,7 @@ begin
         else public.github_write_rate_limits.window_start
       end,
       updated_at = v_now
-  returning request_count into v_count;
+  returning public.github_write_rate_limits.request_count into v_count;
 
   if v_count is null then
     v_count := 1;
