@@ -215,6 +215,23 @@ export async function listCloudMemories(): Promise<CloudDurableMemory[] | null> 
   return (data ?? []) as CloudDurableMemory[]
 }
 
+async function insertCloudMemoryForUser(
+  client: SupabaseClient,
+  userId: string,
+  mem: { id: string; text: string; tags?: string[]; createdAt: string },
+): Promise<{ memory: CloudDurableMemory | null; succeeded: boolean }> {
+  const { data, error } = await client
+    .from('durable_memories')
+    .insert({ id: mem.id, user_id: userId, text: mem.text, tags: mem.tags ?? [], created_at: mem.createdAt })
+    .select()
+    .maybeSingle<CloudDurableMemory>()
+  if (error) {
+    console.warn('[daemon-persistence] insertCloudMemory:', error.message)
+    return { memory: null, succeeded: false }
+  }
+  return { memory: data, succeeded: true }
+}
+
 export async function insertCloudMemory(
   mem: { id: string; text: string; tags?: string[]; createdAt: string },
 ): Promise<CloudDurableMemory | null> {
@@ -222,13 +239,7 @@ export async function insertCloudMemory(
   if (!client) return null
   const userId = await getCurrentUserId()
   if (!userId) return null
-  const { data, error } = await client
-    .from('durable_memories')
-    .insert({ id: mem.id, user_id: userId, text: mem.text, tags: mem.tags ?? [], created_at: mem.createdAt })
-    .select()
-    .maybeSingle<CloudDurableMemory>()
-  if (error) { console.warn('[daemon-persistence] insertCloudMemory:', error.message); return null }
-  return data
+  return (await insertCloudMemoryForUser(client, userId, mem)).memory
 }
 
 export async function deleteCloudMemory(id: string): Promise<boolean> {
@@ -406,13 +417,7 @@ export async function migrateLocalMemoriesToCloud(
 
   for (const mem of localMemories) {
     if (await getCurrentUserId() !== userId) return
-    const { error } = await client
-      .from('durable_memories')
-      .insert({ id: mem.id, user_id: userId, text: mem.text, tags: mem.tags ?? [], created_at: mem.createdAt })
-    if (error) {
-      console.warn('[daemon-persistence] migrateLocalMemoriesToCloud:', error.message)
-      return
-    }
+    if (!(await insertCloudMemoryForUser(client, userId, mem)).succeeded) return
   }
   markCloudMigrationDone(userId)
 }

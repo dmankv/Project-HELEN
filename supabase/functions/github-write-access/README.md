@@ -79,7 +79,8 @@ Host the write-enabled frontend on a dedicated HTTPS custom origin such as
 projects under one account share an origin and browser storage. The functions
 fail closed for `*.github.io`; until a dedicated origin is available, leave
 GitHub issue writes disabled. An explicitly configured `http://localhost` or
-`http://127.0.0.1` origin is accepted only for local development.
+`http://127.0.0.1` origin, including its exact port, is accepted only for local
+development.
 
 Deploy the OAuth callback with gateway JWT verification disabled because
 GitHub's redirect cannot carry the application's Supabase JWT. The function

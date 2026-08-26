@@ -444,6 +444,13 @@ describe('GitHub write issue creation behavior', () => {
     expect(getAllowedGitHubWriteOrigin('https://dmankv.github.io')).toBeNull()
     expect(getAllowedGitHubWriteOrigin('https://other-project.github.io')).toBeNull()
 
+    serverEnvironment.GITHUB_WRITE_ACCESS_APP_URL = 'http://localhost:5173/'
+    const localhostOriginModule = await loadGitHubWriteServerModule()
+    expect(localhostOriginModule.getAllowedGitHubWriteOrigin('http://localhost:5173')).toBe(
+      'http://localhost:5173',
+    )
+    expect(localhostOriginModule.getAllowedGitHubWriteOrigin('http://localhost:4173')).toBeNull()
+
     serverEnvironment.GITHUB_WRITE_ACCESS_APP_URL = 'https://dmankv.github.io/Project-HELEN/'
     const invalidOriginModule = await loadGitHubWriteServerModule()
     expect(invalidOriginModule.getAllowedGitHubWriteOrigin('https://dmankv.github.io')).toBeNull()
