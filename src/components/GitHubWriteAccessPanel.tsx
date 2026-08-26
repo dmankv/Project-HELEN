@@ -158,42 +158,15 @@ export default function GitHubWriteAccessPanel() {
         setStatus(safeFailureMessage('OAUTH_DENIED'))
         return () => { active = false }
       }
-      setLoading(true)
       const p = completeGitHubWriteAuthorization(callback.state!, callback.code!)
       pendingOAuthCompletion = p
-      void (async () => {
-        const result = await p
-        if (pendingOAuthCompletion === p) pendingOAuthCompletion = null
-        if (!active) return
-        setLoading(false)
-        if (!result.ok) {
-          setStatus(safeFailureMessage(result.code))
-          return
-        }
-        setStatus('GitHub authorization completed.')
-        await refresh(() => active)
-        if (!active) return
-      })()
+      attachCompletion(p)
       return () => { active = false }
     }
     // StrictMode second run: callback was already cleared by the first setup;
     // if a completion is still in flight reattach to it so the result is not lost.
     if (pendingOAuthCompletion) {
-      const p = pendingOAuthCompletion
-      setLoading(true)
-      void (async () => {
-        const result = await p
-        if (pendingOAuthCompletion === p) pendingOAuthCompletion = null
-        if (!active) return
-        setLoading(false)
-        if (!result.ok) {
-          setStatus(safeFailureMessage(result.code))
-          return
-        }
-        setStatus('GitHub authorization completed.')
-        await refresh(() => active)
-        if (!active) return
-      })()
+      attachCompletion(pendingOAuthCompletion)
       return () => { active = false }
     }
     if (callback) {
@@ -206,6 +179,23 @@ export default function GitHubWriteAccessPanel() {
     }
     void refresh()
     return () => { active = false }
+
+    function attachCompletion(p: Promise<GitHubWriteResult<{ authorized: true }>>) {
+      setLoading(true)
+      void (async () => {
+        const result = await p
+        if (pendingOAuthCompletion === p) pendingOAuthCompletion = null
+        if (!active) return
+        setLoading(false)
+        if (!result.ok) {
+          setStatus(safeFailureMessage(result.code))
+          return
+        }
+        setStatus('GitHub authorization completed.')
+        await refresh(() => active)
+        if (!active) return
+      })()
+    }
   }, [])
 
   useEffect(() => {
