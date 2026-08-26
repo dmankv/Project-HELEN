@@ -9,6 +9,7 @@ import {
   authenticateGitHubWriteRequest,
   createGitHubIssue,
   getAllowedGitHubWriteOrigin,
+  GitHubWriteError,
   githubWriteCorsHeaders,
   githubWriteErrorResponse,
   githubWriteJsonResponse,
@@ -45,7 +46,12 @@ Deno.serve(async (req: Request) => {
   try {
     // Authenticate before reading the issue content, which is never logged.
     const { userId, service } = await authenticateGitHubWriteRequest(req)
-    const body: unknown = await req.json()
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      throw new GitHubWriteError('BAD_REQUEST', 400)
+    }
     const issue = await createGitHubIssue(service, userId, body)
     return githubWriteJsonResponse({
       issueNumber: issue.issueNumber,

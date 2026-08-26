@@ -64,7 +64,12 @@ Deno.serve(async (req: Request) => {
   try {
     // Authenticate before inspecting browser-provided data.
     const { userId, service } = await authenticateGitHubWriteRequest(req)
-    const body: unknown = await req.json()
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      throw new GitHubWriteError('BAD_REQUEST', 400)
+    }
     const { action, request } = parseAction(body)
     switch (action) {
       case 'authorize': {
