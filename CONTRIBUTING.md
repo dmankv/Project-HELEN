@@ -80,6 +80,7 @@ if either string is found in any `src/**/*.ts` or `src/**/*.tsx` file.
 ```bash
 npm run lint
 npm test
+npm run test:adaptive
 npm run test:unit
 npm run test:server
 npm run check:dist
