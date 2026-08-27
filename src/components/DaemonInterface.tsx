@@ -1176,9 +1176,10 @@ export default function DaemonInterface({
     const deletedHydrated = hydratedMemories.some(memory => memory.id === memoryId)
     if (!deletedLocal && !deletedHydrated) return
     if (deletedHydrated) {
-      // Memory was already in the hydrated state: invalidate any in-flight
-      // initial hydration version so its result doesn't re-add the memory.
-      memoryMutationVersionRef.current += 1
+      // Memory was already in the hydrated state: filter it from the current
+      // snapshot and record the ID so any in-flight hydration result also
+      // excludes it, without discarding unrelated cloud-only memories.
+      pendingLocalDeletionIdsRef.current.add(memoryId)
       setHydratedMemoryState(previous => ({
         ...previous,
         memories: previous.memories.filter(memory => memory.id !== memoryId),
