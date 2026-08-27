@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "lint": "eslint src server",
     "test": "npx tsx tests/daemon-eval.mjs && npx tsx tests/auth-eval.mjs",
+    "test:adaptive": "npx tsx tests/adaptive-eval.mjs",
     "test:unit": "vitest run",
     "test:server": "node tests/server-api.mjs",
     "cli": "npx tsx src/cli/daemon-cli.ts",
