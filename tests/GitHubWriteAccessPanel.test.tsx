@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -169,6 +169,47 @@ describe('GitHubWriteAccessPanel', () => {
 
     fireEvent.change(body, { target: { value: 'Updated body' } })
     expect(confirmation).not.toBeChecked()
+  })
+
+  it('clears repository and issue state after an account-keyed remount', async () => {
+    function PanelForUser({ userKey }: { userKey: string }) {
+      return <GitHubWriteAccessPanel key={userKey} userKey={userKey} />
+    }
+
+    const { rerender } = render(<PanelForUser userKey="user-a" />)
+    const title = await screen.findByLabelText('Issue title')
+    const confirmation = screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)
+    fireEvent.change(title, { target: { value: 'Account A issue' } })
+    fireEvent.click(confirmation)
+    expect(confirmation).toBeChecked()
+
+    rerender(<PanelForUser userKey="user-b" />)
+
+    expect(await screen.findByLabelText('Issue title')).toHaveValue('')
+    expect(screen.getByLabelText(/I reviewed this issue and confirm creation in owner\/repository-a/)).not.toBeChecked()
+  })
+
+  it('does not attach a pending OAuth completion to a different account', async () => {
+    const state = 'oauth-state-token-for-browser-binding-123456'
+    const code = 'github-authorization-code-123456'
+    let resolveCompletion: ((value: { ok: true; data: { authorized: true } }) => void) | null = null
+    completeGitHubWriteAuthorization.mockReturnValue(new Promise<{ ok: true; data: { authorized: true } }>(resolve => {
+      resolveCompletion = resolve
+    }))
+    window.location.hash = `/?github_write=complete&github_write_state=${state}&github_write_code=${code}`
+    function PanelForUser({ userKey }: { userKey: string }) {
+      return <GitHubWriteAccessPanel key={userKey} userKey={userKey} />
+    }
+
+    const { rerender } = render(<PanelForUser userKey="user-a" />)
+    await waitFor(() => expect(completeGitHubWriteAuthorization).toHaveBeenCalledWith(state, code))
+
+    rerender(<PanelForUser userKey="user-b" />)
+    await act(async () => {
+      resolveCompletion?.({ ok: true, data: { authorized: true } })
+    })
+
+    expect(screen.queryByText('GitHub authorization completed.')).not.toBeInTheDocument()
   })
 
   it('disables issue creation when title or body exceed UTF-8 byte limits', async () => {

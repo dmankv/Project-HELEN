@@ -15,7 +15,6 @@
     "server:build": "npm run build --prefix server",
     "server:typecheck": "npm run typecheck --prefix server",
     "python:smoke": "python3 tests/defself_l_smoke.py",
-    "test:adaptive": "npx tsx tests/adaptive-eval.mjs",
     "check:imports": "node tests/check-imports.mjs",
     "check:dist": "node tests/check-dist.mjs",
     "cli:typecheck": "node_modules/.bin/tsc --project tsconfig.cli.json --noEmit",

@@ -519,6 +519,30 @@ describe('Local durable-memory migration reconciliation', () => {
     expect(cloudMemories.has(secondMemory.id)).toBe(true)
     expect(persistence.isCloudMigrationDone(userId)).toBe(true)
   })
+
+  it('completes after a captured memory is deleted before its migration write', async () => {
+    const persistence = await loadPersistenceService()
+
+    await persistence.migrateLocalMemoriesToCloud(
+      [firstMemory, secondMemory],
+      id => id !== secondMemory.id,
+    )
+
+    expect(insertAttempts).toEqual([firstMemory.id])
+    expect(cloudMemories.has(firstMemory.id)).toBe(true)
+    expect(cloudMemories.has(secondMemory.id)).toBe(false)
+    expect(persistence.isCloudMigrationDone(userId)).toBe(true)
+  })
+
+  it('completes when all captured memories are deleted before migration writes', async () => {
+    const persistence = await loadPersistenceService()
+
+    await persistence.migrateLocalMemoriesToCloud([firstMemory, secondMemory], () => false)
+
+    expect(insertAttempts).toEqual([])
+    expect(cloudMemories.size).toBe(0)
+    expect(persistence.isCloudMigrationDone(userId)).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------

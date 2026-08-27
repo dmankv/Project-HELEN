@@ -144,6 +144,11 @@ for (const legacyFile of [
       && date.getUTCSeconds() === second
   }
 
+  const migrationTimestamp = (file) => {
+    const match = /^(\d{14})_/.exec(path.basename(file))
+    return match?.[1] ?? ''
+  }
+
   const migrationsDir = path.join(root, 'supabase', 'migrations')
   if (fs.existsSync(migrationsDir)) {
     const migrationFiles = fs.readdirSync(migrationsDir)
@@ -152,9 +157,9 @@ for (const legacyFile of [
 
     let previousTimestamp = ''
     for (const file of migrationFiles) {
-      const ts = file.slice(0, 14)
+      const ts = migrationTimestamp(file)
       if (!isValidMigrationTimestamp(ts)) {
-        console.error(`Migration check failed: filename "${file}" must start with a valid timestamp prefix (YYYYMMDDHHmmss).`)
+        console.error(`Migration check failed: filename "${file}" must start with a valid timestamp prefix followed by "_".`)
         process.exit(1)
       }
       if (ts === previousTimestamp) {
@@ -182,7 +187,7 @@ for (const legacyFile of [
         { cwd: root, encoding: 'utf8' },
       ).trim().split('\n').filter(Boolean)
       const baselineMax = baselineFiles.reduce((max, file) => {
-        const ts = path.basename(file).slice(0, 14)
+        const ts = migrationTimestamp(file)
         return isValidMigrationTimestamp(ts) && ts > max ? ts : max
       }, '0')
       const addedFiles = execFileSync(
@@ -192,8 +197,8 @@ for (const legacyFile of [
       ).trim().split('\n').filter(Boolean)
 
       for (const file of addedFiles) {
-        const ts = path.basename(file).slice(0, 14)
-        if (ts <= baselineMax) {
+        const ts = migrationTimestamp(file)
+        if (!isValidMigrationTimestamp(ts) || ts <= baselineMax) {
           console.error(
             `Migration check failed: newly added "${file}" timestamp ${ts} is not greater than ` +
             `the merge-base maximum ${baselineMax}.`,
@@ -255,10 +260,10 @@ for (const legacyFile of [
 }
 
 // ---------------------------------------------------------------------------
-// 5e — Provider secret-key names in frontend source
+// 5f — Provider secret-key names in frontend source
 //
 // The frontend must not contain the literal strings OPENAI_API_KEY or
-// ANTHROPIC_API_KEY. Provider keys are Supabase Vault secrets accessed only
+// ANTHROPIC_API_KEY. Provider keys are Supabase Function secrets accessed only
 // inside the daemon-chat Edge Function (see commit 84909fa). Their presence
 // in frontend files is a hygiene failure that suggests a key might be leaked
 // via a future environment variable or template substitution.

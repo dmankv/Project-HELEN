@@ -88,9 +88,12 @@ function clearGitHubWriteOAuthCallback(): void {
 
 // Module-level slot so React.StrictMode double-invocation (setup→cleanup→setup)
 // can reattach to the in-flight OAuth completion promise rather than silently dropping it.
-let pendingOAuthCompletion: Promise<GitHubWriteResult<{ authorized: true }>> | null = null
+let pendingOAuthCompletion: {
+  userKey: string
+  promise: Promise<GitHubWriteResult<{ authorized: true }>>
+} | null = null
 
-export default function GitHubWriteAccessPanel() {
+export default function GitHubWriteAccessPanel({ userKey = '' }: { userKey?: string }) {
   const [connections, setConnections] = useState<GitHubWriteConnectionSummary[]>([])
   const [eligibleRepositories, setEligibleRepositories] = useState<GitHubEligibleRepository[]>([])
   const [selectedConnectionId, setSelectedConnectionId] = useState('')
@@ -161,14 +164,14 @@ export default function GitHubWriteAccessPanel() {
         return () => { active = false }
       }
       const p = completeGitHubWriteAuthorization(callback.state!, callback.code!)
-      pendingOAuthCompletion = p
+      pendingOAuthCompletion = { userKey, promise: p }
       attachCompletion(p)
       return () => { active = false }
     }
     // StrictMode second run: callback was already cleared by the first setup;
     // if a completion is still in flight reattach to it so the result is not lost.
-    if (pendingOAuthCompletion) {
-      attachCompletion(pendingOAuthCompletion)
+    if (pendingOAuthCompletion?.userKey === userKey) {
+      attachCompletion(pendingOAuthCompletion.promise)
       return () => { active = false }
     }
     if (callback) {
@@ -186,7 +189,7 @@ export default function GitHubWriteAccessPanel() {
       setLoading(true)
       void (async () => {
         const result = await p
-        if (pendingOAuthCompletion === p) pendingOAuthCompletion = null
+        if (pendingOAuthCompletion?.promise === p) pendingOAuthCompletion = null
         if (!active) return
         setLoading(false)
         if (!result.ok) {
@@ -198,7 +201,7 @@ export default function GitHubWriteAccessPanel() {
         if (!active) return
       })()
     }
-  }, [])
+  }, [userKey])
 
   useEffect(() => {
     if (!connections.some(connection => connection.id === selectedConnectionId)) {

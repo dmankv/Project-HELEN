@@ -252,6 +252,8 @@ export function safeGitHubWriteErrorMessage(code: GitHubWriteErrorCode): string 
       return 'Explicit issue-creation confirmation is required.'
     case 'IDEMPOTENCY_CONFLICT':
       return 'This issue request was already attempted. Create a new confirmed request to try again.'
+    case 'IDEMPOTENCY_PENDING':
+      return 'This issue request is still being processed. Retry shortly.'
     case 'GITHUB_ACCESS_DENIED':
       return 'GitHub denied access to that repository.'
     case 'ISSUE_REJECTED':

@@ -449,6 +449,121 @@ describe('GitHub write issue creation behavior', () => {
     }
   }
 
+  type OAuthStateRow = {
+    state_hash: string
+    user_id: string
+    code_verifier_ciphertext: string
+    expires_at: string
+  }
+
+  type EligibleRepositoryRow = {
+    user_id: string
+    github_user_id: string
+    installation_id: string
+    repository_id: string
+    repository_full_name: string
+    expires_at: string
+  }
+
+  class OAuthMockService {
+    oauthStates = new Map<string, OAuthStateRow>()
+    eligibleRepositories: EligibleRepositoryRow[] = []
+    auditActions: string[] = []
+
+    rpc() {
+      return Promise.resolve({ data: [{ allowed: true }], error: null })
+    }
+
+    from(table: string) {
+      const filters = new Map<string, unknown>()
+      let operation: 'delete' | null = null
+      let before: { column: string; value: string } | null = null
+      let after: { column: string; value: string } | null = null
+
+      const rows = (): Array<OAuthStateRow | EligibleRepositoryRow> => {
+        if (table === 'github_write_oauth_states') return Array.from(this.oauthStates.values())
+        if (table === 'github_write_eligible_repositories') return this.eligibleRepositories
+        return []
+      }
+      const matches = (row: OAuthStateRow | EligibleRepositoryRow): boolean => {
+        const record = row as unknown as Record<string, unknown>
+        for (const [column, value] of filters) {
+          if (record[column] !== value) return false
+        }
+        if (before && !(String(record[before.column]) < before.value)) return false
+        if (after && !(String(record[after.column]) > after.value)) return false
+        return true
+      }
+      const matchingRows = () => rows().filter(matches)
+      const removeRows = () => {
+        const matching = new Set(matchingRows())
+        if (table === 'github_write_oauth_states') {
+          for (const [key, row] of this.oauthStates) {
+            if (matching.has(row)) this.oauthStates.delete(key)
+          }
+        } else if (table === 'github_write_eligible_repositories') {
+          this.eligibleRepositories = this.eligibleRepositories.filter(row => !matching.has(row))
+        }
+        return matchingRows()
+      }
+      const execute = async () => {
+        if (operation === 'delete') removeRows()
+        return { data: null, error: null }
+      }
+      const builder = {
+        select: () => builder,
+        insert: (payload: unknown) => {
+          const records = Array.isArray(payload) ? payload : [payload]
+          for (const record of records) {
+            if (!record || typeof record !== 'object') continue
+            const row = record as Record<string, unknown>
+            if (table === 'github_write_oauth_states') {
+              const state = row as unknown as OAuthStateRow
+              this.oauthStates.set(state.state_hash, state)
+            } else if (table === 'github_write_eligible_repositories') {
+              this.eligibleRepositories.push(row as unknown as EligibleRepositoryRow)
+            } else if (table === 'github_write_audit' && typeof row.action === 'string') {
+              this.auditActions.push(row.action)
+            }
+          }
+          return Promise.resolve({ error: null })
+        },
+        delete: () => {
+          operation = 'delete'
+          return builder
+        },
+        eq: (column: string, value: unknown) => {
+          filters.set(column, value)
+          return builder
+        },
+        lt: (column: string, value: string) => {
+          before = { column, value }
+          return builder
+        },
+        gt: (column: string, value: string) => {
+          after = { column, value }
+          return builder
+        },
+        maybeSingle: async () => {
+          const row = matchingRows()[0] ?? null
+          if (operation === 'delete' && row) {
+            if (table === 'github_write_oauth_states') {
+              this.oauthStates.delete((row as OAuthStateRow).state_hash)
+            } else if (table === 'github_write_eligible_repositories') {
+              this.eligibleRepositories = this.eligibleRepositories.filter(candidate => candidate !== row)
+            }
+          }
+          return { data: row, error: null }
+        },
+        then: (
+          resolve: (value: { data: null; error: null }) => unknown,
+          reject?: (reason: unknown) => unknown,
+        ) => execute().then(resolve, reject),
+      }
+      return builder
+    }
+  }
+
   const connection: Connection = {
     id: '00000000-0000-4000-8000-000000000111',
     user_id: '00000000-0000-4000-8000-000000000999',
@@ -542,6 +657,128 @@ describe('GitHub write issue creation behavior', () => {
     expect(parameters.get('github_write')).toBe('complete')
     expect(parameters.get('github_write_state')).toBe(state)
     expect(parameters.get('github_write_code')).toBe(code)
+  })
+
+  it('returns an actionable message when an idempotent issue request is pending', async () => {
+    const { safeGitHubWriteErrorMessage } = await loadGitHubWriteServerModule()
+
+    expect(safeGitHubWriteErrorMessage('IDEMPOTENCY_PENDING')).toBe(
+      'This issue request is still being processed. Retry shortly.',
+    )
+  })
+
+  it('consumes OAuth state once, exchanges the code, and replaces eligible repositories', async () => {
+    const {
+      startGitHubWriteAuthorization,
+      completeGitHubWriteAuthorization,
+    } = await loadGitHubWriteServerModule()
+    const service = new OAuthMockService()
+    service.eligibleRepositories = [{
+      user_id: connection.user_id,
+      github_user_id: 'old-user',
+      installation_id: 'old-installation',
+      repository_id: 'old-repository',
+      repository_full_name: 'owner/old-repository',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    }]
+    const authorization = await startGitHubWriteAuthorization(
+      service,
+      connection.user_id,
+      { consent: true },
+    )
+    const state = new URL(authorization.authorizationUrl).searchParams.get('state')
+    if (!state) throw new Error('expected OAuth state')
+    const code = 'github-authorization-code-123456'
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'github-user-token-1234' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 123 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        installations: [{ id: 456, permissions: { issues: 'write' } }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        repositories: [{ id: 789, full_name: 'dmankv/Project-HELEN' }],
+      }), { status: 200 }))
+
+    await completeGitHubWriteAuthorization(service, connection.user_id, {
+      state,
+      code,
+      browserBinding: authorization.browserBinding,
+    })
+
+    const [, tokenRequest] = vi.mocked(fetch).mock.calls[0] ?? []
+    expect(JSON.parse(String(tokenRequest?.body))).toMatchObject({
+      client_id: 'client-id',
+      client_secret: 'client-secret',
+      code,
+      code_verifier: expect.any(String),
+    })
+    expect(service.oauthStates.size).toBe(0)
+    expect(service.eligibleRepositories).toEqual([{
+      user_id: connection.user_id,
+      github_user_id: '123',
+      installation_id: '456',
+      repository_id: '789',
+      repository_full_name: 'dmankv/Project-HELEN',
+      expires_at: expect.any(String),
+    }])
+
+    await expect(completeGitHubWriteAuthorization(service, connection.user_id, {
+      state,
+      code,
+      browserBinding: authorization.browserBinding,
+    })).rejects.toMatchObject({ code: 'OAUTH_DENIED' })
+    expect(fetch).toHaveBeenCalledTimes(4)
+  })
+
+  it('rejects an OAuth completion whose browser binding does not match', async () => {
+    const {
+      startGitHubWriteAuthorization,
+      completeGitHubWriteAuthorization,
+    } = await loadGitHubWriteServerModule()
+    const service = new OAuthMockService()
+    const authorization = await startGitHubWriteAuthorization(
+      service,
+      connection.user_id,
+      { consent: true },
+    )
+    const state = new URL(authorization.authorizationUrl).searchParams.get('state')
+    if (!state) throw new Error('expected OAuth state')
+
+    await expect(completeGitHubWriteAuthorization(service, connection.user_id, {
+      state,
+      code: 'github-authorization-code-123456',
+      browserBinding: 'different-browser-binding-token-123456',
+    })).rejects.toMatchObject({ code: 'OAUTH_DENIED' })
+
+    expect(service.oauthStates.size).toBe(1)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('rejects an expired OAuth state before exchanging its authorization code', async () => {
+    const {
+      startGitHubWriteAuthorization,
+      completeGitHubWriteAuthorization,
+    } = await loadGitHubWriteServerModule()
+    const service = new OAuthMockService()
+    const authorization = await startGitHubWriteAuthorization(
+      service,
+      connection.user_id,
+      { consent: true },
+    )
+    const state = new URL(authorization.authorizationUrl).searchParams.get('state')
+    if (!state) throw new Error('expected OAuth state')
+    const storedState = Array.from(service.oauthStates.values())[0]
+    if (!storedState) throw new Error('expected stored OAuth state')
+    storedState.expires_at = new Date(Date.now() - 60_000).toISOString()
+
+    await expect(completeGitHubWriteAuthorization(service, connection.user_id, {
+      state,
+      code: 'github-authorization-code-123456',
+      browserBinding: authorization.browserBinding,
+    })).rejects.toMatchObject({ code: 'OAUTH_DENIED' })
+
+    expect(service.oauthStates.size).toBe(0)
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('enforces ownership and current authorization before creating issues', async () => {

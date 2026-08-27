@@ -103,6 +103,8 @@ import {
   hydrateFromCloud,
   listConversations,
   migrateLocalMemoriesToCloud,
+  insertLearningInteraction,
+  updateLearningFeedback,
 } from '../src/services/supabasePersistence'
 
 // ---------------------------------------------------------------------------
@@ -371,6 +373,47 @@ describe('DaemonInterface', () => {
     )
   })
 
+  it('waits for the cloud interaction insert before persisting feedback', async () => {
+    let resolveInsert: (() => void) | null = null
+    const cloudInteraction: Awaited<ReturnType<typeof insertLearningInteraction>> = {
+      id: 'interaction-1',
+      user_id: 'user-1',
+      input: 'Wait for cloud persistence',
+      response: 'Test response from local brain.',
+      intent: 'answer',
+      confidence: 0.8,
+      ambiguity: 0.2,
+      memory_used: 0,
+      plan_complexity: 'simple',
+      created_at: '2026-08-27T00:00:00.000Z',
+    }
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(insertLearningInteraction).mockReturnValue(new Promise(resolve => {
+      resolveInsert = () => resolve(cloudInteraction)
+    }))
+    vi.mocked(updateLearningFeedback).mockResolvedValue(true)
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+    fireEvent.change(screen.getByPlaceholderText(/Message Daemon/i), {
+      target: { value: 'Wait for cloud persistence' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    const helpful = await screen.findByRole('button', { name: 'Helpful' }, WAIT_OPTS)
+    await waitFor(() => expect(insertLearningInteraction).toHaveBeenCalledTimes(1), WAIT_OPTS)
+    fireEvent.click(helpful)
+    expect(updateLearningFeedback).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveInsert?.()
+    })
+
+    await waitFor(
+      () => expect(updateLearningFeedback).toHaveBeenCalledWith('interaction-1', 'helpful', undefined),
+      WAIT_OPTS,
+    )
+  }, 8000)
+
   it('downloads learning data from the feedback and data panel', () => {
     const createObjectURL = vi.fn(() => 'blob:daemon-learning-data')
     const revokeObjectURL = vi.fn()
@@ -408,6 +451,24 @@ describe('DaemonInterface', () => {
     await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id), WAIT_OPTS)
   })
 
+  it('shows a sync error when a cloud memory deletion fails', async () => {
+    const memory = {
+      id: '550e8400-e29b-41d4-a716-446655440012',
+      text: 'Keep local data when cloud deletion fails.',
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(listMemories).mockReturnValue([memory])
+    vi.mocked(forgetById).mockReturnValue(true)
+    vi.mocked(deleteCloudMemory).mockResolvedValue(false)
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: Keep local data when cloud deletion fails\./i }))
+
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(memory.id), WAIT_OPTS)
+    await waitFor(() => expect(screen.getByText('Sync error')).toBeInTheDocument(), WAIT_OPTS)
+  })
+
   it('shows hydrated durable memories and can delete cloud-only entries', async () => {
     const cloudOnlyMemoryId = '550e8400-e29b-41d4-a716-446655440099'
     vi.mocked(isPersistenceConfigured).mockReturnValue(true)
@@ -431,6 +492,45 @@ describe('DaemonInterface', () => {
     fireEvent.click(screen.getByRole('button', { name: /Forget memory: Cloud-only durable memory/i }))
 
     await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId), WAIT_OPTS)
+  })
+
+  it('hides hydrated memories from a previous account before the next hydration finishes', async () => {
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(hydrateFromCloud)
+      .mockResolvedValueOnce({
+        conversations: [],
+        messagesByConversation: {},
+        memories: [{
+          id: '550e8400-e29b-41d4-a716-446655440104',
+          user_id: 'user-a',
+          text: 'Memory owned by account A',
+          tags: [],
+          created_at: '2026-08-25T00:00:00.000Z',
+        }],
+        learningInteractions: [],
+      })
+      .mockResolvedValueOnce({
+        conversations: [],
+        messagesByConversation: {},
+        memories: [{
+          id: '550e8400-e29b-41d4-a716-446655440105',
+          user_id: 'user-b',
+          text: 'Memory owned by account B',
+          tags: [],
+          created_at: '2026-08-26T00:00:00.000Z',
+        }],
+        learningInteractions: [],
+      })
+
+    const { rerender } = render(
+      <DaemonInterface currentUser={{ id: 'user-a', email: 'a@example.com', role: 'user' }} />,
+    )
+    expect(await screen.findByText('Memory owned by account A')).toBeInTheDocument()
+
+    rerender(<DaemonInterface currentUser={{ id: 'user-b', email: 'b@example.com', role: 'user' }} />)
+
+    expect(screen.queryByText('Memory owned by account A')).not.toBeInTheDocument()
+    expect(await screen.findByText('Memory owned by account B')).toBeInTheDocument()
   })
 
   it('forgets the newest hydrated-only memory when no local durable memory exists', async () => {

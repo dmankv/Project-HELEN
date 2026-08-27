@@ -69,7 +69,7 @@ cause runtime insertion failures.
 The frontend (`src/`) must never contain the string literals
 `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 
-Provider keys are Supabase Vault secrets accessed exclusively inside the
+Provider keys are Supabase Function secrets accessed exclusively inside the
 `daemon-chat` Edge Function.  The `check:imports` CI step will fail the build
 if either string is found in any `src/**/*.ts` or `src/**/*.tsx` file.
 
@@ -82,7 +82,6 @@ npm run lint
 npm test
 npm run test:unit
 npm run test:server
-npm run test:adaptive    # deterministic adaptive-intelligence fixture suite
 npm run check:dist
 npm run check:imports    # also runs migration-order, prefixed-ID, and secret-key checks
 npm run cli:smoke

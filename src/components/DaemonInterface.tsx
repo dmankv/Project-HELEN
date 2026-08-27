@@ -193,6 +193,11 @@ interface MemoryCommandResult {
   affectedMemoryIds: string[]
 }
 
+interface HydratedMemoryState {
+  ownerKey: string | null
+  memories: DurableMemory[]
+}
+
 function formatForgottenMemoryResponse(memories: DurableMemory[]): string {
   if (memories.length === 1) {
     return 'Forgotten: "' + memories[0].text + '"'
@@ -392,13 +397,17 @@ export default function DaemonInterface({
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('unconfigured')
   const [ratedMessages, setRatedMessages] = useState<Set<string>>(() => new Set())
   const [dataRevision, setDataRevision] = useState(0)
-  const [hydratedMemories, setHydratedMemories] = useState<DurableMemory[]>([])
+  const [hydratedMemoryState, setHydratedMemoryState] = useState<HydratedMemoryState>({
+    ownerKey: null,
+    memories: [],
+  })
   const [exportStatus, setExportStatus] = useState<'idle' | 'exported' | 'failed'>('idle')
   const [personalityPrefs, setPersonalityPrefs] = useState<PersonalityPreferences>(() => loadLocalPreferences())
   const [showPreferences, setShowPreferences] = useState(false)
   const [projectLogContext, setProjectLogContext] = useState<string | null>(null)
   const memoryMutationVersionRef = useRef(0)
   const memoryWriteTailsRef = useRef(new Map<string, Promise<void>>())
+  const learningWriteTailsRef = useRef(new Map<string, Promise<void>>())
   const liveCloudUserKeyRef = useRef(cloudUserKey)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -411,6 +420,11 @@ export default function DaemonInterface({
   // Maps an assistant message to the approved strategy that produced it, so
   // thumbs-up/down feedback is attributed to the right strategy.
   const msgToStrategyRef = useRef<Map<string, { strategy: ResponseStrategy; contextKey: string }>>(new Map())
+  const hydratedMemories = hydratedMemoryState.ownerKey === cloudUserKey
+    ? hydratedMemoryState.memories
+    : []
+
+  liveCloudUserKeyRef.current = cloudUserKey
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -427,10 +441,6 @@ export default function DaemonInterface({
   useEffect(() => {
     activeConvIdRef.current = activeConvId
   }, [activeConvId])
-
-  useEffect(() => {
-    liveCloudUserKeyRef.current = cloudUserKey
-  }, [cloudUserKey])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -462,7 +472,7 @@ export default function DaemonInterface({
       setSyncStatus('unconfigured')
     } else if (!currentUser) {
       setSyncStatus('offline')
-      setHydratedMemories([])
+      setHydratedMemoryState({ ownerKey: null, memories: [] })
     } else {
       setSyncStatus('idle')
     }
@@ -476,9 +486,12 @@ export default function DaemonInterface({
       .then(async () => {
         if (liveCloudUserKeyRef.current !== cloudUserKey) return
         try {
-          await operation()
+          const result = await operation()
+          if ((result === false || result === null) && liveCloudUserKeyRef.current === cloudUserKey) {
+            setSyncStatus('error')
+          }
         } catch {
-          // Cloud-memory operations are best effort.
+          if (liveCloudUserKeyRef.current === cloudUserKey) setSyncStatus('error')
         }
       })
     memoryWriteTailsRef.current.set(cloudUserKey, next)
@@ -489,25 +502,56 @@ export default function DaemonInterface({
     })
   }, [cloudUserKey])
 
+  const queueCloudLearningWrite = useCallback((
+    interactionId: string,
+    operation: () => Promise<unknown>,
+  ) => {
+    if (!isPersistenceConfigured() || !cloudUserKey) return
+    const writeKey = `${cloudUserKey}:${interactionId}`
+    const previous = learningWriteTailsRef.current.get(writeKey) ?? Promise.resolve()
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (liveCloudUserKeyRef.current !== cloudUserKey) return
+        try {
+          const result = await operation()
+          if ((result === false || result === null) && liveCloudUserKeyRef.current === cloudUserKey) {
+            setSyncStatus('error')
+          }
+        } catch {
+          if (liveCloudUserKeyRef.current === cloudUserKey) setSyncStatus('error')
+        }
+      })
+    learningWriteTailsRef.current.set(writeKey, next)
+    void next.then(() => {
+      if (learningWriteTailsRef.current.get(writeKey) === next) {
+        learningWriteTailsRef.current.delete(writeKey)
+      }
+    })
+  }, [cloudUserKey])
+
   // One-time local-to-cloud memory migration + cloud hydration when user first signs in
   useEffect(() => {
     if (!isPersistenceConfigured() || !cloudUserKey) return
     let active = true
     const hydrationVersion = memoryMutationVersionRef.current
     const localMems = listMemories()
-    setHydratedMemories([])
+    setHydratedMemoryState({ ownerKey: cloudUserKey, memories: [] })
     queueCloudMemoryWrite(() => migrateLocalMemoriesToCloud(localMems, id => listMemories().some(m => m.id === id)))
     // Hydrate cloud data into local state non-disruptively
     void (async () => {
       const hydrated = await hydrateFromCloud()
-      if (!active || !hydrated) return
+      if (!active || liveCloudUserKeyRef.current !== cloudUserKey || !hydrated) return
       if (memoryMutationVersionRef.current === hydrationVersion) {
-        setHydratedMemories(hydrated.memories.map(memory => ({
-          id: memory.id,
-          text: memory.text,
-          tags: memory.tags,
-          createdAt: memory.created_at,
-        })))
+        setHydratedMemoryState({
+          ownerKey: cloudUserKey,
+          memories: hydrated.memories.map(memory => ({
+            id: memory.id,
+            text: memory.text,
+            tags: memory.tags,
+            createdAt: memory.created_at,
+          })),
+        })
       }
       // Merge cloud conversations: add ones not already in local state.
       // Strategy: cloud data is additive — we never replace or clear local
@@ -661,18 +705,24 @@ export default function DaemonInterface({
         // does not show stale entries when persistence is not configured or the
         // user is not signed in.
         if (memCmd.type === 'forget-last') {
-          setHydratedMemories(previous => {
+          setHydratedMemoryState(previous => {
             if (affectedMemoryIds.length === 0) return previous
             const affected = new Set(affectedMemoryIds)
-            return previous.filter(memory => !affected.has(memory.id))
+            return {
+              ...previous,
+              memories: previous.memories.filter(memory => !affected.has(memory.id)),
+            }
           })
         } else if (memCmd.type === 'forget-text') {
           if (affectedMemoryIds.length > 0) {
             const affected = new Set(affectedMemoryIds)
-            setHydratedMemories(previous => previous.filter(memory => !affected.has(memory.id)))
+            setHydratedMemoryState(previous => ({
+              ...previous,
+              memories: previous.memories.filter(memory => !affected.has(memory.id)),
+            }))
           }
         } else if (memCmd.type === 'forget-all') {
-          setHydratedMemories([])
+          setHydratedMemoryState(previous => ({ ...previous, memories: [] }))
         }
         // Mirror memory deletions to cloud
         if (memCmd.type === 'forget-last') {
@@ -907,7 +957,7 @@ export default function DaemonInterface({
 
       // Persist learning interaction and conversation/messages to Supabase when authenticated
       if (isPersistenceConfigured() && currentUser) {
-        void insertLearningInteraction({
+        queueCloudLearningWrite(interactionRecord.id, () => insertLearningInteraction({
           id: interactionRecord.id,
           input: text,
           response,
@@ -917,7 +967,7 @@ export default function DaemonInterface({
           memoryUsed: retrieved.length,
           planComplexity: complexity,
           createdAt: new Date().toISOString(),
-        })
+        }))
         setSyncStatus('syncing')
         void (async () => {
           try {
@@ -940,7 +990,16 @@ export default function DaemonInterface({
       setIsThinking(false)
       abortRef.current = null
     }
-  }, [input, isThinking, lastIntent, persistConversationMessages, currentUser, personalityPrefs, projectLogContext])
+  }, [
+    input,
+    isThinking,
+    lastIntent,
+    persistConversationMessages,
+    currentUser,
+    personalityPrefs,
+    projectLogContext,
+    queueCloudLearningWrite,
+  ])
 
   const handleCopySafeDiagnostics = useCallback(async () => {
     const payload = buildSafeDiagnosticsPayload(currentUser, usingBackend, lastCloudAttempt)
@@ -1077,7 +1136,10 @@ export default function DaemonInterface({
   ) => {
     learningSystem.processFeedback(interactionId, rating, comment)
     if (isPersistenceConfigured() && currentUser) {
-      void updateLearningFeedback(interactionId, rating, comment)
+      queueCloudLearningWrite(
+        interactionId,
+        () => updateLearningFeedback(interactionId, rating, comment),
+      )
     }
 
     const savedInteraction = pendingLearning.find(interaction => interaction.id === interactionId)
@@ -1097,7 +1159,7 @@ export default function DaemonInterface({
       return next
     })
     setDataRevision(revision => revision + 1)
-  }, [currentUser, pendingLearning])
+  }, [currentUser, pendingLearning, queueCloudLearningWrite])
 
   const handleDeleteMemory = useCallback((memoryId: string) => {
     const deletedLocal = forgetById(memoryId)
@@ -1105,7 +1167,10 @@ export default function DaemonInterface({
     if (!deletedLocal && !deletedHydrated) return
     memoryMutationVersionRef.current += 1
     if (deletedHydrated) {
-      setHydratedMemories(previous => previous.filter(memory => memory.id !== memoryId))
+      setHydratedMemoryState(previous => ({
+        ...previous,
+        memories: previous.memories.filter(memory => memory.id !== memoryId),
+      }))
     }
     setDataRevision(revision => revision + 1)
     queueCloudMemoryWrite(() => deleteCloudMemory(memoryId))
@@ -1357,7 +1422,7 @@ export default function DaemonInterface({
                   hasQueuedContext={Boolean(projectLogContext)}
                   onUseWithDaemon={context => setProjectLogContext(context)}
                 />
-                <GitHubWriteAccessPanel />
+                <GitHubWriteAccessPanel key={cloudUserKey} userKey={cloudUserKey ?? ''} />
               </>
             )}
           </div>
