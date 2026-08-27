@@ -408,6 +408,10 @@ export default function DaemonInterface({
   const memoryMutationVersionRef = useRef(0)
   const memoryWriteTailsRef = useRef(new Map<string, Promise<void>>())
   const learningWriteTailsRef = useRef(new Map<string, Promise<void>>())
+  // IDs deleted from local storage while initial hydration was still in flight.
+  // Filtered from hydration results so cloud-only memories still appear while
+  // preventing the deleted memory from being reinstated via a stale hydration.
+  const pendingLocalDeletionIdsRef = useRef(new Set<string>())
   const liveCloudUserKeyRef = useRef(cloudUserKey)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -473,6 +477,7 @@ export default function DaemonInterface({
     } else if (!currentUser) {
       setSyncStatus('offline')
       setHydratedMemoryState({ ownerKey: null, memories: [] })
+      pendingLocalDeletionIdsRef.current.clear()
     } else {
       setSyncStatus('idle')
     }
@@ -543,14 +548,17 @@ export default function DaemonInterface({
       const hydrated = await hydrateFromCloud()
       if (!active || liveCloudUserKeyRef.current !== cloudUserKey || !hydrated) return
       if (memoryMutationVersionRef.current === hydrationVersion) {
+        const excluded = pendingLocalDeletionIdsRef.current
         setHydratedMemoryState({
           ownerKey: cloudUserKey,
-          memories: hydrated.memories.map(memory => ({
-            id: memory.id,
-            text: memory.text,
-            tags: memory.tags,
-            createdAt: memory.created_at,
-          })),
+          memories: hydrated.memories
+            .filter(memory => !excluded.has(memory.id))
+            .map(memory => ({
+              id: memory.id,
+              text: memory.text,
+              tags: memory.tags,
+              createdAt: memory.created_at,
+            })),
         })
       }
       // Merge cloud conversations: add ones not already in local state.
@@ -1165,12 +1173,19 @@ export default function DaemonInterface({
     const deletedLocal = forgetById(memoryId)
     const deletedHydrated = hydratedMemories.some(memory => memory.id === memoryId)
     if (!deletedLocal && !deletedHydrated) return
-    memoryMutationVersionRef.current += 1
     if (deletedHydrated) {
+      // Memory was already in the hydrated state: invalidate any in-flight
+      // initial hydration version so its result doesn't re-add the memory.
+      memoryMutationVersionRef.current += 1
       setHydratedMemoryState(previous => ({
         ...previous,
         memories: previous.memories.filter(memory => memory.id !== memoryId),
       }))
+    } else {
+      // Memory was local-only at deletion time (hydration still in flight or
+      // not yet started). Record the ID so the upcoming hydration result can
+      // filter it out without discarding unrelated cloud-only memories.
+      pendingLocalDeletionIdsRef.current.add(memoryId)
     }
     setDataRevision(revision => revision + 1)
     queueCloudMemoryWrite(() => deleteCloudMemory(memoryId))

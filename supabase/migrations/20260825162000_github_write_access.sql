@@ -223,6 +223,14 @@ security definer
 set search_path = public
 as $$
 begin
+  -- Allow rows to be removed as part of user-account deletion (FK CASCADE).
+  -- Postgres deletes the auth.users row before cascading to child tables, so
+  -- by the time this trigger fires for a CASCADE the parent user is gone.
+  if tg_op = 'DELETE'
+     and not exists (select 1 from auth.users where id = OLD.user_id)
+  then
+    return OLD;
+  end if;
   raise exception 'GitHub write audit records are append-only';
 end;
 $$;

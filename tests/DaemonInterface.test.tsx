@@ -707,6 +707,51 @@ describe('DaemonInterface', () => {
     expect(screen.queryByText(memory.text)).not.toBeInTheDocument()
   })
 
+  it('shows cloud-only memories when a different local memory is deleted during hydration', async () => {
+    type HydrationResult = NonNullable<Awaited<ReturnType<typeof hydrateFromCloud>>>
+    let resolveHydration: ((value: HydrationResult) => void) | null = null
+    const localMemory = {
+      id: '550e8400-e29b-41d4-a716-446655441001',
+      text: 'Local memory to delete.',
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    const cloudOnlyMemoryId = '550e8400-e29b-41d4-a716-446655441002'
+    let localMemories = [localMemory]
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(listMemories).mockImplementation(() => localMemories)
+    vi.mocked(forgetById).mockImplementation(memoryId => {
+      if (memoryId !== localMemory.id) return false
+      localMemories = []
+      return true
+    })
+    vi.mocked(hydrateFromCloud).mockReturnValue(new Promise(resolve => {
+      resolveHydration = resolve as (value: HydrationResult) => void
+    }))
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    // Delete the local memory while hydration is still in flight
+    fireEvent.click(screen.getByRole('button', { name: /Forget memory: Local memory to delete\./i }))
+
+    await act(async () => {
+      resolveHydration?.({
+        conversations: [],
+        messagesByConversation: {},
+        memories: [
+          // The deleted local memory (must not reappear)
+          { id: localMemory.id, user_id: 'user-1', text: localMemory.text, tags: [], created_at: localMemory.createdAt },
+          // An unrelated cloud-only memory (must still appear)
+          { id: cloudOnlyMemoryId, user_id: 'user-1', text: 'Unrelated cloud-only memory', tags: [], created_at: '2026-08-25T00:00:00.000Z' },
+        ],
+        learningInteractions: [],
+      })
+    })
+
+    // The deleted local memory must not reappear
+    expect(screen.queryByText(localMemory.text)).not.toBeInTheDocument()
+    // The unrelated cloud-only memory must still appear
+    expect(await screen.findByText('Unrelated cloud-only memory')).toBeInTheDocument()
+  })
   it('waits for the initial memory migration before deleting from cloud', async () => {
     let finishMigration: (() => void) | null = null
     const memory = {
