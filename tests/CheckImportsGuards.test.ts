@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import {
+  classifyMigrationDiff,
   evaluateMigrationCatalog,
   evaluateMigrationHistoryChanges,
   findLegacyPrefixedIdViolations,
@@ -65,13 +66,13 @@ describe('check-imports guard helpers', () => {
       'src/components/Test.ts',
       [
         "const a = 'mem-' + value",
-        'const b = `interaction-${record.id}`',
+        'const b = `interaction-${record.id}-${suffix}`',
       ].join('\n'),
     )
 
     expect(violations.sort()).toEqual([
       "src/components/Test.ts: 'mem-' +",
-      'src/components/Test.ts: `interaction-${record.id}`',
+      'src/components/Test.ts: `interaction-${record.id}-${suffix}`',
     ].sort())
   })
 
@@ -80,10 +81,31 @@ describe('check-imports guard helpers', () => {
     expect(findLegacyPrefixedIdViolations('src/services/daemonStorageMigration.ts', "const old = 'mem-' + value")).toEqual([])
   })
 
-  it('detects provider key names in executable code and ignores comments', () => {
+  it('detects provider key names in executable code and ignores actual comments', () => {
     expect(findProviderKeyViolations('src/components/Test.ts', 'const key = OPENAI_API_KEY')).toEqual([
       'src/components/Test.ts: OPENAI_API_KEY',
     ])
-    expect(findProviderKeyViolations('src/components/Test.ts', '// OPENAI_API_KEY is server-side only')).toEqual([])
+    expect(findProviderKeyViolations('src/components/Test.ts', 'const sample = "/* OPENAI_API_KEY */"')).toEqual([
+      'src/components/Test.ts: OPENAI_API_KEY',
+    ])
+    expect(findProviderKeyViolations('src/components/Test.ts', 'const value = 1 // OPENAI_API_KEY is server-side only')).toEqual([])
+  })
+
+  it('classifies migration renames by full path and sql status', () => {
+    const result = classifyMigrationDiff([
+      'R100\tsupabase/migrations/20260825090000_adaptive_profiles.sql\tsupabase/migrations/archive/20260825090000_adaptive_profiles.sql',
+      'R100\tsupabase/migrations/readme.txt\tsupabase/migrations/20260826000000_add_example_table.sql',
+    ].join('\n'))
+
+    expect(result).toEqual({
+      addedFiles: ['20260826000000_add_example_table.sql'],
+      renamedFiles: [
+        {
+          from: '20260825090000_adaptive_profiles.sql',
+          to: 'archive/20260825090000_adaptive_profiles.sql',
+        },
+      ],
+      deletedFiles: [],
+    })
   })
 })

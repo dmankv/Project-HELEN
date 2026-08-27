@@ -19,6 +19,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import ts from 'typescript'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MIGRATION_DIR_REL = 'supabase/migrations'
@@ -81,10 +82,35 @@ function listSourceFiles() {
     .map(file => ({ rel: toRel(file), content: fs.readFileSync(file, 'utf8') }))
 }
 
-function stripComments(content) {
-  return content
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '')
+function stripActualComments(content) {
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, content)
+  let sanitized = ''
+  let lastIndex = 0
+
+  while (true) {
+    const token = scanner.scan()
+    const tokenPos = scanner.getTokenPos()
+    if (token === ts.SyntaxKind.EndOfFileToken) break
+
+    sanitized += content.slice(lastIndex, tokenPos)
+
+    if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
+      sanitized += scanner.getTokenText().replace(/[^\r\n]/g, ' ')
+    } else {
+      sanitized += scanner.getTokenText()
+    }
+
+    lastIndex = scanner.getTextPos()
+  }
+
+  sanitized += content.slice(lastIndex)
+  return sanitized
+}
+
+function toMigrationRelPath(filePath) {
+  const normalized = filePath.replace(/\\/g, '/')
+  const prefix = `${MIGRATION_DIR_REL}/`
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized
 }
 
 function isRealUtcTimestamp(version) {
@@ -175,9 +201,9 @@ function evaluateMigrationHistoryChanges({ baseVersions, baseMaxVersion, addedFi
 
 function findLegacyPrefixedIdViolations(relPath, content) {
   if (LEGACY_PREFIXED_ID_RULE_EXCLUSIONS.has(relPath)) return []
-  const sanitized = stripComments(content)
+  const sanitized = stripActualComments(content)
   const patterns = [
-    /`(?:daemon|mem|interaction)-\$\{[^}]+\}`/g,
+    /`(?:daemon|mem|interaction)-(?:\\`|[^`])*`/g,
     /['"](?:daemon|mem|interaction)-['"]\s*\+/g,
   ]
 
@@ -191,7 +217,7 @@ function findLegacyPrefixedIdViolations(relPath, content) {
 }
 
 function findProviderKeyViolations(relPath, content) {
-  const sanitized = stripComments(content)
+  const sanitized = stripActualComments(content)
   const violations = []
   for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
     if (sanitized.includes(key)) violations.push(`${relPath}: ${key}`)
@@ -236,25 +262,17 @@ function getMergeBaseRef() {
 }
 
 function listMigrationsAtRef(ref) {
-  const output = runGit(['ls-tree', '-r', '--name-only', ref, MIGRATION_DIR_REL], true)
+  const output = runGit(['ls-tree', '-r', '--name-only', ref, MIGRATION_DIR_REL])
   if (!output) return []
   return output
     .split('\n')
     .map(line => line.trim())
     .filter(Boolean)
     .filter(line => line.endsWith('.sql'))
-    .map(line => path.basename(line))
+    .map(toMigrationRelPath)
 }
 
-function parseMigrationDiff(mergeBase) {
-  const output = runGit([
-    'diff',
-    '--name-status',
-    '--find-renames',
-    `${mergeBase}..HEAD`,
-    '--',
-    MIGRATION_DIR_REL,
-  ], true)
+function classifyMigrationDiff(output) {
   if (!output) return { addedFiles: [], renamedFiles: [], deletedFiles: [] }
 
   const addedFiles = []
@@ -267,15 +285,19 @@ function parseMigrationDiff(mergeBase) {
     if (!status) continue
 
     if (status.startsWith('R')) {
-      const from = parts[1] ? path.basename(parts[1]) : null
-      const to = parts[2] ? path.basename(parts[2]) : null
-      if (from && to && from !== to && from.endsWith('.sql') && to.endsWith('.sql')) {
+      const from = parts[1] ? toMigrationRelPath(parts[1]) : null
+      const to = parts[2] ? toMigrationRelPath(parts[2]) : null
+      const fromIsSql = from?.endsWith('.sql') ?? false
+      const toIsSql = to?.endsWith('.sql') ?? false
+
+      if (from && to && fromIsSql && from !== to) {
         renamedFiles.push({ from, to })
       }
+      if (to && toIsSql && !fromIsSql) addedFiles.push(to)
       continue
     }
 
-    const file = parts[1] ? path.basename(parts[1]) : null
+    const file = parts[1] ? toMigrationRelPath(parts[1]) : null
     if (!file || !file.endsWith('.sql')) continue
 
     if (status === 'A') addedFiles.push(file)
@@ -285,13 +307,26 @@ function parseMigrationDiff(mergeBase) {
   return { addedFiles, renamedFiles, deletedFiles }
 }
 
+function parseMigrationDiff(mergeBase) {
+  const output = runGit([
+    'diff',
+    '--name-status',
+    '--find-renames',
+    `${mergeBase}..HEAD`,
+    '--',
+    MIGRATION_DIR_REL,
+  ])
+  return classifyMigrationDiff(output)
+}
+
 function runMigrationChecks() {
   const migrationDir = path.join(root, MIGRATION_DIR_REL)
   if (!fs.existsSync(migrationDir)) {
     throw new Error(`Missing required migration directory: ${MIGRATION_DIR_REL}`)
   }
-  const filenames = fs.readdirSync(migrationDir)
-    .filter(name => name.endsWith('.sql'))
+  const filenames = readDirRecursive(migrationDir)
+    .filter(file => file.endsWith('.sql'))
+    .map(file => path.relative(migrationDir, file).replace(/\\/g, '/'))
     .sort()
 
   const current = evaluateMigrationCatalog(filenames)
@@ -427,6 +462,7 @@ if (isMainModule()) {
 }
 
 export {
+  classifyMigrationDiff,
   evaluateMigrationCatalog,
   evaluateMigrationHistoryChanges,
   findLegacyPrefixedIdViolations,

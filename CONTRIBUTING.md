@@ -45,7 +45,7 @@ npm run test:adaptive
 npm run test:unit
 ```
 
-If you add a migration, use a UTC timestamp strictly newer than the current max migration version (`20260825090000` at time of writing).
+If you add a migration, use a UTC timestamp strictly newer than the current max migration version already present in `supabase/migrations/`.
 
 Example valid migration name:
 
