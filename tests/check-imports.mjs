@@ -222,7 +222,13 @@ function findLegacyPrefixedIdViolations(relPath, content) {
     if (ts.isBinaryExpression(node)
       && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       let left = node.left
-      while (ts.isParenthesizedExpression(left) || ts.isAsExpression(left) || ts.isTypeAssertionExpression(left)) {
+      while (
+        ts.isParenthesizedExpression(left)
+        || ts.isAsExpression(left)
+        || ts.isTypeAssertionExpression(left)
+        || ts.isSatisfiesExpression(left)
+        || ts.isNonNullExpression(left)
+      ) {
         left = left.expression
       }
       if ((ts.isStringLiteral(left) || ts.isNoSubstitutionTemplateLiteral(left))
@@ -342,7 +348,7 @@ function classifyMigrationDiff(output) {
 
     if (status === 'A') addedFiles.push(file)
     else if (status === 'D') deletedFiles.push(file)
-    else if (status === 'M') modifiedFiles.push(file)
+    else if (status === 'M' || status === 'T') modifiedFiles.push(file)
   }
 
   return { addedFiles, renamedFiles, deletedFiles, modifiedFiles }

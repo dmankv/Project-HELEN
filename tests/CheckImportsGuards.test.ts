@@ -90,6 +90,15 @@ describe('check-imports guard helpers', () => {
     ])
   })
 
+  it('detects concatenated legacy prefixed IDs wrapped in satisfies or non-null expressions', () => {
+    expect(findLegacyPrefixedIdViolations('src/components/Test.ts', "const id = ('mem-' satisfies string) + value")).toEqual([
+      "src/components/Test.ts: ('mem-' satisfies string) +",
+    ])
+    expect(findLegacyPrefixedIdViolations('src/components/Test.ts', "const id = ('mem-'!) + value")).toEqual([
+      "src/components/Test.ts: ('mem-'!) +",
+    ])
+  })
+
   it('detects prefixed IDs in template tails that contain //', () => {
     expect(findLegacyPrefixedIdViolations('src/components/Test.ts', 'const id = `mem-${value}//suffix`')).toEqual([
       'src/components/Test.ts: `mem-${value}//suffix`',
@@ -152,6 +161,15 @@ describe('check-imports guard helpers', () => {
   it('classifies modified migrations into modifiedFiles', () => {
     const result = classifyMigrationDiff(
       'M\tsupabase/migrations/20260825090000_adaptive_profiles.sql',
+    )
+    expect(result.modifiedFiles).toEqual(['20260825090000_adaptive_profiles.sql'])
+    expect(result.addedFiles).toEqual([])
+    expect(result.deletedFiles).toEqual([])
+  })
+
+  it('classifies type-only (T) migration changes into modifiedFiles', () => {
+    const result = classifyMigrationDiff(
+      'T\tsupabase/migrations/20260825090000_adaptive_profiles.sql',
     )
     expect(result.modifiedFiles).toEqual(['20260825090000_adaptive_profiles.sql'])
     expect(result.addedFiles).toEqual([])
