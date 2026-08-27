@@ -102,6 +102,12 @@ describe('check-imports guard helpers', () => {
     ])
   })
 
+  it('detects legacy prefixed IDs in no-substitution templates', () => {
+    expect(findLegacyPrefixedIdViolations('src/components/Test.ts', 'const id = `mem-literal`')).toEqual([
+      'src/components/Test.ts: `mem-literal`',
+    ])
+  })
+
   it('detects provider key names in executable code and ignores actual comments', () => {
     expect(findProviderKeyViolations('src/components/Test.ts', 'const key = OPENAI_API_KEY')).toEqual([
       'src/components/Test.ts: OPENAI_API_KEY',
