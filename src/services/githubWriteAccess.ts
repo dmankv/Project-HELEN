@@ -19,6 +19,7 @@ function publicEnvironment(name: string): string {
 
 const SUPABASE_URL = publicEnvironment('VITE_SUPABASE_URL')
 const SUPABASE_ANON_KEY = publicEnvironment('VITE_SUPABASE_ANON_KEY')
+const GITHUB_WRITE_ACCESS_ENABLED = publicEnvironment('VITE_GITHUB_WRITE_ACCESS_ENABLED') === 'true'
 const ACCESS_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/github-write-access`
 const WRITE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/github-write`
 const REPOSITORY_ID = /^[1-9][0-9]{0,15}$/
@@ -61,6 +62,7 @@ export type GitHubWriteFailureCode =
   | 'REPOSITORY_AUTHORIZATION_EXPIRED'
   | 'WRITE_NOT_CONFIRMED'
   | 'IDEMPOTENCY_CONFLICT'
+  | 'IDEMPOTENCY_PENDING'
   | 'GITHUB_ACCESS_DENIED'
   | 'ISSUE_REJECTED'
   | 'unavailable'
@@ -104,7 +106,7 @@ function getClient(): SupabaseClient | null {
 }
 
 export function isGitHubWriteAccessConfigured(): boolean {
-  return SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0
+  return GITHUB_WRITE_ACCESS_ENABLED && SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0
 }
 
 function safeCode(value: unknown): GitHubWriteFailureCode {

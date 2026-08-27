@@ -14,10 +14,11 @@ vi.mock('@supabase/supabase-js', () => ({
   })),
 }))
 
-async function loadModule() {
+async function loadModule(enabled = true) {
   vi.resetModules()
   vi.stubEnv('VITE_SUPABASE_URL', 'https://gateway.supabase.co')
   vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'public-test-key')
+  vi.stubEnv('VITE_GITHUB_WRITE_ACCESS_ENABLED', enabled ? 'true' : 'false')
   return import('../src/services/githubWriteAccess')
 }
 
@@ -63,6 +64,12 @@ describe('GitHub write browser client', () => {
 
     expect(result).toEqual({ ok: false, code: 'WRITE_NOT_CONFIRMED' })
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('requires the dedicated-origin capability flag', async () => {
+    const { isGitHubWriteAccessConfigured } = await loadModule(false)
+
+    expect(isGitHubWriteAccessConfigured()).toBe(false)
   })
 
   it('does not submit an issue without final confirmation', async () => {
@@ -577,6 +584,31 @@ describe('GitHub write issue creation behavior', () => {
       issueNumber: 44,
       issueUrl: 'https://github.com/dmankv/Project-HELEN/issues/44',
     })
+  })
+
+  it('retains a pending idempotency key while the original request completes', async () => {
+    const { createGitHubIssue } = await loadGitHubWriteServerModule()
+    const service = new MockService(connection)
+    const request = issueRequest()
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'installation-token-1234' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: Number(connection.repository_id),
+        full_name: connection.repository_full_name,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        number: 52,
+        html_url: 'https://github.com/dmankv/Project-HELEN/issues/52',
+      }), { status: 201 }))
+    await createGitHubIssue(service, connection.user_id, request)
+    const existing = Array.from(service.idempotency.values())[0]
+    if (!existing) throw new Error('expected idempotency record')
+    existing.status = 'pending'
+    existing.issue_number = null
+    existing.issue_url = null
+
+    await expect(createGitHubIssue(service, connection.user_id, request))
+      .rejects.toMatchObject({ code: 'IDEMPOTENCY_PENDING' })
   })
 
   it('stores succeeded on success and unknown on downstream failure', async () => {

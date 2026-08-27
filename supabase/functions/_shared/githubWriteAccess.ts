@@ -13,6 +13,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 type ServiceClient = ReturnType<typeof createClient>
 type GitHubRateScope = 'connect' | 'connection-mutate' | 'issue-create'
 const OAUTH_STATE_OR_BINDING = /^[A-Za-z0-9_-]{16,256}$/
+const ELIGIBLE_REPOSITORY_PAGE_SIZE = 20
 
 interface SupabaseRuntimeConfig {
   supabaseUrl: string
@@ -132,6 +133,7 @@ export type GitHubWriteErrorCode =
   | 'REPOSITORY_AUTHORIZATION_EXPIRED'
   | 'WRITE_NOT_CONFIRMED'
   | 'IDEMPOTENCY_CONFLICT'
+  | 'IDEMPOTENCY_PENDING'
   | 'GITHUB_ACCESS_DENIED'
   | 'ISSUE_REJECTED'
   | 'GITHUB_UNAVAILABLE'
@@ -849,27 +851,29 @@ async function findEligibleRepositories(
 
   for (const installationId of installations) {
     if (repositories.length >= MAX_ELIGIBLE_REPOSITORIES) break
-    const remaining = MAX_ELIGIBLE_REPOSITORIES - repositories.length
-    const payload = await githubUserJson(
-      `/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=${remaining}`,
-      userToken,
-    )
-    const values = payload.repositories
-    if (!Array.isArray(values)) throw new GitHubWriteError('OAUTH_DENIED', 401)
-    for (const value of values) {
-      if (repositories.length >= MAX_ELIGIBLE_REPOSITORIES) break
-      const repository = asRecord(value, 'OAUTH_DENIED')
-      const repositoryId = assertGitHubId(repository.id, 'OAUTH_DENIED')
-      if (seen.has(repositoryId)) continue
-      seen.add(repositoryId)
-      repositories.push({
-        user_id: userId,
-        github_user_id: githubUserId,
-        installation_id: installationId,
-        repository_id: repositoryId,
-        repository_full_name: assertRepositoryFullName(repository.full_name, 'OAUTH_DENIED'),
-        expires_at: expiresAt,
-      })
+    for (let page = 1; repositories.length < MAX_ELIGIBLE_REPOSITORIES; page += 1) {
+      const payload = await githubUserJson(
+        `/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=${ELIGIBLE_REPOSITORY_PAGE_SIZE}&page=${page}`,
+        userToken,
+      )
+      const values = payload.repositories
+      if (!Array.isArray(values)) throw new GitHubWriteError('OAUTH_DENIED', 401)
+      for (const value of values) {
+        if (repositories.length >= MAX_ELIGIBLE_REPOSITORIES) break
+        const repository = asRecord(value, 'OAUTH_DENIED')
+        const repositoryId = assertGitHubId(repository.id, 'OAUTH_DENIED')
+        if (seen.has(repositoryId)) continue
+        seen.add(repositoryId)
+        repositories.push({
+          user_id: userId,
+          github_user_id: githubUserId,
+          installation_id: installationId,
+          repository_id: repositoryId,
+          repository_full_name: assertRepositoryFullName(repository.full_name, 'OAUTH_DENIED'),
+          expires_at: expiresAt,
+        })
+      }
+      if (values.length < ELIGIBLE_REPOSITORY_PAGE_SIZE) break
     }
   }
   return { githubUserId, repositories }
@@ -1293,7 +1297,10 @@ function idempotencyResult(
       issueUrl: verifiedIssueUrl(existing.issue_url, repositoryFullName),
     }
   }
-  throw new GitHubWriteError('IDEMPOTENCY_CONFLICT', 409)
+  throw new GitHubWriteError(
+    existing.status === 'pending' ? 'IDEMPOTENCY_PENDING' : 'IDEMPOTENCY_CONFLICT',
+    409,
+  )
 }
 
 async function findIdempotency(

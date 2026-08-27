@@ -38,6 +38,8 @@ function safeFailureMessage(code: GitHubWriteFailureCode): string {
       return 'Review and explicitly confirm the selected GitHub write first.'
     case 'IDEMPOTENCY_CONFLICT':
       return 'This issue request was already attempted. Review it before making a new request.'
+    case 'IDEMPOTENCY_PENDING':
+      return 'This issue request is still being processed. Please wait and retry.'
     case 'GITHUB_ACCESS_DENIED':
       return 'GitHub denied access to that repository. Reconnect after checking App permissions.'
     case 'ISSUE_REJECTED':

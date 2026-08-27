@@ -255,8 +255,9 @@ signed-in user explicitly authorizes; it is not a generic GitHub API proxy.
    Set `GITHUB_WRITE_ACCESS_APP_URL` to the dedicated HTTPS custom origin that
    hosts the write-enabled frontend, never a `github.io` project-site URL.
    GitHub Pages projects share an origin and browser storage, so the functions
-   reject `*.github.io` for issue writes. Do not create `VITE_*` versions of
-   any of these values.
+   reject `*.github.io` for issue writes. Build the dedicated frontend with
+   `VITE_GITHUB_WRITE_ACCESS_ENABLED=true`; do not create `VITE_*` versions of
+   any server-side value above.
 4. Deploy the functions:
    ```bash
    supabase functions deploy github-write-access --no-verify-jwt
