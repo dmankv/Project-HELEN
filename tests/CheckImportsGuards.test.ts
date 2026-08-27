@@ -81,6 +81,15 @@ describe('check-imports guard helpers', () => {
     expect(findLegacyPrefixedIdViolations('src/services/daemonStorageMigration.ts', "const old = 'mem-' + value")).toEqual([])
   })
 
+  it('detects concatenated legacy prefixed IDs wrapped in parentheses or as-expressions', () => {
+    expect(findLegacyPrefixedIdViolations('src/components/Test.ts', "const id = ('mem-') + value")).toEqual([
+      "src/components/Test.ts: ('mem-') +",
+    ])
+    expect(findLegacyPrefixedIdViolations('src/components/Test.ts', "const id = ('mem-' as const) + value")).toEqual([
+      "src/components/Test.ts: ('mem-' as const) +",
+    ])
+  })
+
   it('detects prefixed IDs in template tails that contain //', () => {
     expect(findLegacyPrefixedIdViolations('src/components/Test.ts', 'const id = `mem-${value}//suffix`')).toEqual([
       'src/components/Test.ts: `mem-${value}//suffix`',

@@ -209,11 +209,16 @@ function findLegacyPrefixedIdViolations(relPath, content) {
     }
 
     if (ts.isBinaryExpression(node)
-      && node.operatorToken.kind === ts.SyntaxKind.PlusToken
-      && (ts.isStringLiteral(node.left) || ts.isNoSubstitutionTemplateLiteral(node.left))
-      && prefixedValuePattern.test(node.left.text)) {
-      const snippet = sourceFile.text.slice(node.left.getStart(sourceFile), node.operatorToken.end)
-      violations.push(`${relPath}: ${snippet}`)
+      && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      let left = node.left
+      while (ts.isParenthesizedExpression(left) || ts.isAsExpression(left) || ts.isTypeAssertionExpression(left)) {
+        left = left.expression
+      }
+      if ((ts.isStringLiteral(left) || ts.isNoSubstitutionTemplateLiteral(left))
+        && prefixedValuePattern.test(left.text)) {
+        const snippet = sourceFile.text.slice(node.left.getStart(sourceFile), node.operatorToken.end)
+        violations.push(`${relPath}: ${snippet}`)
+      }
     }
 
     ts.forEachChild(node, visit)
