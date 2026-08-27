@@ -223,7 +223,7 @@ describe('GitHub write server boundaries', () => {
     }
     expect(migration).toContain('GitHub write connection identity is immutable')
     expect(migration).toContain('GitHub write audit records are append-only')
-    expect(migration).toContain('before update on public.github_write_audit')
+    expect(migration).toContain('before update or delete on public.github_write_audit')
     expect(migration).toContain("allowed_actions = array['create_issue']::text[]")
     expect(migration).toContain('authorization_expires_at')
     expect(migration).toContain("'connection-mutate'")
