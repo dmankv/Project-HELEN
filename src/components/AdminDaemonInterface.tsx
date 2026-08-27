@@ -101,19 +101,14 @@ async function callAdminEdgeFunction(
       body: JSON.stringify({ messages }),
     })
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({})) as { code?: string }
+      await res.json().catch(() => undefined)
       if (res.status === 403) {
         return { ok: false, error: 'Access denied.' }
       }
       if (res.status === 429) {
         return { ok: false, error: 'Rate limit exceeded. Please wait a moment.' }
       }
-      return {
-        ok: false,
-        error: errData.code === 'PROVIDER_UNAVAILABLE' || errData.code === 'FUNCTION_CONFIG_ERROR'
-          ? 'Admin cloud chat is temporarily unavailable.'
-          : 'Admin cloud chat is temporarily unavailable.',
-      }
+      return { ok: false, error: 'Admin cloud chat is temporarily unavailable.' }
     }
     const data2 = await res.json() as { message?: string }
     return { ok: true, message: data2.message ?? '' }
@@ -346,17 +341,19 @@ export default function AdminDaemonInterface({
       return next
     })
 
-    // Best-effort cloud persist of user message
+    // Best-effort cloud persist of user message — position = index in conversation
+    const currentConv = conversations.find(c => c.id === convId)
+    const userPosition = currentConv?.messages.length ?? 0
+
     void insertAdminMessage({
       id: userMsg.id,
       conversation_id: convId,
       role: 'user',
       content: userMsg.content,
-      position: 0,
+      position: userPosition,
     })
 
     // Build message history for the API call
-    const currentConv = conversations.find(c => c.id === convId)
     const historyMessages = [
       ...(currentConv?.messages ?? []),
       userMsg,
@@ -391,7 +388,7 @@ export default function AdminDaemonInterface({
       conversation_id: convId,
       role: 'assistant',
       content: assistantMsg.content,
-      position: 1,
+      position: userPosition + 1,
     })
 
     setIsThinking(false)

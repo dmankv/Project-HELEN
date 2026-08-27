@@ -189,10 +189,10 @@ describe('Admin Daemon migration', () => {
   // UUID primary keys
   // ---------------------------------------------------------------------------
 
-  ADMIN_TABLES.forEach(table => {
-    it(`${table} uses UUID primary key with gen_random_uuid() default`, () => {
-      expect(normalizedSql).toContain(`id          uuid primary key default gen_random_uuid()`)
-    })
+  it('UUID primary keys with gen_random_uuid() default on all admin tables', () => {
+    // Count occurrences to verify every table has the UUID PK pattern
+    const uuidPkMatches = normalizedSql.match(/id\s+uuid\s+primary key\s+default\s+gen_random_uuid\(\)/g) ?? []
+    expect(uuidPkMatches.length).toBeGreaterThanOrEqual(ADMIN_TABLES.length)
   })
 
   // ---------------------------------------------------------------------------
