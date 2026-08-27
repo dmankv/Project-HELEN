@@ -496,7 +496,7 @@ export default function DaemonInterface({
     const hydrationVersion = memoryMutationVersionRef.current
     const localMems = listMemories()
     setHydratedMemories([])
-    queueCloudMemoryWrite(() => migrateLocalMemoriesToCloud(localMems))
+    queueCloudMemoryWrite(() => migrateLocalMemoriesToCloud(localMems, id => listMemories().some(m => m.id === id)))
     // Hydrate cloud data into local state non-disruptively
     void (async () => {
       const hydrated = await hydrateFromCloud()

@@ -436,6 +436,7 @@ async function cloudMemoryIds(
  */
 export async function migrateLocalMemoriesToCloud(
   localMemories: LocalDurableMemory[],
+  isStillLocal?: (id: string) => boolean,
 ): Promise<void> {
   const client = getClient()
   if (!client) return
@@ -451,7 +452,8 @@ export async function migrateLocalMemoriesToCloud(
   for (const mem of memories) {
     if (await getCurrentUserId() !== userId) return
     if (existingMemoryIds.has(mem.id)) continue
-    if (!(await insertCloudMemoryForUser(client, userId, mem)).succeeded) return
+    if (isStillLocal && !isStillLocal(mem.id)) continue
+    await insertCloudMemoryForUser(client, userId, mem)
   }
 
   if (await getCurrentUserId() !== userId) return
