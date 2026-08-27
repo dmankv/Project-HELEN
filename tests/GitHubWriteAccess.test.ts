@@ -706,6 +706,9 @@ describe('GitHub write issue creation behavior', () => {
     })
 
     const [, tokenRequest] = vi.mocked(fetch).mock.calls[0] ?? []
+    expect(vi.mocked(fetch).mock.calls[2]?.[0]).toBe(
+      'https://api.github.com/user/installations?per_page=20',
+    )
     expect(JSON.parse(String(tokenRequest?.body))).toMatchObject({
       client_id: 'client-id',
       client_secret: 'client-secret',

@@ -846,7 +846,9 @@ async function findEligibleRepositories(
 ): Promise<{ githubUserId: string; repositories: EligibleRepository[] }> {
   const user = await githubUserJson('/user', userToken)
   const githubUserId = assertGitHubId(user.id, 'OAUTH_DENIED')
-  const installations = eligibleInstallations(await githubUserJson('/user/installations?per_page=100', userToken))
+  const installations = eligibleInstallations(
+    await githubUserJson(`/user/installations?per_page=${MAX_ELIGIBLE_INSTALLATIONS}`, userToken),
+  )
   const seen = new Set<string>()
   const repositories: EligibleRepository[] = []
   const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString()
