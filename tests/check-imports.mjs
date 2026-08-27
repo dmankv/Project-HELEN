@@ -95,7 +95,7 @@ function isRealUtcTimestamp(version) {
   const hour = Number(version.slice(8, 10))
   const minute = Number(version.slice(10, 12))
   const second = Number(version.slice(12, 14))
-  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+  if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
     return false
   }
   const candidate = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
@@ -191,9 +191,10 @@ function findLegacyPrefixedIdViolations(relPath, content) {
 }
 
 function findProviderKeyViolations(relPath, content) {
+  const sanitized = stripComments(content)
   const violations = []
   for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
-    if (content.includes(key)) violations.push(`${relPath}: ${key}`)
+    if (sanitized.includes(key)) violations.push(`${relPath}: ${key}`)
   }
   return violations
 }
@@ -250,7 +251,7 @@ function parseMigrationDiff(mergeBase) {
     'diff',
     '--name-status',
     '--find-renames',
-    `${mergeBase}...HEAD`,
+    `${mergeBase}..HEAD`,
     '--',
     MIGRATION_DIR_REL,
   ], true)
@@ -286,6 +287,9 @@ function parseMigrationDiff(mergeBase) {
 
 function runMigrationChecks() {
   const migrationDir = path.join(root, MIGRATION_DIR_REL)
+  if (!fs.existsSync(migrationDir)) {
+    throw new Error(`Missing required migration directory: ${MIGRATION_DIR_REL}`)
+  }
   const filenames = fs.readdirSync(migrationDir)
     .filter(name => name.endsWith('.sql'))
     .sort()

@@ -4,6 +4,7 @@ import {
   evaluateMigrationCatalog,
   evaluateMigrationHistoryChanges,
   findLegacyPrefixedIdViolations,
+  findProviderKeyViolations,
 } from './check-imports.mjs'
 
 describe('check-imports guard helpers', () => {
@@ -77,5 +78,12 @@ describe('check-imports guard helpers', () => {
   it('ignores prefixed-ID examples inside comments and sanctioned migration service', () => {
     expect(findLegacyPrefixedIdViolations('src/components/Test.ts', '// const old = `daemon-${legacy}`')).toEqual([])
     expect(findLegacyPrefixedIdViolations('src/services/daemonStorageMigration.ts', "const old = 'mem-' + value")).toEqual([])
+  })
+
+  it('detects provider key names in executable code and ignores comments', () => {
+    expect(findProviderKeyViolations('src/components/Test.ts', 'const key = OPENAI_API_KEY')).toEqual([
+      'src/components/Test.ts: OPENAI_API_KEY',
+    ])
+    expect(findProviderKeyViolations('src/components/Test.ts', '// OPENAI_API_KEY is server-side only')).toEqual([])
   })
 })
