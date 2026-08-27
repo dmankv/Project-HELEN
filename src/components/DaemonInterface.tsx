@@ -690,11 +690,13 @@ export default function DaemonInterface({
           localMemoriesBeforeCommand,
           hydratedMemories,
         )
-        if (memCmd.type === 'forget-all' || (
+        if (memCmd.type === 'forget-all') {
+          memoryMutationVersionRef.current += 1
+        } else if (
           (memCmd.type === 'forget-last' || memCmd.type === 'forget-text') &&
           affectedMemoryIds.length > 0
-        )) {
-          memoryMutationVersionRef.current += 1
+        ) {
+          for (const id of affectedMemoryIds) pendingLocalDeletionIdsRef.current.add(id)
         }
         // Cloud-persist new memory if user is authenticated
         if (memCmd.type === 'remember') {
