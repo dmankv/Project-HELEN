@@ -19,7 +19,7 @@ Configure these in **Settings → Branches/Rules** and **Settings → General**:
   - Filenames must follow `YYYYMMDDHHmmss_description.sql`.
   - The 14-digit prefix must be a real UTC timestamp.
   - Migration versions must be unique.
-  - For PRs, newly added migration versions must be strictly newer than the merge-base max version, and existing migrations cannot be renamed/deleted.
+  - For PRs, newly added migration versions must be strictly newer than the merge-base max version, and existing migrations cannot be renamed/modified/deleted.
 - **Legacy prefixed ID ban in frontend source**
   - Rejects executable construction patterns such as `` `daemon-${...}` ``, `` `mem-${...}` ``, `` `interaction-${...}` ``, and `'mem-' + value` in `src/**/*.{ts,tsx}`.
   - `src/services/daemonStorageMigration.ts` is excluded because it intentionally handles legacy migration cleanup.

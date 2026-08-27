@@ -96,6 +96,12 @@ describe('check-imports guard helpers', () => {
     ])
   })
 
+  it('detects escaped legacy prefixed IDs in template heads', () => {
+    expect(findLegacyPrefixedIdViolations('src/components/Test.ts', 'const id = `mem\\u002d${value}`')).toEqual([
+      'src/components/Test.ts: `mem\\u002d${value}`',
+    ])
+  })
+
   it('detects provider key names in executable code and ignores actual comments', () => {
     expect(findProviderKeyViolations('src/components/Test.ts', 'const key = OPENAI_API_KEY')).toEqual([
       'src/components/Test.ts: OPENAI_API_KEY',
@@ -108,6 +114,12 @@ describe('check-imports guard helpers', () => {
 
   it('detects provider keys in template tails that include //', () => {
     expect(findProviderKeyViolations('src/components/Test.ts', 'const key = `cfg-${value}//OPENAI_API_KEY`')).toEqual([
+      'src/components/Test.ts: OPENAI_API_KEY',
+    ])
+  })
+
+  it('detects provider keys in regular expression literals', () => {
+    expect(findProviderKeyViolations('src/components/Test.ts', 'const matches = /OPENAI_API_KEY/.test(name)')).toEqual([
       'src/components/Test.ts: OPENAI_API_KEY',
     ])
   })

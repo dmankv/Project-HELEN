@@ -95,9 +95,12 @@ function parseSourceFile(relPath, content) {
   return ts.createSourceFile(relPath, content, ts.ScriptTarget.Latest, true, scriptKindFromRelPath(relPath))
 }
 
-function collectStringFragments(node) {
+function collectStringFragments(node, sourceFile) {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
     return [node.text]
+  }
+  if (ts.isRegularExpressionLiteral(node)) {
+    return [node.getText(sourceFile)]
   }
   if (!ts.isTemplateExpression(node)) return []
   return [node.head.text, ...node.templateSpans.map(span => span.literal.text)]
@@ -207,8 +210,12 @@ function findLegacyPrefixedIdViolations(relPath, content) {
   const prefixedValuePattern = /^(?:daemon|mem|interaction)-/i
 
   function visit(node) {
-    if ((ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node))
-      && prefixedTemplatePattern.test(node.getText(sourceFile))) {
+    const decodedTemplateHead = ts.isNoSubstitutionTemplateLiteral(node)
+      ? node.text
+      : ts.isTemplateExpression(node)
+        ? node.head.text
+        : null
+    if (decodedTemplateHead && prefixedTemplatePattern.test(`\`${decodedTemplateHead}`)) {
       violations.push(`${relPath}: ${node.getText(sourceFile)}`)
     }
 
@@ -242,7 +249,7 @@ function findProviderKeyViolations(relPath, content) {
       found.add(node.text)
     }
 
-    for (const fragment of collectStringFragments(node)) {
+    for (const fragment of collectStringFragments(node, sourceFile)) {
       for (const key of keys) {
         if (fragment.includes(key)) found.add(key)
       }
