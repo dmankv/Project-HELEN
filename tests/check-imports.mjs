@@ -217,7 +217,7 @@ function ensureBaseRefExists(baseRef) {
   const hasRef = runGit(['rev-parse', '--verify', baseRef], true)
   if (hasRef) return
   const branch = baseRef.replace(/^origin\//, '')
-  runGit(['fetch', '--no-tags', 'origin', `${branch}:${baseRef}`])
+  runGit(['fetch', '--no-tags', 'origin', `refs/heads/${branch}:refs/remotes/origin/${branch}`])
 }
 
 function getMergeBaseRef() {
