@@ -81,6 +81,12 @@ describe('check-imports guard helpers', () => {
     expect(findLegacyPrefixedIdViolations('src/services/daemonStorageMigration.ts', "const old = 'mem-' + value")).toEqual([])
   })
 
+  it('detects prefixed IDs in template tails that contain //', () => {
+    expect(findLegacyPrefixedIdViolations('src/components/Test.ts', 'const id = `mem-${value}//suffix`')).toEqual([
+      'src/components/Test.ts: `mem-${value}//suffix`',
+    ])
+  })
+
   it('detects provider key names in executable code and ignores actual comments', () => {
     expect(findProviderKeyViolations('src/components/Test.ts', 'const key = OPENAI_API_KEY')).toEqual([
       'src/components/Test.ts: OPENAI_API_KEY',
@@ -89,6 +95,12 @@ describe('check-imports guard helpers', () => {
       'src/components/Test.ts: OPENAI_API_KEY',
     ])
     expect(findProviderKeyViolations('src/components/Test.ts', 'const value = 1 // OPENAI_API_KEY is server-side only')).toEqual([])
+  })
+
+  it('detects provider keys in template tails that include //', () => {
+    expect(findProviderKeyViolations('src/components/Test.ts', 'const key = `cfg-${value}//OPENAI_API_KEY`')).toEqual([
+      'src/components/Test.ts: OPENAI_API_KEY',
+    ])
   })
 
   it('classifies migration renames by full path and sql status', () => {

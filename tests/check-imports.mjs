@@ -24,6 +24,8 @@ import ts from 'typescript'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MIGRATION_DIR_REL = 'supabase/migrations'
 const LEGACY_PREFIXED_ID_RULE_EXCLUSIONS = new Set(['src/services/daemonStorageMigration.ts'])
+const LEGACY_ID_SOURCE_EXTENSIONS = ['.ts', '.tsx']
+const PROVIDER_KEY_SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs']
 
 function read(rel) {
   const full = path.join(root, rel)
@@ -75,36 +77,30 @@ function toRel(fullPath) {
   return path.relative(root, fullPath).replace(/\\/g, '/')
 }
 
-function listSourceFiles() {
+function listSourceFiles(extensions) {
   const srcRoot = path.join(root, 'src')
   return readDirRecursive(srcRoot)
-    .filter(file => /\.(ts|tsx)$/.test(file))
+    .filter(file => extensions.some(ext => file.endsWith(ext)))
     .map(file => ({ rel: toRel(file), content: fs.readFileSync(file, 'utf8') }))
 }
 
-function stripActualComments(content) {
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, content)
-  let sanitized = ''
-  let lastIndex = 0
+function scriptKindFromRelPath(relPath) {
+  if (relPath.endsWith('.tsx')) return ts.ScriptKind.TSX
+  if (relPath.endsWith('.ts')) return ts.ScriptKind.TS
+  if (relPath.endsWith('.jsx')) return ts.ScriptKind.JSX
+  return ts.ScriptKind.JS
+}
 
-  while (true) {
-    const token = scanner.scan()
-    const tokenPos = scanner.getTokenPos()
-    if (token === ts.SyntaxKind.EndOfFileToken) break
+function parseSourceFile(relPath, content) {
+  return ts.createSourceFile(relPath, content, ts.ScriptTarget.Latest, true, scriptKindFromRelPath(relPath))
+}
 
-    sanitized += content.slice(lastIndex, tokenPos)
-
-    if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
-      sanitized += scanner.getTokenText().replace(/[^\r\n]/g, ' ')
-    } else {
-      sanitized += scanner.getTokenText()
-    }
-
-    lastIndex = scanner.getTextPos()
+function collectStringFragments(node) {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return [node.text]
   }
-
-  sanitized += content.slice(lastIndex)
-  return sanitized
+  if (!ts.isTemplateExpression(node)) return []
+  return [node.head.text, ...node.templateSpans.map(span => span.literal.text)]
 }
 
 function toMigrationRelPath(filePath) {
@@ -201,27 +197,54 @@ function evaluateMigrationHistoryChanges({ baseVersions, baseMaxVersion, addedFi
 
 function findLegacyPrefixedIdViolations(relPath, content) {
   if (LEGACY_PREFIXED_ID_RULE_EXCLUSIONS.has(relPath)) return []
-  const sanitized = stripActualComments(content)
-  const patterns = [
-    /`(?:daemon|mem|interaction)-(?:\\`|[^`])*`/g,
-    /['"](?:daemon|mem|interaction)-['"]\s*\+/g,
-  ]
-
+  const sourceFile = parseSourceFile(relPath, content)
   const violations = []
-  for (const pattern of patterns) {
-    for (const match of sanitized.matchAll(pattern)) {
-      violations.push(`${relPath}: ${match[0]}`)
+  const prefixedTemplatePattern = /^`(?:daemon|mem|interaction)-/i
+  const prefixedValuePattern = /^(?:daemon|mem|interaction)-/i
+
+  function visit(node) {
+    if ((ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node))
+      && prefixedTemplatePattern.test(node.getText(sourceFile))) {
+      violations.push(`${relPath}: ${node.getText(sourceFile)}`)
     }
+
+    if (ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.PlusToken
+      && (ts.isStringLiteral(node.left) || ts.isNoSubstitutionTemplateLiteral(node.left))
+      && prefixedValuePattern.test(node.left.text)) {
+      const snippet = sourceFile.text.slice(node.left.getStart(sourceFile), node.operatorToken.end)
+      violations.push(`${relPath}: ${snippet}`)
+    }
+
+    ts.forEachChild(node, visit)
   }
+
+  visit(sourceFile)
   return violations
 }
 
 function findProviderKeyViolations(relPath, content) {
-  const sanitized = stripActualComments(content)
-  const violations = []
-  for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
-    if (sanitized.includes(key)) violations.push(`${relPath}: ${key}`)
+  const sourceFile = parseSourceFile(relPath, content)
+  const keys = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']
+  const found = new Set()
+
+  function visit(node) {
+    if (ts.isIdentifier(node) && keys.includes(node.text)) {
+      found.add(node.text)
+    }
+
+    for (const fragment of collectStringFragments(node)) {
+      for (const key of keys) {
+        if (fragment.includes(key)) found.add(key)
+      }
+    }
+
+    ts.forEachChild(node, visit)
   }
+
+  visit(sourceFile)
+  const violations = []
+  for (const key of keys) if (found.has(key)) violations.push(`${relPath}: ${key}`)
   return violations
 }
 
@@ -361,7 +384,7 @@ function runMigrationChecks() {
 
 function runLegacyPrefixedIdChecks() {
   const violations = []
-  for (const file of listSourceFiles()) {
+  for (const file of listSourceFiles(LEGACY_ID_SOURCE_EXTENSIONS)) {
     violations.push(...findLegacyPrefixedIdViolations(file.rel, file.content))
   }
   if (violations.length) {
@@ -371,7 +394,7 @@ function runLegacyPrefixedIdChecks() {
 
 function runFrontendProviderKeyChecks() {
   const violations = []
-  for (const file of listSourceFiles()) {
+  for (const file of listSourceFiles(PROVIDER_KEY_SOURCE_EXTENSIONS)) {
     violations.push(...findProviderKeyViolations(file.rel, file.content))
   }
   if (violations.length) {
