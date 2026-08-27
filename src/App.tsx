@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import DaemonInterface from './components/DaemonInterface'
 import LoginView from './components/LoginView'
+import AccessDenied from './components/AccessDenied'
+import AdminDaemonInterface from './components/AdminDaemonInterface'
 import {
   getCurrentSession,
   hasAuthBackend,
@@ -17,6 +19,7 @@ import type { AuthUser } from './services/daemonAuthAPI'
 
 type Route =
   | 'chat'
+  | 'admin-daemon'
   | 'login'
   | 'register'
   | 'forgot-password'
@@ -36,6 +39,8 @@ function parseRoute(hash: string): ParsedRoute {
   const token = params.get('token') ?? ''
 
   switch (pathPart) {
+    case '/admin-daemon':
+      return { route: 'admin-daemon', token: '' }
     case '/login':
       return { route: 'login', token }
     case '/register':
@@ -119,6 +124,10 @@ function App() {
       window.location.hash = '#/'
       return
     }
+    if (next === 'admin-daemon') {
+      window.location.hash = '#/admin-daemon'
+      return
+    }
     const encoded = routeToken ? `?token=${encodeURIComponent(routeToken)}` : ''
     window.location.hash = `#/${next}${encoded}`
   }, [])
@@ -142,6 +151,29 @@ function App() {
     return <main style={{ padding: '2rem' }}>Loading…</main>
   }
 
+  // ── Admin Daemon route ──────────────────────────────────────────────────
+  if (route === 'admin-daemon') {
+    const isAdmin = currentUser?.role === 'admin'
+    if (!isAdmin) {
+      // Show access-denied for anonymous and authenticated non-admin users.
+      // Do not disclose that an admin section exists to non-admins.
+      return (
+        <AccessDenied
+          currentUser={currentUser}
+          onLoginClick={() => navigate('login')}
+          onBackToPublic={() => navigate('chat')}
+        />
+      )
+    }
+    return (
+      <AdminDaemonInterface
+        currentUser={currentUser}
+        onBackToPublic={() => navigate('chat')}
+        onLogoutClick={handleLogout}
+      />
+    )
+  }
+
   if (route !== 'chat') {
     return (
       <LoginView
@@ -161,6 +193,7 @@ function App() {
       currentUser={currentUser}
       onLoginClick={() => navigate('login')}
       onLogoutClick={currentUser ? handleLogout : undefined}
+      onAdminDaemonClick={currentUser?.role === 'admin' ? () => navigate('admin-daemon') : undefined}
     />
   )
 }

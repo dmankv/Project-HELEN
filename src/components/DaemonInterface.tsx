@@ -250,6 +250,7 @@ function buildAPIHistory(messages: Message[]): APIMessage[] {
 interface DaemonInterfaceProps {
   onLoginClick?: () => void
   onLogoutClick?: () => void
+  onAdminDaemonClick?: () => void
   currentUser?: { id?: string; email: string; role?: 'user' | 'admin' | null } | null
 }
 
@@ -295,6 +296,7 @@ function buildSafeDiagnosticsPayload(
 export default function DaemonInterface({
   onLoginClick,
   onLogoutClick,
+  onAdminDaemonClick,
   currentUser = null,
 }: DaemonInterfaceProps = {}) {
   const currentUserRoleLabel = currentUser?.role === 'admin'
@@ -1179,6 +1181,17 @@ export default function DaemonInterface({
                       title="Log out"
                     >
                       Log out
+                    </button>
+                  )}
+                  {onAdminDaemonClick && currentUser?.role === 'admin' && (
+                    <button
+                      type="button"
+                      className="login-btn"
+                      onClick={onAdminDaemonClick}
+                      aria-label="Go to Admin Daemon"
+                      title="Admin Daemon"
+                    >
+                      Admin Daemon
                     </button>
                   )}
                 </>
