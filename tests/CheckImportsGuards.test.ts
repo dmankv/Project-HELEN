@@ -127,6 +127,30 @@ describe('check-imports guard helpers', () => {
         },
       ],
       deletedFiles: [],
+      modifiedFiles: [],
     })
+  })
+
+  it('classifies modified migrations into modifiedFiles', () => {
+    const result = classifyMigrationDiff(
+      'M\tsupabase/migrations/20260825090000_adaptive_profiles.sql',
+    )
+    expect(result.modifiedFiles).toEqual(['20260825090000_adaptive_profiles.sql'])
+    expect(result.addedFiles).toEqual([])
+    expect(result.deletedFiles).toEqual([])
+  })
+
+  it('rejects modified migrations as immutable-history violations', () => {
+    const errors = evaluateMigrationHistoryChanges({
+      baseVersions: new Map([['20260825090000', '20260825090000_adaptive_profiles.sql']]),
+      baseMaxVersion: '20260825090000',
+      addedFiles: [],
+      renamedFiles: [],
+      deletedFiles: [],
+      modifiedFiles: ['20260825090000_adaptive_profiles.sql'],
+    })
+    expect(errors).toEqual([
+      'modifying an existing migration is not allowed: 20260825090000_adaptive_profiles.sql',
+    ])
   })
 })

@@ -25,7 +25,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MIGRATION_DIR_REL = 'supabase/migrations'
 const LEGACY_PREFIXED_ID_RULE_EXCLUSIONS = new Set(['src/services/daemonStorageMigration.ts'])
 const LEGACY_ID_SOURCE_EXTENSIONS = ['.ts', '.tsx']
-const PROVIDER_KEY_SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs']
+const PROVIDER_KEY_SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.mts']
 
 function read(rel) {
   const full = path.join(root, rel)
@@ -86,7 +86,7 @@ function listSourceFiles(extensions) {
 
 function scriptKindFromRelPath(relPath) {
   if (relPath.endsWith('.tsx')) return ts.ScriptKind.TSX
-  if (relPath.endsWith('.ts')) return ts.ScriptKind.TS
+  if (relPath.endsWith('.ts') || relPath.endsWith('.mts')) return ts.ScriptKind.TS
   if (relPath.endsWith('.jsx')) return ts.ScriptKind.JSX
   return ts.ScriptKind.JS
 }
@@ -164,8 +164,12 @@ function evaluateMigrationCatalog(filenames) {
   return { errors, versions, maxVersion }
 }
 
-function evaluateMigrationHistoryChanges({ baseVersions, baseMaxVersion, addedFiles, renamedFiles, deletedFiles }) {
+function evaluateMigrationHistoryChanges({ baseVersions, baseMaxVersion, addedFiles, renamedFiles, deletedFiles, modifiedFiles = [] }) {
   const errors = []
+
+  for (const file of modifiedFiles) {
+    errors.push(`modifying an existing migration is not allowed: ${file}`)
+  }
 
   for (const rename of renamedFiles) {
     errors.push(`renaming existing migration is not allowed: ${rename.from} -> ${rename.to}`)
@@ -301,11 +305,12 @@ function listMigrationsAtRef(ref) {
 }
 
 function classifyMigrationDiff(output) {
-  if (!output) return { addedFiles: [], renamedFiles: [], deletedFiles: [] }
+  if (!output) return { addedFiles: [], renamedFiles: [], deletedFiles: [], modifiedFiles: [] }
 
   const addedFiles = []
   const renamedFiles = []
   const deletedFiles = []
+  const modifiedFiles = []
 
   for (const line of output.split('\n')) {
     const parts = line.trim().split('\t')
@@ -329,10 +334,11 @@ function classifyMigrationDiff(output) {
     if (!file || !file.endsWith('.sql')) continue
 
     if (status === 'A') addedFiles.push(file)
-    if (status === 'D') deletedFiles.push(file)
+    else if (status === 'D') deletedFiles.push(file)
+    else if (status === 'M') modifiedFiles.push(file)
   }
 
-  return { addedFiles, renamedFiles, deletedFiles }
+  return { addedFiles, renamedFiles, deletedFiles, modifiedFiles }
 }
 
 function parseMigrationDiff(mergeBase) {
@@ -378,6 +384,7 @@ function runMigrationChecks() {
     addedFiles: diff.addedFiles,
     renamedFiles: diff.renamedFiles,
     deletedFiles: diff.deletedFiles,
+    modifiedFiles: diff.modifiedFiles,
   })
 
   if (historyErrors.length) {
