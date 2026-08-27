@@ -91,7 +91,7 @@ vi.mock('../src/services/supabasePersistence', async (importActual) => {
 
 // Import the component after mocks are registered.
 import DaemonInterface from '../src/components/DaemonInterface'
-import { saveMemory, listMemories, forgetById, forgetAll, forgetLast } from '../src/services/daemonMemory'
+import { saveMemory, listMemories, forgetById, forgetAll, forgetLast, forgetByText } from '../src/services/daemonMemory'
 import learningSystem from '../src/services/daemon_learning_integration'
 import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonChatAPI'
 import { callEdgeFunction, hasEdgeFunction, createEdgeChatFailure } from '../src/services/supabaseEdgeChat'
@@ -432,6 +432,77 @@ describe('DaemonInterface', () => {
 
     await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId), WAIT_OPTS)
   })
+
+  it('forgets the newest hydrated-only memory when no local durable memory exists', async () => {
+    const cloudOnlyMemoryId = '550e8400-e29b-41d4-a716-446655440100'
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(hydrateFromCloud).mockResolvedValue({
+      conversations: [],
+      messagesByConversation: {},
+      memories: [{
+        id: cloudOnlyMemoryId,
+        user_id: 'user-1',
+        text: 'Newest cloud-only durable memory',
+        tags: [],
+        created_at: '2026-08-26T00:00:00.000Z',
+      }],
+      learningInteractions: [],
+    })
+    vi.mocked(forgetLast).mockReturnValue(null)
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    expect(await screen.findByText('Newest cloud-only durable memory')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText(/Message Daemon/i), { target: { value: 'forget this' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMemoryId), WAIT_OPTS)
+    await waitFor(() => expect(screen.queryByText('Newest cloud-only durable memory')).not.toBeInTheDocument(), WAIT_OPTS)
+  }, 8000)
+
+  it('forgets matching hydrated-only memories alongside local text matches', async () => {
+    const localMatch = {
+      id: '550e8400-e29b-41d4-a716-446655440101',
+      text: 'Shared phrase from local memory',
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    const cloudOnlyMatchId = '550e8400-e29b-41d4-a716-446655440102'
+    vi.mocked(isPersistenceConfigured).mockReturnValue(true)
+    vi.mocked(listMemories).mockReturnValue([localMatch])
+    vi.mocked(forgetByText).mockReturnValue([localMatch])
+    vi.mocked(hydrateFromCloud).mockResolvedValue({
+      conversations: [],
+      messagesByConversation: {},
+      memories: [
+        {
+          id: cloudOnlyMatchId,
+          user_id: 'user-1',
+          text: 'Shared phrase from hydrated memory',
+          tags: [],
+          created_at: '2026-08-26T00:00:00.000Z',
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440103',
+          user_id: 'user-1',
+          text: 'Unrelated hydrated memory',
+          tags: [],
+          created_at: '2026-08-24T00:00:00.000Z',
+        },
+      ],
+      learningInteractions: [],
+    })
+
+    render(<DaemonInterface currentUser={{ id: 'user-1', email: 'user@example.com', role: 'user' }} />)
+
+    expect(await screen.findByText('Shared phrase from hydrated memory')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText(/Message Daemon/i), { target: { value: 'forget: shared phrase' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(localMatch.id), WAIT_OPTS)
+    await waitFor(() => expect(deleteCloudMemory).toHaveBeenCalledWith(cloudOnlyMatchId), WAIT_OPTS)
+    expect(screen.queryByText('Shared phrase from hydrated memory')).not.toBeInTheDocument()
+    expect(screen.getByText('Unrelated hydrated memory')).toBeInTheDocument()
+  }, 8000)
 
   it('does not restore a deleted memory from stale hydration results', async () => {
     type HydrationResult = {

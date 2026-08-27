@@ -193,6 +193,51 @@ interface MemoryCommandResult {
   affectedMemoryIds: string[]
 }
 
+function formatForgottenMemoryResponse(memories: DurableMemory[]): string {
+  if (memories.length === 1) {
+    return 'Forgotten: "' + memories[0].text + '"'
+  }
+  const names = memories.map(memory => '"' + memory.text + '"').join(', ')
+  return 'Forgotten ' + memories.length + ' memories: ' + names
+}
+
+function resolveVisibleMemoryCommandResult(
+  cmd: MemoryCommand,
+  localResult: MemoryCommandResult,
+  localMemories: DurableMemory[],
+  hydratedMemories: DurableMemory[],
+): MemoryCommandResult {
+  const localIds = new Set(localMemories.map(memory => memory.id))
+  const hydratedOnly = hydratedMemories.filter(memory => !localIds.has(memory.id))
+  if (cmd.type === 'forget-last' && localResult.affectedMemoryIds.length === 0) {
+    const latestHydratedOnly = hydratedOnly
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+    return latestHydratedOnly
+      ? {
+          responseText: formatForgottenMemoryResponse([latestHydratedOnly]),
+          affectedMemoryIds: [latestHydratedOnly.id],
+        }
+      : localResult
+  }
+  if (cmd.type === 'forget-text') {
+    const localAffectedIds = new Set(localResult.affectedMemoryIds)
+    const resolved = localMemories.filter(memory => localAffectedIds.has(memory.id))
+    const phrase = cmd.payload.trim().toLowerCase()
+    for (const memory of hydratedOnly) {
+      if (memory.text.toLowerCase().includes(phrase)) {
+        resolved.push(memory)
+      }
+    }
+    if (resolved.length === 0) return localResult
+    return {
+      responseText: formatForgottenMemoryResponse(resolved),
+      affectedMemoryIds: resolved.map(memory => memory.id),
+    }
+  }
+  return localResult
+}
+
 function parseMemoryCommand(text: string): MemoryCommand | null {
   const t = text.trim()
   const rememberMatch = /^remember(?:\s+this)?[:-]?\s*(.+)$/i.exec(t)
@@ -585,7 +630,14 @@ export default function DaemonInterface({
       const memCmd = parseMemoryCommand(text)
       if (memCmd) {
         await new Promise(r => setTimeout(r, 400))
-        const { responseText, affectedMemoryIds } = handleMemoryCommand(memCmd)
+        const localMemoriesBeforeCommand = listMemories()
+        const localResult = handleMemoryCommand(memCmd)
+        const { responseText, affectedMemoryIds } = resolveVisibleMemoryCommandResult(
+          memCmd,
+          localResult,
+          localMemoriesBeforeCommand,
+          hydratedMemories,
+        )
         if (memCmd.type === 'forget-all' || (
           (memCmd.type === 'forget-last' || memCmd.type === 'forget-text') &&
           affectedMemoryIds.length > 0
