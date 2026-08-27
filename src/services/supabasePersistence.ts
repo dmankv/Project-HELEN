@@ -457,8 +457,10 @@ export async function migrateLocalMemoriesToCloud(
   }
 
   if (await getCurrentUserId() !== userId) return
-  const completedMemoryIds = await cloudMemoryIds(client, userId, memoryIds)
-  if (!completedMemoryIds || !memories.every(memory => completedMemoryIds.has(memory.id))) return
+  const insertedIds = memories.filter(mem => !isStillLocal || isStillLocal(mem.id)).map(m => m.id)
+  if (insertedIds.length === 0) { markCloudMigrationDone(userId); return }
+  const completedMemoryIds = await cloudMemoryIds(client, userId, insertedIds)
+  if (!completedMemoryIds || !insertedIds.every(id => completedMemoryIds.has(id))) return
   markCloudMigrationDone(userId)
 }
 
