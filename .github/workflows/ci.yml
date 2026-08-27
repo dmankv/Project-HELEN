@@ -39,6 +39,9 @@ jobs:
       - name: Unit tests (component)
         run: npm run test:unit
 
+      - name: Adaptive evaluation fixtures
+        run: npm run test:adaptive
+
       - name: Server API tests
         run: npm run test:server
 

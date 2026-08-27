@@ -229,7 +229,7 @@ $$;
 
 drop trigger if exists prevent_github_write_audit_mutation on public.github_write_audit;
 create trigger prevent_github_write_audit_mutation
-  before update on public.github_write_audit
+  before update or delete on public.github_write_audit
   for each row execute function public.prevent_github_write_audit_mutation();
 
 -- ──────────────────────────────────────────────────────────────────────────
