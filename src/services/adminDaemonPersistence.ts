@@ -156,17 +156,34 @@ export async function deleteAllAdminConversations(): Promise<boolean> {
 export async function listAdminMessages(
   conversationId: string,
   limit = 200,
-): Promise<AdminMessage[]> {
+): Promise<AdminMessage[] | null> {
   const client = await getAuthedClient()
   if (!client) return []
   const { data, error } = await client
     .from('admin_messages')
     .select('id, conversation_id, user_id, role, content, position, created_at')
     .eq('conversation_id', conversationId)
-    .order('position', { ascending: true })
+    .order('position', { ascending: false })
     .limit(limit)
-  if (error) return []
-  return (data ?? []) as AdminMessage[]
+  if (error) return null
+  return ((data ?? []) as AdminMessage[]).reverse()
+}
+
+async function getNextAdminMessagePosition(
+  client: SupabaseClient,
+  conversationId: string,
+  fallbackPosition: number,
+): Promise<number> {
+  const { data, error } = await client
+    .from('admin_messages')
+    .select('position')
+    .eq('conversation_id', conversationId)
+    .order('position', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ position: number }>()
+
+  if (error || typeof data?.position !== 'number') return fallbackPosition
+  return Math.max(fallbackPosition, data.position + 1)
 }
 
 export async function insertAdminMessage(msg: {
@@ -180,13 +197,18 @@ export async function insertAdminMessage(msg: {
   if (!client) return false
   const { data: { session } } = await client.auth.getSession()
   if (!session?.user.id) return false
+  const nextPosition = await getNextAdminMessagePosition(
+    client,
+    msg.conversation_id,
+    msg.position,
+  )
   const { error } = await client.from('admin_messages').insert({
     id: msg.id,
     conversation_id: msg.conversation_id,
     user_id: session.user.id,
     role: msg.role,
     content: msg.content,
-    position: msg.position,
+    position: nextPosition,
   })
   return !error
 }

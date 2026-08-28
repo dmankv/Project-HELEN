@@ -216,4 +216,58 @@ describe('AdminDaemonInterface', () => {
     await waitFor(() => expect(screen.getAllByText('Second admin chat')).toHaveLength(2))
     expect(screen.queryByText('First admin chat')).toBeNull()
   })
+
+  it('preserves local messages when cloud message hydration fails for a cloud conversation', async () => {
+    const adminConversationKey = getAdminStorageKey(currentUser.id, 'conversations')
+    const adminActiveKey = getAdminStorageKey(currentUser.id, 'activeConversationId')
+    localStorage.setItem(adminConversationKey, JSON.stringify([
+      {
+        id: 'cloud-conv-1',
+        title: 'Local conversation',
+        messages: [{ id: 'local-msg-1', role: 'assistant', content: 'Local pending message', timestamp: '2026-08-28T00:00:01.000Z' }],
+        createdAt: '2026-08-28T00:00:00.000Z',
+      },
+    ]))
+    localStorage.setItem(adminActiveKey, 'cloud-conv-1')
+    persistenceMocks.listAdminConversations.mockResolvedValue([
+      {
+        id: 'cloud-conv-1',
+        user_id: currentUser.id,
+        title: 'Cloud conversation',
+        created_at: '2026-08-28T00:00:00.000Z',
+        updated_at: '2026-08-28T00:00:00.000Z',
+      },
+    ])
+    persistenceMocks.listAdminMessages.mockResolvedValue(null)
+
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    await waitFor(() => expect(screen.getByText('Local pending message')).toBeInTheDocument())
+  })
+
+  it('does not wipe local chat when cloud clear fails', async () => {
+    const adminConversationKey = getAdminStorageKey(currentUser.id, 'conversations')
+    const adminActiveKey = getAdminStorageKey(currentUser.id, 'activeConversationId')
+    localStorage.setItem(adminConversationKey, JSON.stringify([
+      {
+        id: 'admin-conv-1',
+        title: 'Admin conversation',
+        messages: [{ id: 'admin-msg-1', role: 'assistant', content: 'keep me', timestamp: '2026-08-28T00:00:00.000Z' }],
+        createdAt: '2026-08-28T00:00:00.000Z',
+      },
+    ]))
+    localStorage.setItem(adminActiveKey, 'admin-conv-1')
+    persistenceMocks.upsertAdminConversation.mockResolvedValue(true)
+    persistenceMocks.deleteAdminMessagesForConversation.mockResolvedValue(false)
+
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    fireEvent.click(await screen.findByLabelText('Destructive chat actions'))
+    fireEvent.click(screen.getByText('Clear current chat'))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Unable to clear this chat right now. Please try again.'))
+    const stored = JSON.parse(localStorage.getItem(adminConversationKey) ?? '[]') as Array<{ messages: Array<{ content: string }> }>
+    expect(stored[0]?.messages[0]?.content).toBe('keep me')
+  })
+
 })

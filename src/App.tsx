@@ -167,6 +167,7 @@ function App() {
     }
     return (
       <AdminDaemonInterface
+        key={currentUser.id}
         currentUser={currentUser}
         onBackToPublic={() => navigate('chat')}
         onLogoutClick={handleLogout}

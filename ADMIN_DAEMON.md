@@ -85,7 +85,14 @@ Raw message content, provider secrets, or full prompts are **never** logged.
 ## Migration and rollback
 
 ### Forward migration
-Apply `supabase/migrations/20260827190000_admin_daemon.sql` from a privileged Supabase context (Dashboard SQL Editor or Supabase CLI with service-role credentials).
+Apply `supabase/migrations/20260827190000_admin_daemon.sql` and `supabase/migrations/20260828034000_admin_atomic_rate_limit.sql` from a privileged Supabase context (Dashboard SQL Editor or Supabase CLI with service-role credentials).
+
+### Edge Function deployment
+Deploy the Admin Daemon Edge Function after migrations:
+
+```bash
+supabase functions deploy admin-daemon --project-ref "$SUPABASE_PROJECT_REF"
+```
 
 ### Rollback
 ```sql

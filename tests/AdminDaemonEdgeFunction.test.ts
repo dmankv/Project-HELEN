@@ -87,9 +87,9 @@ describe('Admin Daemon Edge Function source', () => {
   // Rate limiting
   // ---------------------------------------------------------------------------
 
-  it('applies rate limiting via increment_rate_limit RPC', () => {
+  it('applies rate limiting via increment_admin_rate_limit RPC', () => {
     expect(src).toContain('checkRateLimit(')
-    expect(src).toContain('increment_rate_limit')
+    expect(src).toContain('increment_admin_rate_limit')
     expect(src).toContain('RATE_LIMITED')
   })
 

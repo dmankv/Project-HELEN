@@ -194,7 +194,7 @@ function logAudit(event: string, data: Record<string, unknown>): void {
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiting — reuses the atomic RPC from daemon_persistence
+// Rate limiting — dedicated admin RPC and keyspace
 // ---------------------------------------------------------------------------
 
 async function checkRateLimit(
@@ -202,7 +202,7 @@ async function checkRateLimit(
   userId: string,
 ): Promise<{ allowed: boolean; remaining: number }> {
   try {
-    const { data, error } = await serviceClient.rpc('increment_rate_limit', {
+    const { data, error } = await serviceClient.rpc('increment_admin_rate_limit', {
       p_user_id: userId,
       p_window_ms: RATE_LIMIT_WINDOW_MS,
       p_max_count: RATE_LIMIT_MAX,

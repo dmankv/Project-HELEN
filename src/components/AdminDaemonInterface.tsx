@@ -309,15 +309,30 @@ export default function AdminDaemonInterface({
      if (cancelled) return
 
      const cloudIds = new Set(cloudConversations.map(conversation => conversation.id))
+     const localConversationsById = new Map(localConversations.map(conversation => [conversation.id, conversation]))
      const mergedCloudConversations = cloudConversations.map(conversation => ({
        id: conversation.id,
        title: conversation.title,
-       messages: (cloudMessages.find(([id]) => id === conversation.id)?.[1] ?? []).map(message => ({
-         id: message.id,
-         role: message.role,
-         content: message.content,
-         timestamp: message.created_at,
-       })),
+       messages: (() => {
+         const localConversation = localConversationsById.get(conversation.id)
+         const fetchedMessages = cloudMessages.find(([id]) => id === conversation.id)?.[1] ?? null
+         if (fetchedMessages === null) {
+           return localConversation?.messages ?? []
+         }
+         const cloudConversationMessages = fetchedMessages.map(message => ({
+           id: message.id,
+           role: message.role,
+           content: message.content,
+           timestamp: message.created_at,
+         }))
+         if (!localConversation) {
+           return cloudConversationMessages
+         }
+         const cloudMessageIds = new Set(cloudConversationMessages.map(message => message.id))
+         const localOnlyMessages = localConversation.messages.filter(message => !cloudMessageIds.has(message.id))
+         return [...cloudConversationMessages, ...localOnlyMessages]
+           .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+       })(),
        createdAt: conversation.created_at,
      }))
      const localOnlyConversations = localConversations.filter(conversation => !cloudIds.has(conversation.id))
@@ -361,17 +376,28 @@ export default function AdminDaemonInterface({
    if (!conversationId) return
    cancelInFlightRequest()
    setIsResetting(true)
-   const nextConversations = conversationsRef.current.map(conversation =>
-     conversation.id === conversationId
-       ? { ...conversation, messages: [], title: 'New admin chat' }
-       : conversation,
-   )
-   applyConversationState(nextConversations, conversationId)
    setClearConfirm(false)
-   setInputError(null)
-   await upsertAdminConversation(conversationId, 'New admin chat')
-   await deleteAdminMessagesForConversation(conversationId)
-   setIsResetting(false)
+   try {
+     const didUpsertConversation = await upsertAdminConversation(conversationId, 'New admin chat')
+     if (!didUpsertConversation) {
+       setInputError('Unable to clear this chat right now. Please try again.')
+       return
+     }
+     const didDeleteMessages = await deleteAdminMessagesForConversation(conversationId)
+     if (!didDeleteMessages) {
+       setInputError('Unable to clear this chat right now. Please try again.')
+       return
+     }
+     const nextConversations = conversationsRef.current.map(conversation =>
+       conversation.id === conversationId
+         ? { ...conversation, messages: [], title: 'New admin chat' }
+         : conversation,
+     )
+     applyConversationState(nextConversations, conversationId)
+     setInputError(null)
+   } finally {
+     setIsResetting(false)
+   }
   }, [applyConversationState, cancelInFlightRequest])
 
   const deleteCurrentConversation = useCallback(async () => {
@@ -389,13 +415,26 @@ export default function AdminDaemonInterface({
      ? [fallbackConversation]
      : remainingConversations
    const nextActiveConvId = fallbackConversation?.id ?? remainingConversations[0]?.id ?? null
-   applyConversationState(nextConversations, nextActiveConvId)
    setClearConfirm(false)
-   setInputError(null)
-   if (fallbackConversation) {
-     await upsertAdminConversation(fallbackConversation.id, fallbackConversation.title)
+   const didDeleteConversation = await deleteAdminConversation(conversationId)
+   if (!didDeleteConversation) {
+     setInputError('Unable to delete this conversation right now. Please try again.')
+     setIsResetting(false)
+     return
    }
-   await deleteAdminConversation(conversationId)
+   if (fallbackConversation) {
+     const didCreateFallbackConversation = await upsertAdminConversation(
+       fallbackConversation.id,
+       fallbackConversation.title,
+     )
+     if (!didCreateFallbackConversation) {
+       setInputError('Conversation deleted, but creating a replacement chat failed. Please try again.')
+     }
+   }
+   applyConversationState(nextConversations, nextActiveConvId)
+   if (!fallbackConversation) {
+     setInputError(null)
+   }
    setIsResetting(false)
   }, [applyConversationState, cancelInFlightRequest])
 
@@ -403,11 +442,24 @@ export default function AdminDaemonInterface({
    cancelInFlightRequest()
    setIsResetting(true)
    setClearConfirm(false)
-   setInputError(null)
+   const didDeleteAllConversations = await deleteAllAdminConversations()
+   if (!didDeleteAllConversations) {
+     setInputError('Unable to clear admin chats right now. Please try again.')
+     setIsResetting(false)
+     return
+   }
    const replacementConversation = createConversation()
+   const didCreateReplacementConversation = await upsertAdminConversation(
+     replacementConversation.id,
+     replacementConversation.title,
+   )
+   if (!didCreateReplacementConversation) {
+     setInputError('Admin chats were cleared, but creating a replacement chat failed. Please try again.')
+     setIsResetting(false)
+     return
+   }
    applyConversationState([replacementConversation], replacementConversation.id)
-   await deleteAllAdminConversations()
-   await upsertAdminConversation(replacementConversation.id, replacementConversation.title)
+   setInputError(null)
    setIsResetting(false)
   }, [applyConversationState, cancelInFlightRequest])
 
@@ -498,7 +550,11 @@ export default function AdminDaemonInterface({
           ? { ...conversation, title: nextTitle, messages: [...currentMessages, assistantMsg] }
           : conversation,
       )
-      applyConversationState(finalConversations, convId)
+      const selectedConversationId = activeConvIdRef.current
+      const nextActiveConvId = selectedConversationId && finalConversations.some(conversation => conversation.id === selectedConversationId)
+        ? selectedConversationId
+        : convId
+      applyConversationState(finalConversations, nextActiveConvId)
 
       if (result.ok) {
         await upsertAdminConversation(convId, nextTitle)
