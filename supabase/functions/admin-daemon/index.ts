@@ -13,7 +13,6 @@
  * Capabilities:
  *   - Accepts bounded, validated chat requests.
  *   - Uses the same approved strategy allowlist as the public daemon-chat function.
- *   - Safe diagnostics status endpoint (GET /admin-daemon) — no secret values.
  *   - No direct SQL/shell/deployment/secret access.
  *
  * Required Supabase Function secrets (set via `supabase secrets set`):

@@ -9,13 +9,15 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ADMIN_STORAGE_KEYS, getAdminStorageKey } from '../src/components/AdminDaemonInterface'
 
 // ---------------------------------------------------------------------------
 // Isolated admin storage key constants (must match the component)
 // ---------------------------------------------------------------------------
 
-const ADMIN_CONVERSATIONS_KEY = 'daemon_admin_conversations'
-const ADMIN_ACTIVE_CONV_KEY = 'daemon_admin_active_conv_id'
+const ADMIN_TEST_USER_ID = 'admin-user-1'
+const ADMIN_CONVERSATIONS_KEY = getAdminStorageKey(ADMIN_TEST_USER_ID, 'conversations')
+const ADMIN_ACTIVE_CONV_KEY = getAdminStorageKey(ADMIN_TEST_USER_ID, 'activeConversationId')
 
 // Public Daemon keys (must not be touched by admin operations)
 const PUBLIC_CONVERSATIONS_KEY = 'daemon_conversations'
@@ -87,8 +89,8 @@ describe('Admin storage key isolation', () => {
   })
 
   it('admin conversation key has admin namespace prefix', () => {
-    expect(ADMIN_CONVERSATIONS_KEY).toContain('admin')
-    expect(ADMIN_ACTIVE_CONV_KEY).toContain('admin')
+    expect(ADMIN_STORAGE_KEYS.conversations).toContain('admin')
+    expect(ADMIN_STORAGE_KEYS.activeConversationId).toContain('admin')
   })
 
   it('writing to admin keys does not affect public keys', () => {

@@ -6,7 +6,7 @@
  *
  * Storage isolation:
  *   - Uses distinct localStorage keys: daemon_admin_conversations,
- *     daemon_admin_messages, daemon_admin_active_conv_id.
+ *     daemon_admin_active_conv_id.
  *   - Never reads or writes public Daemon storage keys.
  *   - Cloud persistence uses dedicated admin_ tables via adminDaemonPersistence.ts.
  *
@@ -15,23 +15,38 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createClient } from '@supabase/supabase-js'
 import type { AuthUser } from '../services/daemonAuthAPI'
 import { genUUID } from '../services/daemonStorageMigration'
-import { hasEdgeFunction } from '../services/supabaseEdgeChat'
 import {
-  upsertAdminConversation,
+  deleteAdminMessagesForConversation,
   deleteAdminConversation,
   deleteAllAdminConversations,
-  insertAdminMessage,
   getAdminDiagnosticsStatus,
+  insertAdminMessage,
+  listAdminConversations,
+  listAdminMessages,
+  upsertAdminConversation,
 } from '../services/adminDaemonPersistence'
 
 // ---------------------------------------------------------------------------
 // Isolated storage keys — never overlap with public Daemon keys
 // ---------------------------------------------------------------------------
 
-const ADMIN_CONVERSATIONS_KEY = 'daemon_admin_conversations'
-const ADMIN_ACTIVE_CONV_KEY = 'daemon_admin_active_conv_id'
+export const ADMIN_STORAGE_KEYS = {
+  conversations: 'daemon_admin_conversations',
+  activeConversationId: 'daemon_admin_active_conv_id',
+} as const
+
+type AdminStorageKeyName = keyof typeof ADMIN_STORAGE_KEYS
+
+const MAX_ADMIN_HISTORY_MESSAGES = 40
+const MAX_ADMIN_MESSAGE_BYTES = 8_000
+const textEncoder = new TextEncoder()
+
+export function getAdminStorageKey(userId: string, key: AdminStorageKeyName): string {
+  return `${ADMIN_STORAGE_KEYS[key]}:${userId}`
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,6 +84,7 @@ interface AdminEdgeChatResult {
 
 async function callAdminEdgeFunction(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  signal?: AbortSignal,
 ): Promise<AdminEdgeChatResult> {
   const supabaseUrl =
     (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL ?? ''
@@ -80,7 +96,6 @@ async function callAdminEdgeFunction(
   }
 
   // Get the current session token from Supabase auth
-  const { createClient } = await import('@supabase/supabase-js')
   const client = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
   })
@@ -99,6 +114,7 @@ async function callAdminEdgeFunction(
         'Authorization': 'Bearer ' + token,
       },
       body: JSON.stringify({ messages }),
+      signal,
     })
     if (!res.ok) {
       await res.json().catch(() => undefined)
@@ -113,6 +129,9 @@ async function callAdminEdgeFunction(
     const data2 = await res.json() as { message?: string }
     return { ok: true, message: data2.message ?? '' }
   } catch {
+    if (signal?.aborted) {
+      return { ok: false, error: 'Request cancelled.' }
+    }
     return { ok: false, error: 'Network error reaching admin-daemon.' }
   }
 }
@@ -121,24 +140,24 @@ async function callAdminEdgeFunction(
 // localStorage helpers (isolated to admin keys)
 // ---------------------------------------------------------------------------
 
-function loadAdminConversations(): Conversation[] {
+function loadAdminConversations(userId: string): Conversation[] {
   try {
-    const raw = localStorage.getItem(ADMIN_CONVERSATIONS_KEY)
+    const raw = localStorage.getItem(getAdminStorageKey(userId, 'conversations'))
     return raw ? (JSON.parse(raw) as Conversation[]) : []
   } catch {
     return []
   }
 }
 
-function saveAdminConversations(convs: Conversation[]): void {
+function saveAdminConversations(userId: string, convs: Conversation[]): void {
   try {
-    localStorage.setItem(ADMIN_CONVERSATIONS_KEY, JSON.stringify(convs))
+    localStorage.setItem(getAdminStorageKey(userId, 'conversations'), JSON.stringify(convs))
   } catch { /* best-effort */ }
 }
 
-function loadAdminActiveConvId(convs: Conversation[]): string | null {
+function loadAdminActiveConvId(userId: string, convs: Conversation[]): string | null {
   try {
-    const saved = localStorage.getItem(ADMIN_ACTIVE_CONV_KEY)
+    const saved = localStorage.getItem(getAdminStorageKey(userId, 'activeConversationId'))
     if (saved && convs.some(c => c.id === saved)) return saved
   } catch { /* best-effort */ }
   if (convs.length === 0) return null
@@ -146,14 +165,29 @@ function loadAdminActiveConvId(convs: Conversation[]): string | null {
   return sorted[0].id
 }
 
-function saveAdminActiveConvId(id: string | null): void {
+function saveAdminActiveConvId(userId: string, id: string | null): void {
   try {
     if (id === null) {
-      localStorage.removeItem(ADMIN_ACTIVE_CONV_KEY)
+      localStorage.removeItem(getAdminStorageKey(userId, 'activeConversationId'))
     } else {
-      localStorage.setItem(ADMIN_ACTIVE_CONV_KEY, id)
+      localStorage.setItem(getAdminStorageKey(userId, 'activeConversationId'), id)
     }
   } catch { /* best-effort */ }
+}
+
+function createConversation(): Conversation {
+  return {
+    id: genUUID(),
+    title: 'New admin chat',
+    messages: [],
+    createdAt: new Date().toISOString(),
+  }
+}
+
+export function buildHistoryMessages(messages: Message[]): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return messages
+    .slice(-MAX_ADMIN_HISTORY_MESSAGES)
+    .map(message => ({ role: message.role, content: message.content }))
 }
 
 function titleFromMessages(messages: Message[]): string {
@@ -174,225 +208,298 @@ export default function AdminDaemonInterface({
   onLogoutClick,
 }: AdminDaemonInterfaceProps): JSX.Element {
   const [conversations, setConversations] = useState<Conversation[]>(() =>
-    loadAdminConversations(),
+   loadAdminConversations(currentUser.id),
   )
   const [activeConvId, setActiveConvId] = useState<string | null>(() => {
-    const convs = loadAdminConversations()
-    return loadAdminActiveConvId(convs)
+   const convs = loadAdminConversations(currentUser.id)
+   return loadAdminActiveConvId(currentUser.id, convs)
   })
   const [input, setInput] = useState('')
+  const [inputError, setInputError] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
+  const [isResetting, setIsResetting] = useState(false)
   const [diagnostics, setDiagnostics] = useState<{
-    persistenceConfigured: boolean
-    sessionActive: boolean
-    supabaseUrl: string
+   persistenceConfigured: boolean
+   sessionActive: boolean
+   supabaseUrl: string
   } | null>(null)
   const [showDiagnostics, setShowDiagnostics] = useState(false)
   const [clearConfirm, setClearConfirm] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestVersionRef = useRef(0)
+  const conversationsRef = useRef(conversations)
+  const activeConvIdRef = useRef(activeConvId)
 
   const activeConversation = conversations.find(c => c.id === activeConvId) ?? null
+  const isBusy = isThinking || isResetting
 
   // Scroll to bottom on new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [activeConversation?.messages.length])
+   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [activeConversation?.messages.length, isThinking])
 
-  // Load diagnostics once on mount
   useEffect(() => {
-    void getAdminDiagnosticsStatus().then(setDiagnostics)
+   conversationsRef.current = conversations
+  }, [conversations])
+
+  useEffect(() => {
+   activeConvIdRef.current = activeConvId
+  }, [activeConvId])
+
+  const applyConversationState = useCallback((nextConversations: Conversation[], nextActiveConvId: string | null) => {
+   conversationsRef.current = nextConversations
+   activeConvIdRef.current = nextActiveConvId
+   setConversations(nextConversations)
+   setActiveConvId(nextActiveConvId)
+   saveAdminConversations(currentUser.id, nextConversations)
+   saveAdminActiveConvId(currentUser.id, nextActiveConvId)
+  }, [currentUser.id])
+
+  const cancelInFlightRequest = useCallback(() => {
+   requestVersionRef.current += 1
+   abortRef.current?.abort()
+   abortRef.current = null
+   setIsThinking(false)
   }, [])
 
-  const persistConversations = useCallback((convs: Conversation[]) => {
-    saveAdminConversations(convs)
-    // Best-effort cloud sync — do not await, do not block UI
-    for (const c of convs) {
-      void upsertAdminConversation(c.id, c.title)
-    }
-  }, [])
-
-  const startNewChat = useCallback(() => {
-    const id = genUUID()
-    const conv: Conversation = {
-      id,
-      title: 'New admin chat',
-      messages: [],
-      createdAt: new Date().toISOString(),
-    }
-    setConversations(prev => {
-      const next = [conv, ...prev]
-      persistConversations(next)
-      return next
-    })
-    setActiveConvId(id)
-    saveAdminActiveConvId(id)
-    setClearConfirm(false)
-  }, [persistConversations])
-
-  // Create initial conversation if none exist
   useEffect(() => {
-    if (conversations.length === 0) {
-      startNewChat()
+   let cancelled = false
+   cancelInFlightRequest()
+   setInput('')
+   setInputError(null)
+   setIsResetting(false)
+   setClearConfirm(false)
+
+   const localConversations = loadAdminConversations(currentUser.id)
+   const localActiveConvId = loadAdminActiveConvId(currentUser.id, localConversations)
+   applyConversationState(localConversations, localActiveConvId)
+
+   void getAdminDiagnosticsStatus().then(status => {
+     if (!cancelled) setDiagnostics(status)
+   })
+
+   void (async () => {
+     const cloudConversations = await listAdminConversations()
+     if (cancelled) return
+
+     const cloudMessages = await Promise.all(
+       cloudConversations.map(async conversation => [
+         conversation.id,
+         await listAdminMessages(conversation.id),
+       ] as const),
+     )
+     if (cancelled) return
+
+     const cloudIds = new Set(cloudConversations.map(conversation => conversation.id))
+     const mergedCloudConversations = cloudConversations.map(conversation => ({
+       id: conversation.id,
+       title: conversation.title,
+       messages: (cloudMessages.find(([id]) => id === conversation.id)?.[1] ?? []).map(message => ({
+         id: message.id,
+         role: message.role,
+         content: message.content,
+         timestamp: message.created_at,
+       })),
+       createdAt: conversation.created_at,
+     }))
+     const localOnlyConversations = localConversations.filter(conversation => !cloudIds.has(conversation.id))
+     const mergedConversations = [...mergedCloudConversations, ...localOnlyConversations]
+       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+
+     const nextConversations = mergedConversations.length > 0
+       ? mergedConversations
+       : [createConversation()]
+     const nextActiveConvId = localActiveConvId && nextConversations.some(conversation => conversation.id === localActiveConvId)
+       ? localActiveConvId
+       : loadAdminActiveConvId(currentUser.id, nextConversations)
+
+     if (!cancelled) {
+       applyConversationState(nextConversations, nextActiveConvId)
+     }
+   })()
+
+   return () => {
+     cancelled = true
     }
-  }, []) // intentionally empty: run once on mount only
+  }, [applyConversationState, cancelInFlightRequest, currentUser.id])
+
+  const startNewChat = useCallback(async () => {
+   const conversation = createConversation()
+   applyConversationState([conversation, ...conversationsRef.current], conversation.id)
+   setClearConfirm(false)
+   setInputError(null)
+   await upsertAdminConversation(conversation.id, conversation.title)
+  }, [applyConversationState])
 
   const selectConversation = useCallback((id: string) => {
-    setActiveConvId(id)
-    saveAdminActiveConvId(id)
-    setClearConfirm(false)
-  }, [])
+   activeConvIdRef.current = id
+   setActiveConvId(id)
+   saveAdminActiveConvId(currentUser.id, id)
+   setClearConfirm(false)
+  }, [currentUser.id])
 
-  const clearCurrentChat = useCallback(() => {
-    if (!activeConvId) return
-    setConversations(prev => {
-      const next = prev.map(c =>
-        c.id === activeConvId ? { ...c, messages: [], title: 'New admin chat' } : c,
-      )
-      persistConversations(next)
-      return next
-    })
-    setClearConfirm(false)
-  }, [activeConvId, persistConversations])
+  const clearCurrentChat = useCallback(async () => {
+   const conversationId = activeConvIdRef.current
+   if (!conversationId) return
+   cancelInFlightRequest()
+   setIsResetting(true)
+   const nextConversations = conversationsRef.current.map(conversation =>
+     conversation.id === conversationId
+       ? { ...conversation, messages: [], title: 'New admin chat' }
+       : conversation,
+   )
+   applyConversationState(nextConversations, conversationId)
+   setClearConfirm(false)
+   setInputError(null)
+   await upsertAdminConversation(conversationId, 'New admin chat')
+   await deleteAdminMessagesForConversation(conversationId)
+   setIsResetting(false)
+  }, [applyConversationState, cancelInFlightRequest])
 
-  const deleteCurrentConversation = useCallback(() => {
-    if (!activeConvId) return
-    setConversations(prev => {
-      const next = prev.filter(c => c.id !== activeConvId)
-      persistConversations(next)
-      return next
-    })
-    void deleteAdminConversation(activeConvId)
-    // Select another conversation or create new
-    const remaining = conversations.filter(c => c.id !== activeConvId)
-    if (remaining.length > 0) {
-      const nextId = remaining[0].id
-      setActiveConvId(nextId)
-      saveAdminActiveConvId(nextId)
-    } else {
-      setActiveConvId(null)
-      saveAdminActiveConvId(null)
-    }
-    setClearConfirm(false)
-  }, [activeConvId, conversations, persistConversations])
+  const deleteCurrentConversation = useCallback(async () => {
+   const conversationId = activeConvIdRef.current
+   if (!conversationId) return
+   cancelInFlightRequest()
+   setIsResetting(true)
+   const remainingConversations = conversationsRef.current.filter(
+     conversation => conversation.id !== conversationId,
+   )
+   const fallbackConversation = remainingConversations.length === 0
+     ? createConversation()
+     : null
+   const nextConversations = fallbackConversation
+     ? [fallbackConversation]
+     : remainingConversations
+   const nextActiveConvId = fallbackConversation?.id ?? remainingConversations[0]?.id ?? null
+   applyConversationState(nextConversations, nextActiveConvId)
+   setClearConfirm(false)
+   setInputError(null)
+   if (fallbackConversation) {
+     await upsertAdminConversation(fallbackConversation.id, fallbackConversation.title)
+   }
+   await deleteAdminConversation(conversationId)
+   setIsResetting(false)
+  }, [applyConversationState, cancelInFlightRequest])
 
-  const clearAllChats = useCallback(() => {
-    setConversations([])
-    saveAdminConversations([])
-    setActiveConvId(null)
-    saveAdminActiveConvId(null)
-    void deleteAllAdminConversations()
-    setClearConfirm(false)
-    // Start fresh after clearing
-    const id = genUUID()
-    const conv: Conversation = {
-      id,
-      title: 'New admin chat',
-      messages: [],
-      createdAt: new Date().toISOString(),
-    }
-    setConversations([conv])
-    saveAdminConversations([conv])
-    setActiveConvId(id)
-    saveAdminActiveConvId(id)
-  }, [])
+  const clearAllChats = useCallback(async () => {
+   cancelInFlightRequest()
+   setIsResetting(true)
+   setClearConfirm(false)
+   setInputError(null)
+   const replacementConversation = createConversation()
+   applyConversationState([replacementConversation], replacementConversation.id)
+   await deleteAllAdminConversations()
+   await upsertAdminConversation(replacementConversation.id, replacementConversation.title)
+   setIsResetting(false)
+  }, [applyConversationState, cancelInFlightRequest])
 
   const sendMessage = useCallback(async () => {
-    const trimmed = input.trim()
-    if (!trimmed || isThinking) return
+   const trimmed = input.trim()
+   if (!trimmed || isBusy) return
+   if (textEncoder.encode(trimmed).byteLength > MAX_ADMIN_MESSAGE_BYTES) {
+     setInputError(`Message is too large. Keep it under ${MAX_ADMIN_MESSAGE_BYTES} UTF-8 bytes.`)
+     return
+   }
+   setInputError(null)
 
-    let convId = activeConvId
-    if (!convId) {
-      const id = genUUID()
-      const conv: Conversation = {
-        id,
-        title: 'New admin chat',
-        messages: [],
-        createdAt: new Date().toISOString(),
-      }
-      setConversations(prev => {
-        const next = [conv, ...prev]
-        persistConversations(next)
-        return next
-      })
-      setActiveConvId(id)
-      saveAdminActiveConvId(id)
-      convId = id
-    }
+   const requestVersion = requestVersionRef.current + 1
+   requestVersionRef.current = requestVersion
 
-    const userMsg: Message = {
-      id: genUUID(),
-      role: 'user',
+   let convId = activeConvIdRef.current
+   let currentConversation = conversationsRef.current.find(conversation => conversation.id === convId) ?? null
+   if (!convId) {
+     currentConversation = createConversation()
+     convId = currentConversation.id
+     applyConversationState([currentConversation, ...conversationsRef.current], convId)
+   }
+
+   const userMsg: Message = {
+     id: genUUID(),
+     role: 'user',
       content: trimmed,
       timestamp: new Date().toISOString(),
     }
 
     setInput('')
     setIsThinking(true)
-
-    // Add user message to local state immediately
-    setConversations(prev => {
-      const next = prev.map(c => {
-        if (c.id !== convId) return c
-        const msgs = [...c.messages, userMsg]
-        const title = msgs.length === 1 ? titleFromMessages(msgs) : c.title
-        return { ...c, messages: msgs, title }
-      })
-      saveAdminConversations(next)
-      return next
-    })
-
-    // Best-effort cloud persist of user message — position = index in conversation
-    const currentConv = conversations.find(c => c.id === convId)
-    const userPosition = currentConv?.messages.length ?? 0
-
-    void insertAdminMessage({
-      id: userMsg.id,
-      conversation_id: convId,
-      role: 'user',
-      content: userMsg.content,
-      position: userPosition,
-    })
-
-    // Build message history for the API call
-    const historyMessages = [
-      ...(currentConv?.messages ?? []),
-      userMsg,
-    ].map(m => ({ role: m.role, content: m.content }))
-
-    const result = await callAdminEdgeFunction(historyMessages)
-
-    const assistantMsg: Message = {
-      id: genUUID(),
-      role: 'assistant',
-      content: result.ok && result.message
-        ? result.message
-        : result.error ?? 'Admin cloud chat is temporarily unavailable.',
-      timestamp: new Date().toISOString(),
+    const userPosition = currentConversation?.messages.length ?? 0
+    const nextMessages = [...(currentConversation?.messages ?? []), userMsg]
+    const nextTitle = userPosition === 0
+      ? titleFromMessages(nextMessages)
+      : currentConversation?.title ?? titleFromMessages(nextMessages)
+    const updatedConversation: Conversation = {
+      ...(currentConversation ?? createConversation()),
+      id: convId,
+      title: nextTitle,
+      messages: nextMessages,
     }
+    const nextConversations = conversationsRef.current.some(conversation => conversation.id === convId)
+      ? conversationsRef.current.map(conversation =>
+          conversation.id === convId ? updatedConversation : conversation,
+        )
+      : [updatedConversation, ...conversationsRef.current]
+    applyConversationState(nextConversations, convId)
 
-    setConversations(prev => {
-      const next = prev.map(c => {
-        if (c.id !== convId) return c
-        const msgs = [...c.messages, assistantMsg]
-        return { ...c, messages: msgs }
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    try {
+      await upsertAdminConversation(convId, nextTitle)
+      if (requestVersionRef.current !== requestVersion) return
+
+      await insertAdminMessage({
+        id: userMsg.id,
+        conversation_id: convId,
+        role: 'user',
+        content: userMsg.content,
+        position: userPosition,
       })
-      saveAdminConversations(next)
-      // Cloud sync conversation after assistant reply
-      const updatedConv = next.find(c => c.id === convId)
-      if (updatedConv) void upsertAdminConversation(updatedConv.id, updatedConv.title)
-      return next
-    })
+      if (requestVersionRef.current !== requestVersion) return
 
-    void insertAdminMessage({
-      id: assistantMsg.id,
-      conversation_id: convId,
-      role: 'assistant',
-      content: assistantMsg.content,
-      position: userPosition + 1,
-    })
+      const result = await callAdminEdgeFunction(
+        buildHistoryMessages(nextMessages),
+        controller.signal,
+      )
+      if (requestVersionRef.current !== requestVersion || controller.signal.aborted) return
 
-    setIsThinking(false)
-  }, [input, isThinking, activeConvId, conversations, persistConversations])
+      const assistantMsg: Message = {
+        id: genUUID(),
+        role: 'assistant',
+        content: result.ok && result.message
+          ? result.message
+          : result.error ?? 'Admin cloud chat is temporarily unavailable.',
+        timestamp: new Date().toISOString(),
+      }
+
+      const currentMessages = (
+        conversationsRef.current.find(conversation => conversation.id === convId)?.messages
+        ?? nextMessages
+      )
+      const finalConversations = conversationsRef.current.map(conversation =>
+        conversation.id === convId
+          ? { ...conversation, title: nextTitle, messages: [...currentMessages, assistantMsg] }
+          : conversation,
+      )
+      applyConversationState(finalConversations, convId)
+
+      await upsertAdminConversation(convId, nextTitle)
+      if (requestVersionRef.current !== requestVersion) return
+
+      await insertAdminMessage({
+        id: assistantMsg.id,
+        conversation_id: convId,
+        role: 'assistant',
+        content: assistantMsg.content,
+        position: userPosition + 1,
+      })
+    } finally {
+      if (requestVersionRef.current === requestVersion) {
+        abortRef.current = null
+        setIsThinking(false)
+      }
+    }
+  }, [applyConversationState, input, isBusy])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -662,7 +769,7 @@ export default function AdminDaemonInterface({
               <li>Persistence configured: {String(diagnostics.persistenceConfigured)}</li>
               <li>Session active: {String(diagnostics.sessionActive)}</li>
               <li>Supabase host: {diagnostics.supabaseUrl || '(not configured)'}</li>
-              <li>Admin edge function: {hasEdgeFunction() ? 'reachable (public daemon-chat)' : 'not configured'}</li>
+              <li>Admin edge function status: not verified by the browser diagnostics</li>
             </ul>
             <p style={{ margin: '0.4rem 0 0', color: '#888' }}>
               No secret values are shown above. To access project secrets, use the Supabase dashboard.
@@ -757,17 +864,20 @@ export default function AdminDaemonInterface({
           <textarea
             aria-label="Admin Daemon message input"
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => {
+              setInput(e.target.value)
+              if (inputError) setInputError(null)
+            }}
             onKeyDown={handleKeyDown}
             placeholder="Message Admin Daemon…"
             rows={2}
-            disabled={isThinking}
+            disabled={isBusy}
             style={{
               flex: 1,
               resize: 'none',
               padding: '0.6rem 0.75rem',
               borderRadius: '8px',
-              border: '1px solid #ccc',
+              border: inputError ? '1px solid #c44' : '1px solid #ccc',
               fontSize: '0.9rem',
               lineHeight: 1.5,
               fontFamily: 'inherit',
@@ -776,7 +886,7 @@ export default function AdminDaemonInterface({
           <button
             type="button"
             onClick={() => void sendMessage()}
-            disabled={isThinking || !input.trim()}
+            disabled={isBusy || !input.trim()}
             aria-label="Send message"
             style={{
               padding: '0.6rem 1.2rem',
@@ -784,14 +894,22 @@ export default function AdminDaemonInterface({
               color: '#fff',
               border: 'none',
               borderRadius: '8px',
-              cursor: isThinking || !input.trim() ? 'not-allowed' : 'pointer',
-              opacity: isThinking || !input.trim() ? 0.5 : 1,
+              cursor: isBusy || !input.trim() ? 'not-allowed' : 'pointer',
+              opacity: isBusy || !input.trim() ? 0.5 : 1,
               fontSize: '0.9rem',
             }}
           >
             Send
           </button>
         </div>
+        {inputError && (
+          <p
+            role="alert"
+            style={{ margin: '0 1.25rem 0.75rem', color: '#c44', fontSize: '0.8rem' }}
+          >
+            {inputError}
+          </p>
+        )}
       </main>
     </div>
   )

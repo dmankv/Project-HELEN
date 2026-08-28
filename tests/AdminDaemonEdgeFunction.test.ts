@@ -34,9 +34,15 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain("data.role === 'admin'")
   })
 
-  it('verifyAdmin function is called before processing', () => {
-    expect(src).toContain('verifyAdmin(')
-    expect(src).toContain('isAdmin')
+  it('verifyAdmin function is called before request validation and provider access', () => {
+    const verifyAdminIndex = src.indexOf('const isAdmin = await verifyAdmin(')
+    const validateMessagesIndex = src.indexOf('const validation = validateMessages(body)')
+    const callProviderIndex = src.indexOf('const message = await callProvider(')
+    expect(verifyAdminIndex).toBeGreaterThan(-1)
+    expect(validateMessagesIndex).toBeGreaterThan(-1)
+    expect(callProviderIndex).toBeGreaterThan(-1)
+    expect(verifyAdminIndex).toBeLessThan(validateMessagesIndex)
+    expect(verifyAdminIndex).toBeLessThan(callProviderIndex)
   })
 
   it('does not use JWT claims for role (no app_metadata role check)', () => {
@@ -112,9 +118,13 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain('validateStrategyMetadata(')
   })
 
-  it('requires Content-Type application/json (POST only)', () => {
-    expect(src).toContain("req.method !== 'POST'")
+  it('rejects non-POST requests before reading the JSON body', () => {
+    const methodGuardIndex = src.indexOf("if (req.method !== 'POST')")
+    const reqJsonIndex = src.indexOf('body = await req.json()')
+    expect(methodGuardIndex).toBeGreaterThan(-1)
+    expect(reqJsonIndex).toBeGreaterThan(-1)
     expect(src).toContain('METHOD_NOT_ALLOWED')
+    expect(methodGuardIndex).toBeLessThan(reqJsonIndex)
   })
 
   // ---------------------------------------------------------------------------

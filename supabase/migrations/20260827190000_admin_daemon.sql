@@ -132,7 +132,16 @@ drop policy if exists "admin_messages_insert_own" on public.admin_messages;
 create policy "admin_messages_insert_own"
   on public.admin_messages for insert
   to authenticated
-  with check (auth.uid() = user_id and public.is_admin());
+  with check (
+    auth.uid() = user_id
+    and public.is_admin()
+    and exists (
+      select 1
+      from public.admin_conversations
+      where admin_conversations.id = conversation_id
+        and admin_conversations.user_id = auth.uid()
+    )
+  );
 
 drop policy if exists "admin_messages_delete_own" on public.admin_messages;
 create policy "admin_messages_delete_own"

@@ -191,6 +191,18 @@ export async function insertAdminMessage(msg: {
   return !error
 }
 
+export async function deleteAdminMessagesForConversation(
+  conversationId: string,
+): Promise<boolean> {
+  const client = await getAuthedClient()
+  if (!client) return false
+  const { error } = await client
+    .from('admin_messages')
+    .delete()
+    .eq('conversation_id', conversationId)
+  return !error
+}
+
 // ---------------------------------------------------------------------------
 // Durable memories
 // ---------------------------------------------------------------------------

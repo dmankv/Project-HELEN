@@ -23,6 +23,14 @@ const migrationPath = path.resolve(
 describe('Admin Daemon migration', () => {
   const rawSql = fs.readFileSync(migrationPath, 'utf8')
   const normalizedSql = rawSql.toLowerCase()
+  const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const extractPolicyBlock = (policyName: string): string => {
+    const match = rawSql.match(
+      new RegExp(`create policy "${escapeRegExp(policyName)}"[\\s\\S]+?;`, 'i'),
+    )
+    expect(match, `missing policy ${policyName}`).not.toBeNull()
+    return match![0]
+  }
 
   // ---------------------------------------------------------------------------
   // is_admin() helper
@@ -74,19 +82,32 @@ describe('Admin Daemon migration', () => {
 
   ADMIN_TABLES.forEach(table => {
     it(`${table} select policy requires auth.uid() = user_id AND is_admin()`, () => {
-      expect(normalizedSql).toContain(`create policy "${table}_select_own"`)
-      expect(normalizedSql).toContain(`on public.${table} for select`)
-      expect(normalizedSql).toContain('auth.uid() = user_id and public.is_admin()')
+      const policy = extractPolicyBlock(`${table}_select_own`)
+      expect(policy.toLowerCase()).toContain(`on public.${table} for select`)
+      expect(policy.toLowerCase()).toContain('auth.uid() = user_id')
+      expect(policy.toLowerCase()).toContain('public.is_admin()')
     })
 
     it(`${table} insert policy requires auth.uid() = user_id AND is_admin()`, () => {
-      expect(normalizedSql).toContain(`create policy "${table}_insert_own"`)
-      expect(normalizedSql).toContain(`on public.${table} for insert`)
+      const policy = extractPolicyBlock(`${table}_insert_own`)
+      expect(policy.toLowerCase()).toContain(`on public.${table} for insert`)
+      expect(policy.toLowerCase()).toContain('auth.uid() = user_id')
+      expect(policy.toLowerCase()).toContain('public.is_admin()')
     })
 
     it(`${table} delete policy requires auth.uid() = user_id AND is_admin()`, () => {
-      expect(normalizedSql).toContain(`create policy "${table}_delete_own"`)
+      const policy = extractPolicyBlock(`${table}_delete_own`)
+      expect(policy.toLowerCase()).toContain('auth.uid() = user_id')
+      expect(policy.toLowerCase()).toContain('public.is_admin()')
     })
+  })
+
+  it('admin_messages insert policy requires parent conversation ownership', () => {
+    const policy = extractPolicyBlock('admin_messages_insert_own')
+    expect(policy.toLowerCase()).toContain('exists (')
+    expect(policy.toLowerCase()).toContain('from public.admin_conversations')
+    expect(policy.toLowerCase()).toContain('admin_conversations.id = conversation_id')
+    expect(policy.toLowerCase()).toContain('admin_conversations.user_id = auth.uid()')
   })
 
   it('all policies use is_admin() — demoted users lose access', () => {

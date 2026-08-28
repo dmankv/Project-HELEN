@@ -8,7 +8,7 @@ Project-HELEN hosts two Daemon instances:
 |---|---|---|
 | Access | Anonymous and authenticated users | Authenticated users with `profiles.role = 'admin'` only |
 | Route guard | None (public) | Server-side + browser-side |
-| Chat storage | `daemon_messages`, `daemon_conversations`, `daemon_active_conv_id` | `daemon_admin_messages`, `daemon_admin_conversations`, `daemon_admin_active_conv_id` |
+| Chat storage | `daemon_messages`, `daemon_conversations`, `daemon_active_conv_id` | `daemon_admin_conversations`, `daemon_admin_active_conv_id` |
 | Cloud tables | `conversations`, `messages`, `durable_memories`, `learning_interactions` | `admin_conversations`, `admin_messages`, `admin_durable_memories`, `admin_learning_interactions` |
 | Edge Function | `daemon-chat` | `admin-daemon` |
 | Navigation | Always visible | Visible only to admins |
