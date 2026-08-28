@@ -478,7 +478,7 @@ Deno.serve(async (req: Request) => {
 
   const metadata = validateStrategyMetadata(body)
   if (!metadata.valid) {
-    return new Response(JSON.stringify({ error: metadata.error }), { status: 400, headers })
+    return jsonErrorResponse('BAD_REQUEST', 400, headers)
   }
 
   logAudit('admin_chat', {

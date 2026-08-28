@@ -235,6 +235,6 @@ describe('Admin persistence service — uses only anon key', () => {
     const envAccesses = src.match(/VITE_\w+/g) ?? []
     expect(envAccesses).toContain('VITE_SUPABASE_URL')
     expect(envAccesses).toContain('VITE_SUPABASE_ANON_KEY')
-    expect(envAccesses).not.toContain('SUPABASE_SERVICE_ROLE_KEY')
+    expect(src).not.toContain('SUPABASE_SERVICE_ROLE_KEY')
   })
 })

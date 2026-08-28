@@ -40,12 +40,26 @@ export const ADMIN_STORAGE_KEYS = {
 
 type AdminStorageKeyName = keyof typeof ADMIN_STORAGE_KEYS
 
+const ADMIN_SUPABASE_URL =
+  (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL ?? ''
+const ADMIN_SUPABASE_ANON_KEY =
+  (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY ?? ''
 const MAX_ADMIN_HISTORY_MESSAGES = 40
 const MAX_ADMIN_MESSAGE_BYTES = 8_000
 const textEncoder = new TextEncoder()
+let adminEdgeAuthClient: ReturnType<typeof createClient> | null = null
 
 export function getAdminStorageKey(userId: string, key: AdminStorageKeyName): string {
   return `${ADMIN_STORAGE_KEYS[key]}:${userId}`
+}
+
+function getAdminEdgeAuthClient(): ReturnType<typeof createClient> | null {
+  if (!ADMIN_SUPABASE_URL || !ADMIN_SUPABASE_ANON_KEY) return null
+  if (adminEdgeAuthClient) return adminEdgeAuthClient
+  adminEdgeAuthClient = createClient(ADMIN_SUPABASE_URL, ADMIN_SUPABASE_ANON_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  })
+  return adminEdgeAuthClient
 }
 
 // ---------------------------------------------------------------------------
@@ -86,26 +100,18 @@ async function callAdminEdgeFunction(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
 ): Promise<AdminEdgeChatResult> {
-  const supabaseUrl =
-    (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL ?? ''
-  const supabaseAnonKey =
-    (import.meta as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY ?? ''
-
-  if (!supabaseUrl || !supabaseAnonKey) {
+  const client = getAdminEdgeAuthClient()
+  if (!client) {
     return { ok: false, error: 'admin-daemon edge function is not configured.' }
   }
 
-  // Get the current session token from Supabase auth
-  const client = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-  })
   const { data } = await client.auth.getSession()
   const token = data.session?.access_token
   if (!token) {
     return { ok: false, error: 'No active session.' }
   }
 
-  const endpoint = `${supabaseUrl}/functions/v1/admin-daemon`
+  const endpoint = `${ADMIN_SUPABASE_URL}/functions/v1/admin-daemon`
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -165,6 +171,17 @@ function loadAdminActiveConvId(userId: string, convs: Conversation[]): string | 
   return sorted[0].id
 }
 
+function loadInitialAdminState(userId: string): {
+  conversations: Conversation[]
+  activeConvId: string | null
+} {
+  const conversations = loadAdminConversations(userId)
+  return {
+    conversations,
+    activeConvId: loadAdminActiveConvId(userId, conversations),
+  }
+}
+
 function saveAdminActiveConvId(userId: string, id: string | null): void {
   try {
     if (id === null) {
@@ -207,13 +224,13 @@ export default function AdminDaemonInterface({
   onBackToPublic,
   onLogoutClick,
 }: AdminDaemonInterfaceProps): JSX.Element {
-  const [conversations, setConversations] = useState<Conversation[]>(() =>
-   loadAdminConversations(currentUser.id),
+  const initialStateRef = useRef(loadInitialAdminState(currentUser.id))
+  const [conversations, setConversations] = useState<Conversation[]>(
+   initialStateRef.current.conversations,
   )
-  const [activeConvId, setActiveConvId] = useState<string | null>(() => {
-   const convs = loadAdminConversations(currentUser.id)
-   return loadAdminActiveConvId(currentUser.id, convs)
-  })
+  const [activeConvId, setActiveConvId] = useState<string | null>(
+   initialStateRef.current.activeConvId,
+  )
   const [input, setInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
@@ -483,16 +500,18 @@ export default function AdminDaemonInterface({
       )
       applyConversationState(finalConversations, convId)
 
-      await upsertAdminConversation(convId, nextTitle)
-      if (requestVersionRef.current !== requestVersion) return
+      if (result.ok) {
+        await upsertAdminConversation(convId, nextTitle)
+        if (requestVersionRef.current !== requestVersion) return
 
-      await insertAdminMessage({
-        id: assistantMsg.id,
-        conversation_id: convId,
-        role: 'assistant',
-        content: assistantMsg.content,
-        position: userPosition + 1,
-      })
+        await insertAdminMessage({
+          id: assistantMsg.id,
+          conversation_id: convId,
+          role: 'assistant',
+          content: assistantMsg.content,
+          position: userPosition + 1,
+        })
+      }
     } finally {
       if (requestVersionRef.current === requestVersion) {
         abortRef.current = null
