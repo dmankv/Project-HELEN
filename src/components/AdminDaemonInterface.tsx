@@ -866,7 +866,11 @@ export default function AdminDaemonInterface({
             rows={2}
             disabled={isBusy}
             aria-invalid={inputError ? 'true' : 'false'}
-            className={'daemon-input admin-daemon-input' + (inputError ? ' admin-daemon-input-error' : '')}
+            className={[
+              'daemon-input',
+              'admin-daemon-input',
+              inputError ? 'admin-daemon-input-error' : '',
+            ].filter(Boolean).join(' ')}
           />
           <button
             type="button"
@@ -881,7 +885,7 @@ export default function AdminDaemonInterface({
         {inputError && (
           <p
             role="alert"
-            style={{ margin: '0 1.25rem 0.75rem', color: '#c44', fontSize: '0.8rem' }}
+            className="admin-daemon-input-error-message"
           >
             {inputError}
           </p>

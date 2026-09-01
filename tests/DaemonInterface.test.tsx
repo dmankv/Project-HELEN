@@ -373,6 +373,15 @@ describe('DaemonInterface', () => {
     expect(clearAllInHeader).toBeUndefined()
   })
 
+  it('keeps the public daemon shell wired to shared theme classes', () => {
+    render(<DaemonInterface />)
+    expect(document.querySelector('.daemon-app')).toBeInTheDocument()
+    expect(document.querySelector('.daemon-header')).toBeInTheDocument()
+    expect(screen.getByRole('log', { name: /Conversation/i })).toHaveClass('messages-container')
+    expect(document.querySelector('.input-area')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Send message/i })).toHaveClass('send-btn')
+  })
+
   // ── Clear current chat ────────────────────────────────────────────────────
 
   it('"Clear current chat" is disabled when no active conversation exists', () => {

@@ -777,9 +777,9 @@
 }
 
 .admin-daemon-danger-btn:hover:not(:disabled) {
-  background-color: rgba(220, 80, 80, 0.15);
-  border-color: #c0392b;
-  color: #e74c3c;
+  background-color: var(--color-surface-light);
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .admin-daemon-header {
@@ -824,7 +824,13 @@
 }
 
 .admin-daemon-input-error {
-  border-color: #c44;
+  border-color: var(--color-error);
+}
+
+.admin-daemon-input-error-message {
+  margin: 0 1.25rem 0.75rem;
+  color: var(--color-error);
+  font-size: 0.8rem;
 }
 
 /* ── Responsive: mobile input ────────────────────────── */

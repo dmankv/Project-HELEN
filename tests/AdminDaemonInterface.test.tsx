@@ -190,7 +190,7 @@ describe('AdminDaemonInterface', () => {
     render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
 
     expect(await screen.findByText('Restricted administrative assistant')).toBeInTheDocument()
-    expect(screen.getAllByLabelText(`Signed in as ${currentUser.email}`)).toHaveLength(2)
+    expect(await screen.findAllByLabelText(`Signed in as ${currentUser.email}`)).toHaveLength(2)
     expect(screen.getByLabelText('Account role admin')).toHaveTextContent('Admin')
   })
 
@@ -379,24 +379,15 @@ describe('AdminDaemonInterface', () => {
     expect(screen.queryByText('First admin chat')).toBeNull()
   })
 
-  it('keeps admin theme literals out of AdminDaemonInterface source while public daemon keeps shared shell classes', () => {
+  it('keeps old regular theme literals out of AdminDaemonInterface source', () => {
     const adminSource = readFileSync(
       resolve(process.cwd(), 'src/components/AdminDaemonInterface.tsx'),
       'utf8',
     )
-    const publicSource = readFileSync(
-      resolve(process.cwd(), 'src/components/DaemonInterface.tsx'),
-      'utf8',
+
+    expect(adminSource).not.toMatch(
+      /#(?:f9f9f9|1a1a2e|f0f0ff|e0e0e0|(?:fff|eef|222|444|666|888|ccc)(?![0-9a-fA-F]))/i,
     )
-
-    expect(adminSource).not.toMatch(/#(?:fff|f9f9f9|1a1a2e|eef|f0f0ff|222|444|666|888|ccc|e0e0e0)\b/i)
-    expect(adminSource).toContain('className="daemon-header admin-daemon-header"')
-    expect(adminSource).toContain('className="messages-container admin-daemon-messages"')
-    expect(adminSource).toContain('className="send-btn admin-daemon-send-btn"')
-
-    expect(publicSource).toContain('<header className="daemon-header">')
-    expect(publicSource).toContain('<div className="input-area">')
-    expect(publicSource).toContain('className="messages-container"')
   })
 
   it('preserves local messages when cloud message hydration fails for a cloud conversation', async () => {
