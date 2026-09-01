@@ -686,6 +686,38 @@
   padding: 0.2rem 0.45rem;
 }
 
+/* ── Admin Daemon shell parity ───────────────────────── */
+.admin-daemon-app,
+.admin-daemon-main {
+  background: #f9f9f9;
+}
+
+.admin-daemon-sidebar {
+  background: #fff;
+  border-right: 1px solid #e0e0e0;
+}
+
+.admin-daemon-sidebar-header {
+  align-items: flex-start;
+  background: #1a1a2e;
+  color: #fff;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.admin-daemon-brand-wrap {
+  min-width: 0;
+}
+
+.admin-daemon-sidebar-header .sidebar-toggle {
+  color: #aab;
+  border-color: #445;
+}
+
+.admin-daemon-sidebar-header .sidebar-toggle:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 /* ── Responsive: mobile input ────────────────────────── */
 @media (max-width: 640px) {
   .input-area {

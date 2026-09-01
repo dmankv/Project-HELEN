@@ -41,9 +41,11 @@ vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co')
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key')
 
 import AdminDaemonInterface, {
+  ADMIN_STORAGE_KEYS,
   buildHistoryMessages,
   getAdminStorageKey,
 } from '../src/components/AdminDaemonInterface'
+import { SIDEBAR_OPEN_KEY } from '../src/components/sidebarPreference'
 
 const currentUser = {
   id: 'admin-1',
@@ -55,6 +57,7 @@ const currentUser = {
 const PUBLIC_CONVERSATIONS_KEY = 'daemon_conversations'
 const PUBLIC_MESSAGES_KEY = 'daemon_messages'
 const PUBLIC_ACTIVE_CONV_KEY = 'daemon_active_conv_id'
+const PUBLIC_SIDEBAR_KEY = SIDEBAR_OPEN_KEY
 
 describe('AdminDaemonInterface', () => {
   beforeEach(() => {
@@ -113,6 +116,99 @@ describe('AdminDaemonInterface', () => {
     await waitFor(() => expect(screen.getByText('Recovered from cloud')).toBeInTheDocument())
     expect(screen.getAllByText('Cloud conversation')).toHaveLength(2)
     expect(persistenceMocks.listAdminMessages).toHaveBeenCalledWith('cloud-conv-1')
+  })
+
+  it('shows admin sidebar open by default with close control', async () => {
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    expect(await screen.findByRole('navigation', { name: 'Admin Daemon conversation history' })).toBeInTheDocument()
+    expect(screen.getAllByRole('navigation')).toHaveLength(1)
+    expect(screen.getByRole('list', { name: 'Admin conversations' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open sidebar' })).toBeNull()
+  })
+
+  it('close/open sidebar controls toggle conditional rendering accessibly', async () => {
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Close sidebar' }))
+    expect(screen.queryByRole('navigation', { name: 'Admin Daemon conversation history' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Open sidebar' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }))
+    expect(screen.getByRole('navigation', { name: 'Admin Daemon conversation history' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument()
+  })
+
+  it('persists sidebar close/open state across remount for the same admin user', async () => {
+    const sidebarKey = getAdminStorageKey(currentUser.id, 'sidebarOpen')
+    const { unmount } = render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Close sidebar' }))
+    await waitFor(() => expect(localStorage.getItem(sidebarKey)).toBe('false'))
+
+    unmount()
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    expect(await screen.findByRole('button', { name: 'Open sidebar' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Admin Daemon conversation history' })).toBeNull()
+  })
+
+  it('reloads user-scoped sidebar preference when authenticated admin account changes', async () => {
+    const firstUser = { ...currentUser, id: 'admin-1', email: 'admin1@example.com' }
+    const secondUser = { ...currentUser, id: 'admin-2', email: 'admin2@example.com' }
+    localStorage.setItem(getAdminStorageKey(firstUser.id, 'sidebarOpen'), 'false')
+    localStorage.setItem(getAdminStorageKey(secondUser.id, 'sidebarOpen'), 'true')
+
+    const { rerender } = render(
+      <AdminDaemonInterface currentUser={firstUser} onBackToPublic={() => undefined} />,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Open sidebar' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Admin Daemon conversation history' })).toBeNull()
+
+    rerender(<AdminDaemonInterface currentUser={secondUser} onBackToPublic={() => undefined} />)
+
+    expect(await screen.findByRole('navigation', { name: 'Admin Daemon conversation history' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument()
+  })
+
+  it('uses admin-scoped sidebar key namespace distinct from public daemon keys', () => {
+    const adminSidebarPrefix = ADMIN_STORAGE_KEYS.sidebarOpen
+    expect(adminSidebarPrefix).toContain('admin')
+    expect(adminSidebarPrefix).not.toBe(PUBLIC_SIDEBAR_KEY)
+    expect(adminSidebarPrefix).not.toBe(PUBLIC_CONVERSATIONS_KEY)
+    expect(adminSidebarPrefix).not.toBe(PUBLIC_MESSAGES_KEY)
+    expect(adminSidebarPrefix).not.toBe(PUBLIC_ACTIVE_CONV_KEY)
+  })
+
+  it('admin sidebar toggle does not modify public daemon sidebar or chat keys', async () => {
+    const adminSidebarKey = getAdminStorageKey(currentUser.id, 'sidebarOpen')
+    localStorage.setItem(PUBLIC_SIDEBAR_KEY, 'true')
+    localStorage.setItem(PUBLIC_CONVERSATIONS_KEY, JSON.stringify([{ id: 'public-conv-1' }]))
+    localStorage.setItem(PUBLIC_MESSAGES_KEY, JSON.stringify([{ id: 'public-msg-1' }]))
+    localStorage.setItem(PUBLIC_ACTIVE_CONV_KEY, 'public-conv-1')
+
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Close sidebar' }))
+    await waitFor(() => expect(localStorage.getItem(adminSidebarKey)).toBe('false'))
+
+    expect(localStorage.getItem(PUBLIC_SIDEBAR_KEY)).toBe('true')
+    expect(JSON.parse(localStorage.getItem(PUBLIC_CONVERSATIONS_KEY) ?? '[]')).toEqual([{ id: 'public-conv-1' }])
+    expect(JSON.parse(localStorage.getItem(PUBLIC_MESSAGES_KEY) ?? '[]')).toEqual([{ id: 'public-msg-1' }])
+    expect(localStorage.getItem(PUBLIC_ACTIVE_CONV_KEY)).toBe('public-conv-1')
+  })
+
+  it('public daemon sidebar preference writes do not modify admin sidebar preference', async () => {
+    const adminSidebarKey = getAdminStorageKey(currentUser.id, 'sidebarOpen')
+    localStorage.setItem(adminSidebarKey, 'false')
+    localStorage.setItem(PUBLIC_SIDEBAR_KEY, 'true')
+
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    expect(await screen.findByRole('button', { name: 'Open sidebar' })).toBeInTheDocument()
+    expect(localStorage.getItem(adminSidebarKey)).toBe('false')
   })
 
   it('keeps public storage untouched when admin creates, clears, and deletes chats', async () => {

@@ -18,17 +18,19 @@ import { ADMIN_STORAGE_KEYS, getAdminStorageKey } from '../src/components/AdminD
 const ADMIN_TEST_USER_ID = 'admin-user-1'
 const ADMIN_CONVERSATIONS_KEY = getAdminStorageKey(ADMIN_TEST_USER_ID, 'conversations')
 const ADMIN_ACTIVE_CONV_KEY = getAdminStorageKey(ADMIN_TEST_USER_ID, 'activeConversationId')
+const ADMIN_SIDEBAR_KEY = getAdminStorageKey(ADMIN_TEST_USER_ID, 'sidebarOpen')
 
 // Public Daemon keys (must not be touched by admin operations)
 const PUBLIC_CONVERSATIONS_KEY = 'daemon_conversations'
 const PUBLIC_MESSAGES_KEY = 'daemon_messages'
 const PUBLIC_ACTIVE_CONV_KEY = 'daemon_active_conv_id'
+const PUBLIC_SIDEBAR_KEY = 'daemon_sidebar_open'
 
 // All admin storage key names
-const ALL_ADMIN_KEYS = [ADMIN_CONVERSATIONS_KEY, ADMIN_ACTIVE_CONV_KEY]
+const ALL_ADMIN_KEYS = [ADMIN_CONVERSATIONS_KEY, ADMIN_ACTIVE_CONV_KEY, ADMIN_SIDEBAR_KEY]
 
 // All public Daemon storage key names
-const ALL_PUBLIC_KEYS = [PUBLIC_CONVERSATIONS_KEY, PUBLIC_MESSAGES_KEY, PUBLIC_ACTIVE_CONV_KEY]
+const ALL_PUBLIC_KEYS = [PUBLIC_CONVERSATIONS_KEY, PUBLIC_MESSAGES_KEY, PUBLIC_ACTIVE_CONV_KEY, PUBLIC_SIDEBAR_KEY]
 
 // ---------------------------------------------------------------------------
 // Persistence service tests
@@ -91,6 +93,7 @@ describe('Admin storage key isolation', () => {
   it('admin conversation key has admin namespace prefix', () => {
     expect(ADMIN_STORAGE_KEYS.conversations).toContain('admin')
     expect(ADMIN_STORAGE_KEYS.activeConversationId).toContain('admin')
+    expect(ADMIN_STORAGE_KEYS.sidebarOpen).toContain('admin')
   })
 
   it('writing to admin keys does not affect public keys', () => {

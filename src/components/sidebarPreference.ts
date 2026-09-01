@@ -10,12 +10,25 @@ function getSidebarPreferenceStorage(): Pick<Storage, 'getItem' | 'setItem'> | u
   }
 }
 
+export function parseSidebarOpenPreference(raw: string | null | undefined): boolean {
+  if (raw === null || raw === undefined) return true
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return true
+}
+
+export function loadSidebarOpenForKey(storageKey: string): boolean {
+  try {
+    return parseSidebarOpenPreference(getSidebarPreferenceStorage()?.getItem(storageKey))
+  } catch {
+    return true
+  }
+}
+
 export function loadSidebarOpen(): boolean {
   try {
     const raw = loadMigratedStorageItem(SIDEBAR_OPEN_KEY, LEGACY_STORAGE_KEYS.sidebarOpen)
-    if (raw === null || raw === undefined) return true
-    if (raw === 'true') return true
-    if (raw === 'false') return false
+    return parseSidebarOpenPreference(raw)
   } catch {
     // Ignore malformed or unreadable storage and fall back safely.
   }
@@ -23,10 +36,14 @@ export function loadSidebarOpen(): boolean {
   return true
 }
 
-export function saveSidebarOpen(sidebarOpen: boolean): void {
+export function saveSidebarOpenForKey(storageKey: string, sidebarOpen: boolean): void {
   try {
-    getSidebarPreferenceStorage()?.setItem(SIDEBAR_OPEN_KEY, String(sidebarOpen))
+    getSidebarPreferenceStorage()?.setItem(storageKey, String(sidebarOpen))
   } catch {
     // Persisting this UI preference is best effort only.
   }
+}
+
+export function saveSidebarOpen(sidebarOpen: boolean): void {
+  saveSidebarOpenForKey(SIDEBAR_OPEN_KEY, sidebarOpen)
 }
