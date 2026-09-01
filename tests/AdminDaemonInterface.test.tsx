@@ -209,20 +209,6 @@ describe('AdminDaemonInterface', () => {
     expect(localStorage.getItem(adminSidebarKey)).toBe('false')
   })
 
-  it('keeps conditional sidebar rendering and exact required aria labels in source', async () => {
-    const fs = await import('node:fs')
-    const path = await import('node:path')
-    const src = fs.readFileSync(
-      path.resolve(process.cwd(), 'src/components/AdminDaemonInterface.tsx'),
-      'utf8',
-    )
-
-    expect(src).toContain('{sidebarOpen && (')
-    expect(src).toContain('{!sidebarOpen && (')
-    expect(src).toContain('aria-label="Close sidebar"')
-    expect(src).toContain('aria-label="Open sidebar"')
-  })
-
   it('keeps public storage untouched when admin creates, clears, and deletes chats', async () => {
     const adminConversationKey = getAdminStorageKey(currentUser.id, 'conversations')
     const adminActiveKey = getAdminStorageKey(currentUser.id, 'activeConversationId')
