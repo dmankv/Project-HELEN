@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -126,6 +128,70 @@ describe('AdminDaemonInterface', () => {
     expect(screen.getByRole('list', { name: 'Admin conversations' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open sidebar' })).toBeNull()
+  })
+
+  it('uses shared daemon theme classes for admin shell, messages, controls, and diagnostics', async () => {
+    localStorage.setItem(getAdminStorageKey(currentUser.id, 'conversations'), JSON.stringify([
+      {
+        id: 'admin-conv-1',
+        title: 'Admin conversation',
+        messages: [
+          { id: 'admin-msg-1', role: 'user', content: 'hello admin', timestamp: '2026-08-28T00:00:00.000Z' },
+          { id: 'admin-msg-2', role: 'assistant', content: 'hello operator', timestamp: '2026-08-28T00:00:01.000Z' },
+        ],
+        createdAt: '2026-08-28T00:00:00.000Z',
+      },
+    ]))
+    localStorage.setItem(getAdminStorageKey(currentUser.id, 'activeConversationId'), 'admin-conv-1')
+
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    expect(document.querySelector('.admin-daemon-app.daemon-app')).toBeInTheDocument()
+
+    const sidebar = await screen.findByRole('navigation', { name: 'Admin Daemon conversation history' })
+    expect(sidebar).toHaveClass('daemon-sidebar', 'admin-daemon-sidebar')
+    expect(sidebar).not.toHaveAttribute('style')
+
+    const activeConversation = screen.getByRole('button', { name: 'Admin conversation' })
+    expect(activeConversation).toHaveClass('conversation-item', 'active')
+    expect(activeConversation).not.toHaveAttribute('style')
+
+    const header = document.querySelector('.admin-daemon-header.daemon-header')
+    expect(header).toBeInTheDocument()
+    expect(header).not.toHaveAttribute('style')
+
+    const newChatButton = screen.getByRole('button', { name: '+ New admin chat' })
+    expect(newChatButton).toHaveClass('new-chat-btn', 'admin-daemon-action-btn')
+    expect(newChatButton).not.toHaveAttribute('style')
+
+    const userBubble = screen.getByText('hello admin').closest('.bubble')
+    const assistantBubble = screen.getByText('hello operator').closest('.bubble')
+    expect(userBubble).toHaveClass('bubble', 'user-bubble')
+    expect(assistantBubble).toHaveClass('bubble', 'assistant-bubble')
+
+    const messages = screen.getByRole('log', { name: 'Admin chat messages' })
+    expect(messages).toHaveClass('messages-container', 'admin-daemon-messages')
+
+    const input = screen.getByLabelText('Admin Daemon message input')
+    expect(input).toHaveClass('daemon-input', 'admin-daemon-input')
+    expect(input).not.toHaveAttribute('style')
+
+    const sendButton = screen.getByRole('button', { name: 'Send message' })
+    expect(sendButton).toHaveClass('send-btn', 'admin-daemon-send-btn')
+    expect(sendButton).not.toHaveAttribute('style')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Diagnostics' }))
+    const diagnostics = await screen.findByRole('region', { name: 'Admin diagnostics' })
+    expect(diagnostics).toHaveClass('admin-daemon-diagnostics-panel')
+    expect(diagnostics).not.toHaveAttribute('style')
+  })
+
+  it('keeps admin identity labeling visible and accessible across sidebar and header', async () => {
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    expect(await screen.findByText('Restricted administrative assistant')).toBeInTheDocument()
+    expect(screen.getAllByLabelText(`Signed in as ${currentUser.email}`)).toHaveLength(2)
+    expect(screen.getByLabelText('Account role admin')).toHaveTextContent('Admin')
   })
 
   it('close/open sidebar controls toggle conditional rendering accessibly', async () => {
@@ -311,6 +377,26 @@ describe('AdminDaemonInterface', () => {
 
     await waitFor(() => expect(screen.getAllByText('Second admin chat')).toHaveLength(2))
     expect(screen.queryByText('First admin chat')).toBeNull()
+  })
+
+  it('keeps admin theme literals out of AdminDaemonInterface source while public daemon keeps shared shell classes', () => {
+    const adminSource = readFileSync(
+      resolve(process.cwd(), 'src/components/AdminDaemonInterface.tsx'),
+      'utf8',
+    )
+    const publicSource = readFileSync(
+      resolve(process.cwd(), 'src/components/DaemonInterface.tsx'),
+      'utf8',
+    )
+
+    expect(adminSource).not.toMatch(/#(?:fff|f9f9f9|1a1a2e|eef|f0f0ff|222|444|666|888|ccc|e0e0e0)\b/i)
+    expect(adminSource).toContain('className="daemon-header admin-daemon-header"')
+    expect(adminSource).toContain('className="messages-container admin-daemon-messages"')
+    expect(adminSource).toContain('className="send-btn admin-daemon-send-btn"')
+
+    expect(publicSource).toContain('<header className="daemon-header">')
+    expect(publicSource).toContain('<div className="input-area">')
+    expect(publicSource).toContain('className="messages-container"')
   })
 
   it('preserves local messages when cloud message hydration fails for a cloud conversation', async () => {
