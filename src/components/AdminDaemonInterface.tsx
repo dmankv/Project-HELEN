@@ -259,7 +259,6 @@ export default function AdminDaemonInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const requestVersionRef = useRef(0)
-  const sidebarOwnerRef = useRef(currentUser.id)
   const conversationsRef = useRef(conversations)
   const activeConvIdRef = useRef(activeConvId)
 
@@ -279,14 +278,6 @@ export default function AdminDaemonInterface({
    activeConvIdRef.current = activeConvId
   }, [activeConvId])
 
-  useEffect(() => {
-    if (sidebarOwnerRef.current !== currentUser.id) {
-      sidebarOwnerRef.current = currentUser.id
-      return
-    }
-    saveAdminSidebarOpen(currentUser.id, sidebarOpen)
-  }, [currentUser.id, sidebarOpen])
-
   const applyConversationState = useCallback((nextConversations: Conversation[], nextActiveConvId: string | null) => {
    conversationsRef.current = nextConversations
    activeConvIdRef.current = nextActiveConvId
@@ -302,6 +293,11 @@ export default function AdminDaemonInterface({
    abortRef.current = null
    setIsThinking(false)
   }, [])
+
+  const updateSidebarOpen = useCallback((nextSidebarOpen: boolean) => {
+   setSidebarOpen(nextSidebarOpen)
+   saveAdminSidebarOpen(currentUser.id, nextSidebarOpen)
+  }, [currentUser.id])
 
   useEffect(() => {
    let cancelled = false
@@ -634,7 +630,7 @@ export default function AdminDaemonInterface({
             <button
               type="button"
               className="sidebar-toggle"
-              onClick={() => setSidebarOpen(false)}
+              onClick={() => updateSidebarOpen(false)}
               aria-label="Close sidebar"
               title="Close sidebar"
             >
@@ -811,7 +807,7 @@ export default function AdminDaemonInterface({
           <button
             type="button"
             className="sidebar-reopen admin-daemon-sidebar-reopen"
-            onClick={() => setSidebarOpen(true)}
+            onClick={() => updateSidebarOpen(true)}
             aria-label="Open sidebar"
             title="Open sidebar"
           >
