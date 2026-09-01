@@ -18,6 +18,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import type { AuthUser } from '../services/daemonAuthAPI'
 import { genUUID } from '../services/daemonStorageMigration'
+import { loadSidebarOpenForKey, saveSidebarOpenForKey } from './sidebarPreference'
 import {
   deleteAdminMessagesForConversation,
   deleteAdminConversation,
@@ -28,6 +29,7 @@ import {
   listAdminMessages,
   upsertAdminConversation,
 } from '../services/adminDaemonPersistence'
+import '../styles/DaemonInterface.css'
 
 // ---------------------------------------------------------------------------
 // Isolated storage keys — never overlap with public Daemon keys
@@ -36,6 +38,7 @@ import {
 export const ADMIN_STORAGE_KEYS = {
   conversations: 'daemon_admin_conversations',
   activeConversationId: 'daemon_admin_active_conv_id',
+  sidebarOpen: 'daemon_admin_sidebar_open',
 } as const
 
 type AdminStorageKeyName = keyof typeof ADMIN_STORAGE_KEYS
@@ -174,11 +177,13 @@ function loadAdminActiveConvId(userId: string, convs: Conversation[]): string | 
 function loadInitialAdminState(userId: string): {
   conversations: Conversation[]
   activeConvId: string | null
+  sidebarOpen: boolean
 } {
   const conversations = loadAdminConversations(userId)
   return {
     conversations,
     activeConvId: loadAdminActiveConvId(userId, conversations),
+    sidebarOpen: loadSidebarOpenForKey(getAdminStorageKey(userId, 'sidebarOpen')),
   }
 }
 
@@ -190,6 +195,14 @@ function saveAdminActiveConvId(userId: string, id: string | null): void {
       localStorage.setItem(getAdminStorageKey(userId, 'activeConversationId'), id)
     }
   } catch { /* best-effort */ }
+}
+
+function loadAdminSidebarOpen(userId: string): boolean {
+  return loadSidebarOpenForKey(getAdminStorageKey(userId, 'sidebarOpen'))
+}
+
+function saveAdminSidebarOpen(userId: string, sidebarOpen: boolean): void {
+  saveSidebarOpenForKey(getAdminStorageKey(userId, 'sidebarOpen'), sidebarOpen)
 }
 
 function createConversation(): Conversation {
@@ -231,6 +244,7 @@ export default function AdminDaemonInterface({
   const [activeConvId, setActiveConvId] = useState<string | null>(
    initialStateRef.current.activeConvId,
   )
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialStateRef.current.sidebarOpen)
   const [input, setInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
@@ -245,6 +259,7 @@ export default function AdminDaemonInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const requestVersionRef = useRef(0)
+  const sidebarOwnerRef = useRef(currentUser.id)
   const conversationsRef = useRef(conversations)
   const activeConvIdRef = useRef(activeConvId)
 
@@ -263,6 +278,14 @@ export default function AdminDaemonInterface({
   useEffect(() => {
    activeConvIdRef.current = activeConvId
   }, [activeConvId])
+
+  useEffect(() => {
+    if (sidebarOwnerRef.current !== currentUser.id) {
+      sidebarOwnerRef.current = currentUser.id
+      return
+    }
+    saveAdminSidebarOpen(currentUser.id, sidebarOpen)
+  }, [currentUser.id, sidebarOpen])
 
   const applyConversationState = useCallback((nextConversations: Conversation[], nextActiveConvId: string | null) => {
    conversationsRef.current = nextConversations
@@ -287,6 +310,7 @@ export default function AdminDaemonInterface({
    setInputError(null)
    setIsResetting(false)
    setClearConfirm(false)
+   setSidebarOpen(loadAdminSidebarOpen(currentUser.id))
 
    const localConversations = loadAdminConversations(currentUser.id)
    const localActiveConvId = loadAdminActiveConvId(currentUser.id, localConversations)
@@ -591,46 +615,35 @@ export default function AdminDaemonInterface({
   )
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        fontFamily: 'inherit',
-        background: '#f9f9f9',
-      }}
-    >
-      {/* Sidebar */}
-      <aside
-        aria-label="Admin Daemon conversation history"
-        style={{
-          width: 260,
-          borderRight: '1px solid #e0e0e0',
-          display: 'flex',
-          flexDirection: 'column',
-          background: '#fff',
-          flexShrink: 0,
-        }}
-      >
-        {/* Admin identity badge */}
-        <div
-          style={{
-            padding: '1rem',
-            borderBottom: '1px solid #e0e0e0',
-            background: '#1a1a2e',
-            color: '#fff',
-          }}
+    <div className="daemon-app admin-daemon-app">
+      {sidebarOpen && (
+        <nav
+          className="daemon-sidebar admin-daemon-sidebar"
+          aria-label="Admin Daemon conversation history"
         >
-          <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Admin Daemon</div>
-          <div style={{ fontSize: '0.75rem', color: '#aab', marginTop: '0.2rem' }}>
-            Restricted administrative assistant
+          <div className="sidebar-header admin-daemon-sidebar-header">
+            <div className="admin-daemon-brand-wrap">
+              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Admin Daemon</div>
+              <div style={{ fontSize: '0.75rem', color: '#aab', marginTop: '0.2rem' }}>
+                Restricted administrative assistant
+              </div>
+              <div style={{ fontSize: '0.7rem', color: '#889', marginTop: '0.15rem' }}>
+                {currentUser.email}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="sidebar-toggle"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close sidebar"
+              title="Close sidebar"
+            >
+              ◀
+            </button>
           </div>
-          <div style={{ fontSize: '0.7rem', color: '#889', marginTop: '0.15rem' }}>
-            {currentUser.email}
-          </div>
-        </div>
 
-        {/* Nav actions */}
-        <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          {/* Nav actions */}
+          <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <button
             type="button"
             onClick={startNewChat}
@@ -682,122 +695,129 @@ export default function AdminDaemonInterface({
               Sign out
             </button>
           )}
-        </div>
+          </div>
 
-        {/* Conversation list */}
-        <nav
-          aria-label="Admin conversations"
-          style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0.5rem' }}
-        >
-          {sortedConversations.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => selectConversation(c.id)}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '0.5rem 0.75rem',
-                marginBottom: '0.2rem',
-                borderRadius: '6px',
-                border: 'none',
-                background: c.id === activeConvId ? '#eef' : 'transparent',
-                cursor: 'pointer',
-                fontSize: '0.82rem',
-                color: '#222',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {c.title}
-            </button>
-          ))}
+          {/* Conversation list */}
+          <nav
+            aria-label="Admin conversations"
+            style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0.5rem' }}
+          >
+            {sortedConversations.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => selectConversation(c.id)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '0.5rem 0.75rem',
+                  marginBottom: '0.2rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: c.id === activeConvId ? '#eef' : 'transparent',
+                  cursor: 'pointer',
+                  fontSize: '0.82rem',
+                  color: '#222',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {c.title}
+              </button>
+            ))}
+          </nav>
+
+          {/* Destructive actions */}
+          <div style={{ padding: '0.75rem', borderTop: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+            {!clearConfirm ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setClearConfirm(true)}
+                  aria-label="Destructive chat actions"
+                  style={{
+                    padding: '0.4rem',
+                    background: 'transparent',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '0.78rem',
+                    color: '#888',
+                  }}
+                >
+                  Clear / delete…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDiagnostics(v => !v)}
+                  style={{
+                    padding: '0.4rem',
+                    background: 'transparent',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '0.78rem',
+                    color: '#888',
+                  }}
+                >
+                  {showDiagnostics ? 'Hide diagnostics' : 'Diagnostics'}
+                </button>
+              </>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                <span style={{ fontSize: '0.78rem', color: '#888' }}>Choose action:</span>
+                <button
+                  type="button"
+                  onClick={clearCurrentChat}
+                  style={{ padding: '0.4rem', border: '1px solid #e0e0e0', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', background: 'transparent' }}
+                >
+                  Clear current chat
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteCurrentConversation}
+                  style={{ padding: '0.4rem', border: '1px solid #f99', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', color: '#c44', background: 'transparent' }}
+                >
+                  Delete this conversation
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllChats}
+                  style={{ padding: '0.4rem', border: '1px solid #f66', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', color: '#c00', background: 'transparent' }}
+                >
+                  Clear all admin chats
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClearConfirm(false)}
+                  style={{ padding: '0.4rem', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', background: 'transparent' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
-
-        {/* Destructive actions */}
-        <div style={{ padding: '0.75rem', borderTop: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-          {!clearConfirm ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setClearConfirm(true)}
-                aria-label="Destructive chat actions"
-                style={{
-                  padding: '0.4rem',
-                  background: 'transparent',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '5px',
-                  cursor: 'pointer',
-                  fontSize: '0.78rem',
-                  color: '#888',
-                }}
-              >
-                Clear / delete…
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowDiagnostics(v => !v)}
-                style={{
-                  padding: '0.4rem',
-                  background: 'transparent',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '5px',
-                  cursor: 'pointer',
-                  fontSize: '0.78rem',
-                  color: '#888',
-                }}
-              >
-                {showDiagnostics ? 'Hide diagnostics' : 'Diagnostics'}
-              </button>
-            </>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-              <span style={{ fontSize: '0.78rem', color: '#888' }}>Choose action:</span>
-              <button
-                type="button"
-                onClick={clearCurrentChat}
-                style={{ padding: '0.4rem', border: '1px solid #e0e0e0', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', background: 'transparent' }}
-              >
-                Clear current chat
-              </button>
-              <button
-                type="button"
-                onClick={deleteCurrentConversation}
-                style={{ padding: '0.4rem', border: '1px solid #f99', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', color: '#c44', background: 'transparent' }}
-              >
-                Delete this conversation
-              </button>
-              <button
-                type="button"
-                onClick={clearAllChats}
-                style={{ padding: '0.4rem', border: '1px solid #f66', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', color: '#c00', background: 'transparent' }}
-              >
-                Clear all admin chats
-              </button>
-              <button
-                type="button"
-                onClick={() => setClearConfirm(false)}
-                style={{ padding: '0.4rem', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', background: 'transparent' }}
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-        </div>
-      </aside>
+      )}
 
       {/* Main chat pane */}
       <main
+        className="daemon-main admin-daemon-main"
         aria-label="Admin Daemon chat"
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
       >
+        {!sidebarOpen && (
+          <button
+            type="button"
+            className="sidebar-reopen admin-daemon-sidebar-reopen"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open sidebar"
+            title="Open sidebar"
+          >
+            ▶
+          </button>
+        )}
         {/* Header */}
         <header
           style={{
