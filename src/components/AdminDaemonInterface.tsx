@@ -806,7 +806,7 @@ export default function AdminDaemonInterface({
         {!sidebarOpen && (
           <button
             type="button"
-            className="sidebar-reopen admin-daemon-sidebar-reopen"
+            className="sidebar-reopen"
             onClick={() => updateSidebarOpen(true)}
             aria-label="Open sidebar"
             title="Open sidebar"
