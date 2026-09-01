@@ -247,6 +247,7 @@ export default function AdminDaemonInterface({
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialStateRef.current.sidebarOpen)
   const [input, setInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
+  const [inputValidationError, setInputValidationError] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
   const [diagnostics, setDiagnostics] = useState<{
@@ -304,6 +305,7 @@ export default function AdminDaemonInterface({
    cancelInFlightRequest()
    setInput('')
    setInputError(null)
+   setInputValidationError(null)
    setIsResetting(false)
    setClearConfirm(false)
    setSidebarOpen(loadAdminSidebarOpen(currentUser.id))
@@ -487,10 +489,10 @@ export default function AdminDaemonInterface({
    const trimmed = input.trim()
    if (!trimmed || isBusy) return
    if (textEncoder.encode(trimmed).byteLength > MAX_ADMIN_MESSAGE_BYTES) {
-     setInputError(`Message is too large. Keep it under ${MAX_ADMIN_MESSAGE_BYTES} UTF-8 bytes.`)
+     setInputValidationError(`Message is too large. Keep it under ${MAX_ADMIN_MESSAGE_BYTES} UTF-8 bytes.`)
      return
    }
-   setInputError(null)
+   setInputValidationError(null)
 
    const requestVersion = requestVersionRef.current + 1
    requestVersionRef.current = requestVersion
@@ -619,11 +621,17 @@ export default function AdminDaemonInterface({
         >
           <div className="sidebar-header admin-daemon-sidebar-header">
             <div className="admin-daemon-brand-wrap">
-              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Admin Daemon</div>
-              <div style={{ fontSize: '0.75rem', color: '#aab', marginTop: '0.2rem' }}>
+              <div className="daemon-brand admin-daemon-brand">
+                <span className="daemon-logo" aria-hidden="true">🛡️</span>
+                <span>Admin Daemon</span>
+              </div>
+              <div className="admin-daemon-subtitle">
                 Restricted administrative assistant
               </div>
-              <div style={{ fontSize: '0.7rem', color: '#889', marginTop: '0.15rem' }}>
+              <div
+                className="account-label admin-daemon-email"
+                aria-label={`Signed in as ${currentUser.email}`}
+              >
                 {currentUser.email}
               </div>
             </div>
@@ -639,156 +647,99 @@ export default function AdminDaemonInterface({
           </div>
 
           {/* Nav actions */}
-          <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          <button
-            type="button"
-            onClick={startNewChat}
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              background: '#1a1a2e',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-            }}
-          >
-            + New admin chat
-          </button>
-
-          <button
-            type="button"
-            onClick={onBackToPublic}
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              background: 'transparent',
-              border: '1px solid #ccc',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-            }}
-          >
-            ← Return to Daemon
-          </button>
-
-          {onLogoutClick && (
+          <div className="admin-daemon-nav-actions">
             <button
               type="button"
-              onClick={onLogoutClick}
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                background: 'transparent',
-                border: '1px solid #ccc',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '0.85rem',
-                color: '#666',
-              }}
+              className="new-chat-btn admin-daemon-action-btn"
+              onClick={startNewChat}
             >
-              Sign out
+              + New admin chat
             </button>
-          )}
+
+            <button
+              type="button"
+              className="login-btn admin-daemon-action-btn admin-daemon-secondary-btn"
+              onClick={onBackToPublic}
+            >
+              ← Return to Daemon
+            </button>
+
+            {onLogoutClick && (
+              <button
+                type="button"
+                className="login-btn admin-daemon-action-btn admin-daemon-secondary-btn"
+                onClick={onLogoutClick}
+              >
+                Sign out
+              </button>
+            )}
           </div>
 
           {/* Conversation list */}
-          <ul
-            aria-label="Admin conversations"
-            style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0.5rem', listStyle: 'none', margin: 0 }}
-          >
+          <ul className="conversation-list" aria-label="Admin conversations">
             {sortedConversations.map(c => (
-              <li key={c.id} style={{ marginBottom: '0.2rem' }}>
+              <li key={c.id} className="conversation-list-item">
                 <button
                   type="button"
+                  className={'conversation-item ' + (c.id === activeConvId ? 'active' : '')}
                   onClick={() => selectConversation(c.id)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '0.5rem 0.75rem',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: c.id === activeConvId ? '#eef' : 'transparent',
-                    cursor: 'pointer',
-                    fontSize: '0.82rem',
-                    color: '#222',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
+                  title={c.title}
                 >
-                  {c.title}
+                  <span className="conv-icon" aria-hidden="true">🛡️</span>
+                  <span className="conv-title">{c.title}</span>
                 </button>
               </li>
             ))}
           </ul>
 
           {/* Destructive actions */}
-          <div style={{ padding: '0.75rem', borderTop: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+          <div className="admin-daemon-controls">
             {!clearConfirm ? (
               <>
                 <button
                   type="button"
                   onClick={() => setClearConfirm(true)}
                   aria-label="Destructive chat actions"
-                  style={{
-                    padding: '0.4rem',
-                    background: 'transparent',
-                    border: '1px solid #e0e0e0',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '0.78rem',
-                    color: '#888',
-                  }}
+                  className="login-btn admin-daemon-compact-btn"
                 >
                   Clear / delete…
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowDiagnostics(v => !v)}
-                  style={{
-                    padding: '0.4rem',
-                    background: 'transparent',
-                    border: '1px solid #e0e0e0',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '0.78rem',
-                    color: '#888',
-                  }}
+                  className="login-btn admin-daemon-compact-btn"
                 >
                   {showDiagnostics ? 'Hide diagnostics' : 'Diagnostics'}
                 </button>
               </>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                <span style={{ fontSize: '0.78rem', color: '#888' }}>Choose action:</span>
+              <div className="admin-daemon-confirm-actions">
+                <span className="admin-daemon-controls-label">Choose action:</span>
                 <button
                   type="button"
                   onClick={clearCurrentChat}
-                  style={{ padding: '0.4rem', border: '1px solid #e0e0e0', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', background: 'transparent' }}
+                  className="clear-current-btn admin-daemon-compact-btn"
                 >
                   Clear current chat
                 </button>
                 <button
                   type="button"
                   onClick={deleteCurrentConversation}
-                  style={{ padding: '0.4rem', border: '1px solid #f99', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', color: '#c44', background: 'transparent' }}
+                  className="clear-all-btn admin-daemon-compact-btn admin-daemon-danger-btn"
                 >
                   Delete this conversation
                 </button>
                 <button
                   type="button"
                   onClick={clearAllChats}
-                  style={{ padding: '0.4rem', border: '1px solid #f66', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', color: '#c00', background: 'transparent' }}
+                  className="clear-all-btn admin-daemon-compact-btn admin-daemon-danger-btn"
                 >
                   Clear all admin chats
                 </button>
                 <button
                   type="button"
                   onClick={() => setClearConfirm(false)}
-                  style={{ padding: '0.4rem', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer', fontSize: '0.78rem', background: 'transparent' }}
+                  className="login-btn admin-daemon-compact-btn"
                 >
                   Cancel
                 </button>
@@ -815,31 +766,25 @@ export default function AdminDaemonInterface({
           </button>
         )}
         {/* Header */}
-        <header
-          style={{
-            padding: '0.75rem 1.25rem',
-            borderBottom: '1px solid #e0e0e0',
-            background: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem',
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>
-            {activeConversation?.title ?? 'Admin Daemon'}
-          </span>
-          <span
-            style={{
-              marginLeft: 'auto',
-              fontSize: '0.75rem',
-              background: '#1a1a2e',
-              color: '#fff',
-              padding: '0.2rem 0.6rem',
-              borderRadius: '4px',
-            }}
-          >
-            Admin
-          </span>
+        <header className="daemon-header admin-daemon-header">
+          <div className="header-title">
+            <span className="daemon-logo-sm" aria-hidden="true">🛡️</span>
+            <span>{activeConversation?.title ?? 'Admin Daemon'}</span>
+          </div>
+          <div className="header-actions">
+            <span
+              className="account-label"
+              aria-label={`Signed in as ${currentUser.email}`}
+            >
+              {currentUser.email}
+            </span>
+            <span
+              className="account-role-label admin-daemon-badge"
+              aria-label="Account role admin"
+            >
+              Admin
+            </span>
+          </div>
         </header>
 
         {/* Diagnostics panel */}
@@ -847,22 +792,16 @@ export default function AdminDaemonInterface({
           <section
             aria-label="Admin diagnostics"
             role="region"
-            style={{
-              padding: '0.75rem 1.25rem',
-              background: '#f0f0ff',
-              borderBottom: '1px solid #e0e0e0',
-              fontSize: '0.8rem',
-              color: '#444',
-            }}
+            className="admin-daemon-diagnostics-panel"
           >
             <strong>Diagnostics</strong>
-            <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.2rem' }}>
+            <ul className="admin-diagnostics-list">
               <li>Persistence configured: {String(diagnostics.persistenceConfigured)}</li>
               <li>Session active: {String(diagnostics.sessionActive)}</li>
               <li>Supabase host: {diagnostics.supabaseUrl || '(not configured)'}</li>
               <li>Admin edge function status: not verified by the browser diagnostics</li>
             </ul>
-            <p style={{ margin: '0.4rem 0 0', color: '#888' }}>
+            <p className="admin-daemon-diagnostics-note">
               No secret values are shown above. To access project secrets, use the Supabase dashboard.
             </p>
           </section>
@@ -870,27 +809,14 @@ export default function AdminDaemonInterface({
 
         {/* Messages */}
         <div
+          className="messages-container admin-daemon-messages"
           role="log"
           aria-live="polite"
           aria-label="Admin chat messages"
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '1rem 1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.75rem',
-          }}
+          aria-busy={isThinking}
         >
           {(activeConversation?.messages.length ?? 0) === 0 && (
-            <div
-              style={{
-                color: '#aaa',
-                textAlign: 'center',
-                marginTop: '3rem',
-                fontSize: '0.9rem',
-              }}
-            >
+            <div className="empty-conv admin-daemon-empty-state">
               Admin Daemon is a restricted administrative assistant.
               <br />
               Start a new message to begin.
@@ -899,42 +825,29 @@ export default function AdminDaemonInterface({
           {(activeConversation?.messages ?? []).map(msg => (
             <div
               key={msg.id}
-              style={{
-                display: 'flex',
-                justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              }}
+              className={'message-row ' + (msg.role === 'user' ? 'user-row' : 'assistant-row')}
             >
-              <div
-                style={{
-                  maxWidth: '72%',
-                  padding: '0.6rem 0.9rem',
-                  borderRadius: '12px',
-                  background: msg.role === 'user' ? '#1a1a2e' : '#f0f0ff',
-                  color: msg.role === 'user' ? '#fff' : '#222',
-                  fontSize: '0.9rem',
-                  lineHeight: 1.5,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {msg.content}
+              <div className="message-avatar" aria-hidden="true">
+                {msg.role === 'user' ? '👤' : '🛡️'}
+              </div>
+              <div className="message-body">
+                <div className={'bubble ' + (msg.role === 'user' ? 'user-bubble' : 'assistant-bubble')}>
+                  <div className="bubble-text">{msg.content}</div>
+                </div>
               </div>
             </div>
           ))}
           {isThinking && (
-            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-              <div
-                aria-label="Admin Daemon is thinking"
-                style={{
-                  padding: '0.6rem 0.9rem',
-                  borderRadius: '12px',
-                  background: '#f0f0ff',
-                  color: '#888',
-                  fontSize: '0.9rem',
-                  fontStyle: 'italic',
-                }}
-              >
-                Thinking…
+            <div className="message-row assistant-row">
+              <div className="message-avatar" aria-hidden="true">🛡️</div>
+              <div className="message-body">
+                <div className="bubble assistant-bubble">
+                  <div className="typing-indicator" aria-label="Admin Daemon is thinking">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -942,61 +855,47 @@ export default function AdminDaemonInterface({
         </div>
 
         {/* Input */}
-        <div
-          style={{
-            padding: '0.75rem 1.25rem',
-            borderTop: '1px solid #e0e0e0',
-            background: '#fff',
-            display: 'flex',
-            gap: '0.75rem',
-            alignItems: 'flex-end',
-          }}
-        >
+        <div className="input-area admin-daemon-input-area">
           <textarea
             aria-label="Admin Daemon message input"
             value={input}
             onChange={e => {
               setInput(e.target.value)
-              if (inputError) setInputError(null)
+              if (inputValidationError) setInputValidationError(null)
             }}
             onKeyDown={handleKeyDown}
             placeholder="Message Admin Daemon…"
             rows={2}
             disabled={isBusy}
-            style={{
-              flex: 1,
-              resize: 'none',
-              padding: '0.6rem 0.75rem',
-              borderRadius: '8px',
-              border: inputError ? '1px solid #c44' : '1px solid #ccc',
-              fontSize: '0.9rem',
-              lineHeight: 1.5,
-              fontFamily: 'inherit',
-            }}
+            aria-invalid={inputValidationError ? 'true' : 'false'}
+            className={[
+              'daemon-input',
+              'admin-daemon-input',
+              inputValidationError ? 'admin-daemon-input-error' : '',
+            ].filter(Boolean).join(' ')}
           />
           <button
             type="button"
             onClick={() => void sendMessage()}
             disabled={isBusy || !input.trim()}
             aria-label="Send message"
-            style={{
-              padding: '0.6rem 1.2rem',
-              background: '#1a1a2e',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: isBusy || !input.trim() ? 'not-allowed' : 'pointer',
-              opacity: isBusy || !input.trim() ? 0.5 : 1,
-              fontSize: '0.9rem',
-            }}
+            className="send-btn admin-daemon-send-btn"
           >
             Send
           </button>
         </div>
+        {inputValidationError && (
+          <p
+            role="alert"
+            className="admin-daemon-input-error-message"
+          >
+            {inputValidationError}
+          </p>
+        )}
         {inputError && (
           <p
             role="alert"
-            style={{ margin: '0 1.25rem 0.75rem', color: '#c44', fontSize: '0.8rem' }}
+            className="admin-daemon-input-error-message"
           >
             {inputError}
           </p>
