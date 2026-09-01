@@ -372,11 +372,19 @@ describe('AdminDaemonInterface', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('First admin chat')).toHaveLength(2))
+    fireEvent.change(screen.getByLabelText('Admin Daemon message input'), {
+      target: { value: 'a'.repeat(8_001) },
+    })
+    fireEvent.click(screen.getByLabelText('Send message'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Message is too large.'))
+    expect(screen.getByLabelText('Admin Daemon message input')).toHaveAttribute('aria-invalid', 'true')
 
     rerender(<AdminDaemonInterface currentUser={secondUser} onBackToPublic={() => undefined} />)
 
     await waitFor(() => expect(screen.getAllByText('Second admin chat')).toHaveLength(2))
     expect(screen.queryByText('First admin chat')).toBeNull()
+    expect(screen.queryByText('Message is too large.')).toBeNull()
+    expect(screen.getByLabelText('Admin Daemon message input')).toHaveAttribute('aria-invalid', 'false')
   })
 
   it('keeps old regular theme literals out of AdminDaemonInterface source', () => {
@@ -441,6 +449,36 @@ describe('AdminDaemonInterface', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Unable to clear this chat right now. Please try again.'))
     const stored = JSON.parse(localStorage.getItem(adminConversationKey) ?? '[]') as Array<{ messages: Array<{ content: string }> }>
     expect(stored[0]?.messages[0]?.content).toBe('keep me')
+  })
+
+  it('shows operation errors even when a validation error already exists', async () => {
+    const adminConversationKey = getAdminStorageKey(currentUser.id, 'conversations')
+    const adminActiveKey = getAdminStorageKey(currentUser.id, 'activeConversationId')
+    localStorage.setItem(adminConversationKey, JSON.stringify([
+      {
+        id: 'admin-conv-2',
+        title: 'Admin conversation',
+        messages: [{ id: 'admin-msg-2', role: 'assistant', content: 'keep me too', timestamp: '2026-08-28T00:00:00.000Z' }],
+        createdAt: '2026-08-28T00:00:00.000Z',
+      },
+    ]))
+    localStorage.setItem(adminActiveKey, 'admin-conv-2')
+    persistenceMocks.upsertAdminConversation.mockResolvedValue(true)
+    persistenceMocks.deleteAdminMessagesForConversation.mockResolvedValue(false)
+
+    render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
+
+    fireEvent.change(await screen.findByLabelText('Admin Daemon message input'), {
+      target: { value: 'a'.repeat(8_001) },
+    })
+    fireEvent.click(screen.getByLabelText('Send message'))
+    await waitFor(() => expect(screen.getByText(/Message is too large\./)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('Destructive chat actions'))
+    fireEvent.click(screen.getByText('Clear current chat'))
+
+    await waitFor(() => expect(screen.getByText('Unable to clear this chat right now. Please try again.')).toBeInTheDocument())
+    expect(screen.getByText(/Message is too large\./)).toBeInTheDocument()
   })
 
 })

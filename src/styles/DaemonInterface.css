@@ -40,6 +40,8 @@
 @media (prefers-reduced-motion: reduce) {
   .daemon-sidebar { animation: none; }
   .sidebar-reopen { transition: none; }
+  .admin-daemon-messages .message-row { animation: none; }
+  .admin-daemon-messages .typing-indicator span { animation: none; }
 }
 
 /* ── Reopen pop-out button ───────────────────────────── */
@@ -824,6 +826,10 @@
 }
 
 .admin-daemon-input-error {
+  border-color: var(--color-error);
+}
+
+.daemon-input.admin-daemon-input-error:focus {
   border-color: var(--color-error);
 }
 

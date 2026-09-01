@@ -305,6 +305,7 @@ export default function AdminDaemonInterface({
    cancelInFlightRequest()
    setInput('')
    setInputError(null)
+   setInputValidationError(null)
    setIsResetting(false)
    setClearConfirm(false)
    setSidebarOpen(loadAdminSidebarOpen(currentUser.id))
@@ -883,12 +884,20 @@ export default function AdminDaemonInterface({
             Send
           </button>
         </div>
-        {(inputValidationError || inputError) && (
+        {inputValidationError && (
           <p
             role="alert"
             className="admin-daemon-input-error-message"
           >
-            {inputValidationError ?? inputError}
+            {inputValidationError}
+          </p>
+        )}
+        {inputError && (
+          <p
+            role="alert"
+            className="admin-daemon-input-error-message"
+          >
+            {inputError}
           </p>
         )}
       </main>
