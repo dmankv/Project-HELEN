@@ -122,6 +122,8 @@ describe('AdminDaemonInterface', () => {
     render(<AdminDaemonInterface currentUser={currentUser} onBackToPublic={() => undefined} />)
 
     expect(await screen.findByRole('navigation', { name: 'Admin Daemon conversation history' })).toBeInTheDocument()
+    expect(screen.getAllByRole('navigation')).toHaveLength(1)
+    expect(screen.getByRole('list', { name: 'Admin conversations' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open sidebar' })).toBeNull()
   })

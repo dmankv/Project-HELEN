@@ -698,36 +698,36 @@ export default function AdminDaemonInterface({
           </div>
 
           {/* Conversation list */}
-          <nav
+          <ul
             aria-label="Admin conversations"
-            style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0.5rem' }}
+            style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0.5rem', listStyle: 'none', margin: 0 }}
           >
             {sortedConversations.map(c => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => selectConversation(c.id)}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '0.5rem 0.75rem',
-                  marginBottom: '0.2rem',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: c.id === activeConvId ? '#eef' : 'transparent',
-                  cursor: 'pointer',
-                  fontSize: '0.82rem',
-                  color: '#222',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {c.title}
-              </button>
+              <li key={c.id} style={{ marginBottom: '0.2rem' }}>
+                <button
+                  type="button"
+                  onClick={() => selectConversation(c.id)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: c.id === activeConvId ? '#eef' : 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    color: '#222',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {c.title}
+                </button>
+              </li>
             ))}
-          </nav>
+          </ul>
 
           {/* Destructive actions */}
           <div style={{ padding: '0.75rem', borderTop: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
