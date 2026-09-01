@@ -37,6 +37,13 @@ Configure these in **Settings → Branches/Rules** and **Settings → General**:
 
 ## Local validation before opening a PR
 
+Install dependencies with the legacy peer-deps flag (required — plain `npm install` leaves
+`pathe`/`vitest` incompletely installed, which causes `test:unit` to fail):
+
+```bash
+npm ci --legacy-peer-deps
+```
+
 Run at minimum:
 
 ```bash
