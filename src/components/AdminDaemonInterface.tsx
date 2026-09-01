@@ -247,6 +247,7 @@ export default function AdminDaemonInterface({
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialStateRef.current.sidebarOpen)
   const [input, setInput] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
+  const [inputValidationError, setInputValidationError] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
   const [diagnostics, setDiagnostics] = useState<{
@@ -487,10 +488,10 @@ export default function AdminDaemonInterface({
    const trimmed = input.trim()
    if (!trimmed || isBusy) return
    if (textEncoder.encode(trimmed).byteLength > MAX_ADMIN_MESSAGE_BYTES) {
-     setInputError(`Message is too large. Keep it under ${MAX_ADMIN_MESSAGE_BYTES} UTF-8 bytes.`)
+     setInputValidationError(`Message is too large. Keep it under ${MAX_ADMIN_MESSAGE_BYTES} UTF-8 bytes.`)
      return
    }
-   setInputError(null)
+   setInputValidationError(null)
 
    const requestVersion = requestVersionRef.current + 1
    requestVersionRef.current = requestVersion
@@ -859,17 +860,17 @@ export default function AdminDaemonInterface({
             value={input}
             onChange={e => {
               setInput(e.target.value)
-              if (inputError) setInputError(null)
+              if (inputValidationError) setInputValidationError(null)
             }}
             onKeyDown={handleKeyDown}
             placeholder="Message Admin Daemon…"
             rows={2}
             disabled={isBusy}
-            aria-invalid={inputError ? 'true' : 'false'}
+            aria-invalid={inputValidationError ? 'true' : 'false'}
             className={[
               'daemon-input',
               'admin-daemon-input',
-              inputError ? 'admin-daemon-input-error' : '',
+              inputValidationError ? 'admin-daemon-input-error' : '',
             ].filter(Boolean).join(' ')}
           />
           <button
@@ -882,12 +883,12 @@ export default function AdminDaemonInterface({
             Send
           </button>
         </div>
-        {inputError && (
+        {(inputValidationError || inputError) && (
           <p
             role="alert"
             className="admin-daemon-input-error-message"
           >
-            {inputError}
+            {inputValidationError ?? inputError}
           </p>
         )}
       </main>
