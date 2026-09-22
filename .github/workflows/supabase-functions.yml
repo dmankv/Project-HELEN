@@ -8,11 +8,16 @@ on:
       - 'supabase/functions/**'
   workflow_dispatch:
 
+concurrency:
+  group: supabase-production-deploy
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: production
