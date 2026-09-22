@@ -18,7 +18,7 @@ export default function AccessDenied({
   currentUser,
   onLoginClick,
   onBackToPublic,
-}: AccessDeniedProps): JSX.Element {
+}: AccessDeniedProps) {
   const isAnonymous = currentUser === null
 
   return (
