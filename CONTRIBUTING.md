@@ -39,11 +39,10 @@ Configure these in **Settings → Branches/Rules** and **Settings → General**:
 
 Use a supported Node.js runtime for this repository: `^22.22.2`, `^24.15.0`, or `>=26.0.0`.
 
-Install dependencies with the legacy peer-deps flag (required — plain `npm install` leaves
-`pathe`/`vitest` incompletely installed, which causes `test:unit` to fail):
+Install dependencies:
 
 ```bash
-npm ci --legacy-peer-deps
+npm ci
 ```
 
 Run at minimum:
