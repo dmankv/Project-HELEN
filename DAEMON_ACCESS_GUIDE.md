@@ -13,7 +13,7 @@
 ```bash
 git clone https://github.com/dmankv/Project-HELEN.git
 cd Project-HELEN
-npm ci --legacy-peer-deps
+npm ci
 npm run dev          # http://localhost:3000
 ```
 

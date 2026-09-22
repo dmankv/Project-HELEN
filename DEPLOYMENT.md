@@ -316,7 +316,7 @@ separately deployed to a platform that supports running Node.js (Render, Railway
 
 ```bash
 # Install dependencies
-npm ci --legacy-peer-deps
+npm ci
 
 # Start frontend dev server (http://localhost:3000)
 npm run dev
@@ -364,7 +364,7 @@ tools from the root install (`../node_modules`). A second `server/package-lock.j
 The workflow (`.github/workflows/deploy.yml`):
 1. Checks out the repository.
 2. Runs `configure-pages` to record Pages metadata.
-3. Installs dependencies with `npm ci --legacy-peer-deps`.
+3. Installs dependencies with `npm ci`.
 4. Builds with `npm run build` (outputs to `dist/`).
 5. Verifies `dist/index.html` contains hashed asset paths and not `/src/main.tsx`.
    It also verifies `dist/favicon.svg` exists.

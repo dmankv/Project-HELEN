@@ -39,7 +39,7 @@ Some older CLI/non-web files still exist and are documented below as separate en
 ## Quick start (local)
 
 ```bash
-npm ci --legacy-peer-deps
+npm ci
 npm run dev          # frontend at http://localhost:3000/Project-HELEN/
 ```
 
