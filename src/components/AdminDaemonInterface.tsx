@@ -236,7 +236,7 @@ export default function AdminDaemonInterface({
   currentUser,
   onBackToPublic,
   onLogoutClick,
-}: AdminDaemonInterfaceProps): JSX.Element {
+}: AdminDaemonInterfaceProps) {
   const initialStateRef = useRef(loadInitialAdminState(currentUser.id))
   const [conversations, setConversations] = useState<Conversation[]>(
    initialStateRef.current.conversations,
