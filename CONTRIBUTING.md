@@ -37,6 +37,17 @@ Configure these in **Settings → Branches/Rules** and **Settings → General**:
 
 ## Local validation before opening a PR
 
+Use a supported Node.js runtime for this repository: install/lint support starts
+at `^20.19.0`, `^22.13.0`, or `>=24`, but the full local validation toolchain
+(`test:unit` via `jsdom`) requires `^22.22.2`, `^24.15.0`, or `>=26.0.0`.
+
+Install dependencies with the legacy peer-deps flag (required — plain `npm install` leaves
+`pathe`/`vitest` incompletely installed, which causes `test:unit` to fail):
+
+```bash
+npm ci --legacy-peer-deps
+```
+
 Run at minimum:
 
 ```bash
