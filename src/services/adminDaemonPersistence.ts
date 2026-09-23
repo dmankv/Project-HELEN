@@ -17,6 +17,10 @@
 
 import { createClient } from '@supabase/supabase-js'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import {
+  buildAdminEvolutionStatusModel,
+  type AdminEvolutionStatusModel,
+} from './daemonEvolutionFoundation'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -282,6 +286,7 @@ export interface AdminDiagnosticsStatus {
   persistenceConfigured: boolean
   sessionActive: boolean
   supabaseUrl: string
+  evolution: AdminEvolutionStatusModel
 }
 
 export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatus> {
@@ -301,5 +306,10 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
     persistenceConfigured: configured,
     sessionActive,
     supabaseUrl: urlHost,
+    evolution: buildAdminEvolutionStatusModel({
+      currentVersion: DAEMON_EVOLUTION_CURRENT_VERSION,
+    }),
   }
 }
+
+const DAEMON_EVOLUTION_CURRENT_VERSION = 'baseline-safe'
