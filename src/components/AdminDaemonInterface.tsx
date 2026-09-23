@@ -29,6 +29,7 @@ import {
   listAdminMessages,
   upsertAdminConversation,
 } from '../services/adminDaemonPersistence'
+import type { AdminDiagnosticsStatus } from '../services/adminDaemonPersistence'
 import '../styles/DaemonInterface.css'
 
 // ---------------------------------------------------------------------------
@@ -250,11 +251,7 @@ export default function AdminDaemonInterface({
   const [inputValidationError, setInputValidationError] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
-  const [diagnostics, setDiagnostics] = useState<{
-   persistenceConfigured: boolean
-   sessionActive: boolean
-   supabaseUrl: string
-  } | null>(null)
+  const [diagnostics, setDiagnostics] = useState<AdminDiagnosticsStatus | null>(null)
   const [showDiagnostics, setShowDiagnostics] = useState(false)
   const [clearConfirm, setClearConfirm] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -800,6 +797,22 @@ export default function AdminDaemonInterface({
               <li>Session active: {String(diagnostics.sessionActive)}</li>
               <li>Supabase host: {diagnostics.supabaseUrl || '(not configured)'}</li>
               <li>Admin edge function status: not verified by the browser diagnostics</li>
+              <li>Evolution current version: {diagnostics.evolution.currentVersion}</li>
+              <li>Evolution run state: {diagnostics.evolution.runState}</li>
+              <li>Evolution stage: {diagnostics.evolution.stage}</li>
+              <li>Evolution candidate version: {diagnostics.evolution.candidateVersion ?? '(none)'}</li>
+              <li>Evolution candidate snapshot: {diagnostics.evolution.candidateSnapshotId ?? '(none)'}</li>
+              <li>Canary status: {diagnostics.evolution.canaryStatus}</li>
+              <li>Rollback status: {diagnostics.evolution.rollbackStatus}</li>
+              <li>
+                Gate results recorded: {diagnostics.evolution.gateResults.length}
+              </li>
+              <li>
+                Audit events recorded: {diagnostics.evolution.recentAuditEvents.length}
+              </li>
+              <li>Budget runtime usage: {diagnostics.evolution.budgetUsage.runtimeMs}ms</li>
+              <li>Budget API call usage: {diagnostics.evolution.budgetUsage.apiCalls}</li>
+              <li>Budget spend usage (USD): ${diagnostics.evolution.budgetUsage.spendUsd}</li>
             </ul>
             <p className="admin-daemon-diagnostics-note">
               No secret values are shown above. To access project secrets, use the Supabase dashboard.
