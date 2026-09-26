@@ -44,7 +44,7 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
         run: |
-          UUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          UUID_PATTERN='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
           printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq "$UUID_PATTERN"
           printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq "$UUID_PATTERN"
           printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'

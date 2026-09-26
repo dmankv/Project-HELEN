@@ -569,7 +569,7 @@ export type AuditEventType =
 
 export interface AuditEvent {
   id: string
-  runId: string
+  runId: string | null
   type: AuditEventType
   createdAt: string
   message: string

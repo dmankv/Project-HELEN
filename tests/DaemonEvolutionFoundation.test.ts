@@ -280,7 +280,7 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
   it('redacts sensitive audit fields and secrets from stored events', () => {
     const log = new AppendOnlyAuditLog()
     const event = log.append({
-      runId: 'run-1',
+      runId: null,
       type: 'policy_decision',
       message: 'recording policy decision',
       metadata: {
@@ -293,6 +293,7 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     expect(event.metadata.authToken).toBe('[REDACTED]')
     expect(event.metadata.apiKey).toBe('[REDACTED]')
     expect(event.metadata.detail).toBe('safe value')
+    expect(event.runId).toBeNull()
 
     event.message = 'mutated'
     event.metadata.detail = 'mutated'

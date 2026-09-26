@@ -265,7 +265,7 @@ jobs:
           NODE
 
       - name: Upload evolution gate artifact
-        if: always() && steps.binding.outputs.ready == 'true'
+        if: always() && steps.config.outputs.configured == 'true' && steps.binding.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: evolution-gate-results
