@@ -45,6 +45,17 @@ create policy "evolution_runs_update_admin_own"
   using (auth.uid() = user_id and public.is_admin())
   with check (auth.uid() = user_id and public.is_admin());
 
+create or replace function public.prevent_evolution_run_mutation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  raise exception 'Evolution runs are append-only';
+end;
+$$;
+
 create table if not exists public.evolution_gate_results (
   id                   uuid primary key default gen_random_uuid(),
   run_id               uuid not null references public.evolution_runs(run_id) on delete cascade,
@@ -89,6 +100,17 @@ create policy "evolution_gate_results_insert_admin_own"
         and user_id = auth.uid()
     )
   );
+
+create or replace function public.prevent_evolution_gate_result_mutation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  raise exception 'Evolution gate results are append-only';
+end;
+$$;
 
 create table if not exists public.evolution_audit_events (
   event_id             uuid primary key default gen_random_uuid(),
@@ -155,6 +177,26 @@ drop trigger if exists prevent_evolution_run_owner_change on public.evolution_ru
 create trigger prevent_evolution_run_identity_change
   before update on public.evolution_runs
   for each row execute function public.prevent_evolution_run_identity_change();
+
+drop trigger if exists prevent_evolution_run_update on public.evolution_runs;
+create trigger prevent_evolution_run_update
+  before update on public.evolution_runs
+  for each row execute function public.prevent_evolution_run_mutation();
+
+drop trigger if exists prevent_evolution_run_delete on public.evolution_runs;
+create trigger prevent_evolution_run_delete
+  before delete on public.evolution_runs
+  for each row execute function public.prevent_evolution_run_mutation();
+
+drop trigger if exists prevent_evolution_gate_result_update on public.evolution_gate_results;
+create trigger prevent_evolution_gate_result_update
+  before update on public.evolution_gate_results
+  for each row execute function public.prevent_evolution_gate_result_mutation();
+
+drop trigger if exists prevent_evolution_gate_result_delete on public.evolution_gate_results;
+create trigger prevent_evolution_gate_result_delete
+  before delete on public.evolution_gate_results
+  for each row execute function public.prevent_evolution_gate_result_mutation();
 
 drop trigger if exists prevent_evolution_audit_owner_change on public.evolution_audit_events;
 

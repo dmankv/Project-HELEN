@@ -792,7 +792,7 @@ export default function AdminDaemonInterface({
             className="admin-daemon-diagnostics-panel"
           >
             <strong>Diagnostics</strong>
-            <ul className="admin-diagnostics-list">
+            <ul className="admin-diagnostics-list" aria-live="polite" aria-atomic="true">
               <li>Persistence configured: {String(diagnostics.persistenceConfigured)}</li>
               <li>Session active: {String(diagnostics.sessionActive)}</li>
               <li>Supabase host: {diagnostics.supabaseUrl || '(not configured)'}</li>

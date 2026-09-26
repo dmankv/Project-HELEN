@@ -781,6 +781,27 @@ export interface EvolutionInfrastructureAdapters {
   canary: CanaryAdapter
 }
 
+const DEFAULT_EVOLUTION_MAX_FILE_BYTES = 16_384
+
+function parseEvolutionMode(value: string | undefined): 'denied' | 'configured' {
+  return value?.trim().toLowerCase() === 'configured' ? 'configured' : 'denied'
+}
+
+function parseConfiguredBackendId(value: string | undefined): string | null {
+  const backendId = value?.trim() ?? ''
+  return backendId.length > 0 ? backendId : null
+}
+
+function parseConfiguredMaxFileBytes(value: string | undefined): number {
+  const parsed = Number(value ?? `${DEFAULT_EVOLUTION_MAX_FILE_BYTES}`)
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_EVOLUTION_MAX_FILE_BYTES
+  return Math.floor(parsed)
+}
+
+function parseAutoPromote(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === 'true'
+}
+
 /**
  * Creates autonomous evolution adapters from immutable infrastructure config.
  * Unknown/invalid settings always fail closed.
@@ -788,10 +809,27 @@ export interface EvolutionInfrastructureAdapters {
 export function createEvolutionInfrastructureAdapters(
   env: EvolutionInfrastructureEnv,
 ): EvolutionInfrastructureAdapters {
-  void env
+  const sandboxMode = parseEvolutionMode(env.DAEMON_EVOLUTION_SANDBOX_MODE)
+  const canaryMode = parseEvolutionMode(env.DAEMON_EVOLUTION_CANARY_MODE)
+  const backendId = parseConfiguredBackendId(env.DAEMON_EVOLUTION_BACKEND_ID)
+  const maxFileBytes = parseConfiguredMaxFileBytes(env.DAEMON_EVOLUTION_MAX_FILE_BYTES)
+  const allowAutoPromote = parseAutoPromote(env.DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE)
+
   return {
-    sandbox: new DeniedSandboxAdapter(),
-    canary: new DeniedCanaryAdapter(),
+    sandbox: sandboxMode === 'configured' && backendId
+      ? new ConfiguredSandboxAdapter({
+          enabled: false,
+          backendId,
+          maxFileBytes,
+        })
+      : new DeniedSandboxAdapter(),
+    canary: canaryMode === 'configured' && backendId
+      ? new ConfiguredCanaryAdapter({
+          enabled: false,
+          backendId,
+          allowAutoPromote,
+        })
+      : new DeniedCanaryAdapter(),
   }
 }
 

@@ -222,6 +222,7 @@ describe('AdminDaemonInterface', () => {
     const diagnostics = await screen.findByRole('region', { name: 'Admin diagnostics' })
     expect(diagnostics).toHaveClass('admin-daemon-diagnostics-panel')
     expect(diagnostics).not.toHaveAttribute('style')
+    expect(diagnostics.querySelector('.admin-diagnostics-list')).toHaveAttribute('aria-live', 'polite')
   })
 
   it('keeps admin identity labeling visible and accessible across sidebar and header', async () => {

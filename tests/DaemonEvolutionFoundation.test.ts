@@ -481,7 +481,9 @@ describe('evolution infrastructure adapter creation', () => {
       DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE: 'true',
       DAEMON_EVOLUTION_MAX_FILE_BYTES: '512',
     })
-    expect(adapters.sandbox.kind).toBe('denied')
-    expect(adapters.canary.name).toBe('denied-canary')
+    expect(adapters.sandbox.kind).toBe('configured-sandbox')
+    expect(adapters.sandbox.createWorkspace().workspaceId).toBe('configured-sandbox-disabled')
+    expect(adapters.canary.name).toBe('configured-canary')
+    expect(adapters.canary.promote(createEvolutionRun('candidate-v2', 'v1')).allowed).toBe(false)
   })
 })
