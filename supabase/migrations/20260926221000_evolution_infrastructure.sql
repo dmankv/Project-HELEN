@@ -172,11 +172,36 @@ begin
 end;
 $$;
 
+create or replace function public.enforce_evolution_run_lifecycle_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.deployed_version is distinct from new.deployed_version
+    and not (
+      old.deployed_version = old.last_known_good
+      and new.deployed_version = new.candidate_version
+      and new.stage = 'promote'
+      and new.status = 'succeeded'
+    ) then
+    raise exception 'Evolution run deployed version can change only on successful promotion';
+  end if;
+  return new;
+end;
+$$;
+
 drop trigger if exists prevent_evolution_run_identity_change on public.evolution_runs;
 drop trigger if exists prevent_evolution_run_owner_change on public.evolution_runs;
 create trigger prevent_evolution_run_identity_change
   before update on public.evolution_runs
   for each row execute function public.prevent_evolution_run_identity_change();
+
+drop trigger if exists enforce_evolution_run_lifecycle_update on public.evolution_runs;
+create trigger enforce_evolution_run_lifecycle_update
+  before update on public.evolution_runs
+  for each row execute function public.enforce_evolution_run_lifecycle_update();
 
 drop trigger if exists prevent_evolution_run_delete on public.evolution_runs;
 create trigger prevent_evolution_run_delete
