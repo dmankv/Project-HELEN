@@ -1,6 +1,6 @@
 # Autonomous Evolution Backend Configuration
 
-This repository now supports **opt-in backend configuration** for autonomous self-write and canary/promotion.
+This repository reserves backend configuration for autonomous self-write and canary/promotion. Configuration values alone do not enable either capability; both remain denied until a verified backend is injected.
 
 ## Default behavior
 

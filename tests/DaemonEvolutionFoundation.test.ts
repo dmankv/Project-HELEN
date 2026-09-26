@@ -4,6 +4,7 @@ import {
   buildAdminEvolutionStatusModel,
   ConfiguredCanaryAdapter,
   ConfiguredSandboxAdapter,
+  completeEvolutionRun,
   createEvolutionInfrastructureAdapters,
   createEvolutionRun,
   decideDaemonCapability,
@@ -120,26 +121,27 @@ describe('evolution run state machine', () => {
           transitionEvolutionStage(
             transitionEvolutionStage(
               transitionEvolutionStage(
-                transitionEvolutionStage(
-                  transitionEvolutionStage(run, 'learn'),
-                  'propose',
-                ),
-                'write',
+                transitionEvolutionStage(run, 'learn'),
+                'propose',
               ),
-              'test',
+              'write',
             ),
-            'evaluate',
+            'test',
           ),
-          'canary',
+          'evaluate',
         ),
-        'promote',
+        'canary',
       ),
       'promote',
     )
 
-    expect(progressed.status).toBe('succeeded')
+    expect(progressed.status).toBe('running')
     expect(progressed.stage).toBe('promote')
-    expect(progressed.endedAt).toBeTruthy()
+    expect(progressed.endedAt).toBeNull()
+
+    const completed = completeEvolutionRun(progressed)
+    expect(completed.status).toBe('succeeded')
+    expect(completed.endedAt).toBeTruthy()
   })
 
   it('stops safely on invalid transitions and keeps last known good version on stop', () => {
@@ -317,6 +319,8 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       ...run,
       stage: 'promote' as const,
       gateResults: passingRequiredGateResults(),
+      budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
     }
     const promoteDecision = adapter.promote(promoteRun)
     expect(promoteDecision.allowed).toBe(true)
@@ -349,6 +353,8 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       ...run,
       stage: 'promote' as const,
       gateResults: passingRequiredGateResults(),
+      budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
     }
     const decision = adapter.promote(promoteRun)
     expect(decision.allowed).toBe(false)
@@ -382,6 +388,26 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     expect(decision.allowed).toBe(false)
     expect(decision.reason).toContain('required evaluation gates')
   })
+
+  it('fails closed when promotion has no budget state or exceeds a budget', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+    const run = {
+      ...createEvolutionRun('candidate-v2', 'v1'),
+      stage: 'promote' as const,
+      gateResults: passingRequiredGateResults(),
+    }
+
+    expect(adapter.promote(run).reason).toContain('budget usage and limits are required')
+    expect(adapter.promote({
+      ...run,
+      budgetUsage: { runtimeMs: 11, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
+    }).reason).toContain('Runtime budget exceeded')
+  })
 })
 
 describe('admin observability model', () => {
@@ -403,7 +429,7 @@ describe('evolution infrastructure adapter creation', () => {
     expect(adapters.canary.name).toBe('denied-canary')
   })
 
-  it('creates configured adapters only with configured mode and backend id', () => {
+  it('keeps configured modes denied until verified backends are injected', () => {
     const adapters = createEvolutionInfrastructureAdapters({
       DAEMON_EVOLUTION_SANDBOX_MODE: 'configured',
       DAEMON_EVOLUTION_CANARY_MODE: 'configured',
@@ -411,7 +437,7 @@ describe('evolution infrastructure adapter creation', () => {
       DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE: 'true',
       DAEMON_EVOLUTION_MAX_FILE_BYTES: '512',
     })
-    expect(adapters.sandbox.kind).toBe('configured-sandbox')
-    expect(adapters.canary.name).toBe('configured-canary')
+    expect(adapters.sandbox.kind).toBe('denied')
+    expect(adapters.canary.name).toBe('denied-canary')
   })
 })

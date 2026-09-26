@@ -38,11 +38,16 @@ jobs:
           fi
 
       - name: Validate required identifiers
+        env:
+          CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
+          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
         run: |
-          echo "${{ inputs.candidate_snapshot_id }}" | grep -Eq '^[0-9a-fA-F-]{36}$'
-          echo "${{ inputs.run_id }}" | grep -Eq '^[0-9a-fA-F-]{36}$'
-          echo "${{ inputs.candidate_sha }}" | grep -Eq '^[0-9a-fA-F]{7,40}$'
-          test -n "${{ inputs.candidate_version }}"
+          printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq '^[0-9a-fA-F-]{36}$'
+          printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq '^[0-9a-fA-F-]{36}$'
+          printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{7,40}$'
+          test -n "$CANDIDATE_VERSION"
 
       - name: Verify regression gate status is passed
         env:

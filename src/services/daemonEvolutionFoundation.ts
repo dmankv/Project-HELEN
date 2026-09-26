@@ -311,6 +311,8 @@ export interface EvolutionRunRecord {
   status: EvolutionRunStatus
   policyDecision: CapabilityDecision | null
   gateResults: GateResult[]
+  budgetUsage: EvolutionBudgetUsage | null
+  budgetLimits: EvolutionBudgetLimits | null
   auditEventIds: string[]
   lastKnownGoodVersion: string
 }
@@ -339,6 +341,8 @@ export function createEvolutionRun(candidateVersion: string, lastKnownGoodVersio
     status: 'running',
     policyDecision: null,
     gateResults: [],
+    budgetUsage: null,
+    budgetLimits: null,
     auditEventIds: [],
     lastKnownGoodVersion,
   }
@@ -373,14 +377,24 @@ export function transitionEvolutionStage(
     }
   }
 
-  const finished = nextStage === 'promote'
   const now = new Date().toISOString()
   return {
     ...run,
     stage: nextStage,
-    status: finished ? 'succeeded' : 'running',
+    status: 'running',
     updatedAt: now,
-    endedAt: finished ? now : null,
+    endedAt: null,
+  }
+}
+
+export function completeEvolutionRun(run: EvolutionRunRecord): EvolutionRunRecord {
+  if (run.status !== 'running' || run.stage !== 'promote') return run
+  const now = new Date().toISOString()
+  return {
+    ...run,
+    status: 'succeeded',
+    endedAt: now,
+    updatedAt: now,
   }
 }
 
@@ -706,6 +720,21 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         reason: 'Promotion denied: required evaluation gates are not fully passed.',
       }
     }
+    if (!run.budgetUsage || !run.budgetLimits) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: budget usage and limits are required.',
+      }
+    }
+    const budget = enforceEvolutionBudget(run.budgetUsage, run.budgetLimits)
+    if (!budget.ok) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: `Promotion denied: ${budget.reason}`,
+      }
+    }
     if (run.stage !== 'promote') {
       return {
         allowed: false,
@@ -738,17 +767,6 @@ export interface EvolutionInfrastructureAdapters {
   canary: CanaryAdapter
 }
 
-function parsePositiveInteger(input: string | undefined, fallback: number): number {
-  const parsed = Number(input)
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
-  return Math.floor(parsed)
-}
-
-function parseBoolean(input: string | undefined, fallback: boolean): boolean {
-  if (input === undefined) return fallback
-  return input === '1' || input.toLowerCase() === 'true'
-}
-
 /**
  * Creates autonomous evolution adapters from immutable infrastructure config.
  * Unknown/invalid settings always fail closed.
@@ -756,29 +774,11 @@ function parseBoolean(input: string | undefined, fallback: boolean): boolean {
 export function createEvolutionInfrastructureAdapters(
   env: EvolutionInfrastructureEnv,
 ): EvolutionInfrastructureAdapters {
-  const sandboxMode = (env.DAEMON_EVOLUTION_SANDBOX_MODE ?? 'denied').toLowerCase()
-  const canaryMode = (env.DAEMON_EVOLUTION_CANARY_MODE ?? 'denied').toLowerCase()
-  const backendId = env.DAEMON_EVOLUTION_BACKEND_ID?.trim() || 'unconfigured'
-  const maxFileBytes = parsePositiveInteger(env.DAEMON_EVOLUTION_MAX_FILE_BYTES, 16_384)
-  const allowAutoPromote = parseBoolean(env.DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE, false)
-
-  const sandbox = sandboxMode === 'configured'
-    ? new ConfiguredSandboxAdapter({
-      enabled: backendId !== 'unconfigured',
-      backendId,
-      maxFileBytes,
-    })
-    : new DeniedSandboxAdapter()
-
-  const canary = canaryMode === 'configured'
-    ? new ConfiguredCanaryAdapter({
-      enabled: backendId !== 'unconfigured',
-      backendId,
-      allowAutoPromote,
-    })
-    : new DeniedCanaryAdapter()
-
-  return { sandbox, canary }
+  void env
+  return {
+    sandbox: new DeniedSandboxAdapter(),
+    canary: new DeniedCanaryAdapter(),
+  }
 }
 
 // ---------------------------------------------------------------------------

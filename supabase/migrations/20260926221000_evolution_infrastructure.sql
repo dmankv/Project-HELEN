@@ -78,7 +78,16 @@ drop policy if exists "evolution_gate_results_insert_admin_own" on public.evolut
 create policy "evolution_gate_results_insert_admin_own"
   on public.evolution_gate_results for insert
   to authenticated
-  with check (auth.uid() = user_id and public.is_admin());
+  with check (
+    auth.uid() = user_id
+    and public.is_admin()
+    and exists (
+      select 1
+      from public.evolution_runs
+      where run_id = evolution_gate_results.run_id
+        and user_id = auth.uid()
+    )
+  );
 
 create table if not exists public.evolution_audit_events (
   event_id             uuid primary key default gen_random_uuid(),
@@ -106,26 +115,45 @@ drop policy if exists "evolution_audit_events_insert_admin_own" on public.evolut
 create policy "evolution_audit_events_insert_admin_own"
   on public.evolution_audit_events for insert
   to authenticated
-  with check (auth.uid() = user_id and public.is_admin());
+  with check (
+    auth.uid() = user_id
+    and public.is_admin()
+    and (
+      evolution_audit_events.run_id is null
+      or exists (
+        select 1
+        from public.evolution_runs
+        where run_id = evolution_audit_events.run_id
+          and user_id = auth.uid()
+      )
+    )
+  );
 
-create or replace function public.prevent_evolution_owner_change()
+create or replace function public.prevent_evolution_run_identity_change()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
 begin
-  if old.user_id is distinct from new.user_id then
-    raise exception 'Evolution record owner is immutable';
+  if old.run_id is distinct from new.run_id
+    or old.user_id is distinct from new.user_id
+    or old.candidate_version is distinct from new.candidate_version
+    or old.candidate_snapshot_id is distinct from new.candidate_snapshot_id
+    or old.last_known_good is distinct from new.last_known_good
+    or old.policy_version is distinct from new.policy_version
+    or old.started_at is distinct from new.started_at then
+    raise exception 'Evolution run identity is immutable';
   end if;
   return new;
 end;
 $$;
 
+drop trigger if exists prevent_evolution_run_identity_change on public.evolution_runs;
 drop trigger if exists prevent_evolution_run_owner_change on public.evolution_runs;
-create trigger prevent_evolution_run_owner_change
+create trigger prevent_evolution_run_identity_change
   before update on public.evolution_runs
-  for each row execute function public.prevent_evolution_owner_change();
+  for each row execute function public.prevent_evolution_run_identity_change();
 
 drop trigger if exists prevent_evolution_audit_owner_change on public.evolution_audit_events;
 
@@ -149,3 +177,56 @@ drop trigger if exists prevent_evolution_audit_delete on public.evolution_audit_
 create trigger prevent_evolution_audit_delete
   before delete on public.evolution_audit_events
   for each row execute function public.prevent_evolution_audit_mutation();
+
+create or replace function public.redact_evolution_audit_metadata(value jsonb)
+returns jsonb
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  key text;
+  item jsonb;
+  result jsonb;
+begin
+  case jsonb_typeof(value)
+    when 'object' then
+      result := '{}'::jsonb;
+      for key, item in select * from jsonb_each(value) loop
+        if key ~* '(password|secret|token|api[-_]?key|access[-_]?key|private[-_]?key|authorization)' then
+          result := result || jsonb_build_object(key, '[REDACTED]');
+        else
+          result := result || jsonb_build_object(key, public.redact_evolution_audit_metadata(item));
+        end if;
+      end loop;
+      return result;
+    when 'array' then
+      return coalesce((
+        select jsonb_agg(public.redact_evolution_audit_metadata(element))
+        from jsonb_array_elements(value) as element
+      ), '[]'::jsonb);
+    when 'string' then
+      if trim(both '"' from value::text) ~* '(sk-[a-z0-9_-]{8,}|ghp_[a-z0-9]{20,})' then
+        return '"[REDACTED]"'::jsonb;
+      end if;
+  end case;
+  return value;
+end;
+$$;
+
+create or replace function public.redact_evolution_audit_metadata_before_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.metadata := public.redact_evolution_audit_metadata(new.metadata);
+  return new;
+end;
+$$;
+
+drop trigger if exists redact_evolution_audit_metadata_before_insert on public.evolution_audit_events;
+create trigger redact_evolution_audit_metadata_before_insert
+  before insert on public.evolution_audit_events
+  for each row execute function public.redact_evolution_audit_metadata_before_insert();
