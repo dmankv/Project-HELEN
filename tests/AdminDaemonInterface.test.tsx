@@ -36,6 +36,7 @@ const {
         },
         recentAuditEvents: [],
       },
+      evolutionStatus: 'unavailable' as const,
     })),
     insertAdminMessage: vi.fn(async () => true),
     listAdminConversations: vi.fn(async () => []),
@@ -117,6 +118,7 @@ describe('AdminDaemonInterface', () => {
         },
         recentAuditEvents: [],
       },
+      evolutionStatus: 'unavailable' as const,
     })
     persistenceMocks.insertAdminMessage.mockResolvedValue(true)
     persistenceMocks.listAdminConversations.mockResolvedValue([])

@@ -325,7 +325,7 @@ function isEvolutionStatusRequest(body: unknown): boolean {
 function buildEvolutionInfrastructureStatus(): {
   sandbox_mode: EvolutionMode
   canary_mode: EvolutionMode
-  backend_configured: boolean
+  backend_id_configured: boolean
   auto_promote_enabled: boolean
   max_file_bytes: number
 } {
@@ -341,7 +341,7 @@ function buildEvolutionInfrastructureStatus(): {
   return {
     sandbox_mode: sandboxMode,
     canary_mode: canaryMode,
-    backend_configured: backendId.length > 0,
+    backend_id_configured: backendId.length > 0,
     auto_promote_enabled: autoPromoteEnabled,
     max_file_bytes: maxFileBytes,
   }

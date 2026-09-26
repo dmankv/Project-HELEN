@@ -315,6 +315,7 @@ export interface EvolutionRunRecord {
   budgetLimits: EvolutionBudgetLimits | null
   auditEventIds: string[]
   lastKnownGoodVersion: string
+  deployedVersion: string
 }
 
 const STAGE_ORDER: EvolutionStage[] = [
@@ -345,6 +346,7 @@ export function createEvolutionRun(candidateVersion: string, lastKnownGoodVersio
     budgetLimits: null,
     auditEventIds: [],
     lastKnownGoodVersion,
+    deployedVersion: lastKnownGoodVersion,
   }
 }
 
@@ -362,7 +364,7 @@ export function transitionEvolutionStage(
       status: 'rolled_back',
       updatedAt: now,
       endedAt: now,
-      candidateVersion: run.lastKnownGoodVersion,
+      deployedVersion: run.lastKnownGoodVersion,
     }
   }
   const currentIndex = STAGE_ORDER.indexOf(run.stage)
@@ -387,8 +389,16 @@ export function transitionEvolutionStage(
   }
 }
 
-export function completeEvolutionRun(run: EvolutionRunRecord): EvolutionRunRecord {
-  if (run.status !== 'running' || run.stage !== 'promote') return run
+export function completeEvolutionRun(
+  run: EvolutionRunRecord,
+  promotionDecision: CanaryDecision,
+): EvolutionRunRecord {
+  if (
+    run.status !== 'running'
+    || run.stage !== 'promote'
+    || !promotionDecision.allowed
+    || promotionDecision.status !== 'healthy'
+  ) return run
   const now = new Date().toISOString()
   return {
     ...run,
@@ -409,7 +419,7 @@ export function stopEvolutionRun(
     status: reason,
     endedAt: now,
     updatedAt: now,
-    candidateVersion: run.lastKnownGoodVersion,
+    deployedVersion: run.lastKnownGoodVersion,
   }
 }
 
@@ -500,17 +510,7 @@ export function evaluateCandidateGates(providedResults: GateResult[]): GateEvalu
 }
 
 function requiredGatesPassed(results: GateResult[]): boolean {
-  const requiredByGate = new Map<GateName, GateResult>()
-  for (const result of results) {
-    if (!result.required) continue
-    requiredByGate.set(result.gate, result)
-  }
-  if (requiredByGate.size === 0) return false
-  for (const gate of REQUIRED_GATES) {
-    const result = requiredByGate.get(gate)
-    if (!result || result.status !== 'passed') return false
-  }
-  return true
+  return evaluateCandidateGates(results).passed
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +542,12 @@ export function enforceEvolutionBudget(
   usage: EvolutionBudgetUsage,
   limits: EvolutionBudgetLimits,
 ): BudgetCheckResult {
+  if (
+    !Object.values(usage).every(value => Number.isFinite(value) && value >= 0)
+    || !Object.values(limits).every(value => Number.isFinite(value) && value >= 0)
+  ) {
+    return { ok: false, reason: 'Budget usage and limits must be finite and non-negative.' }
+  }
   if (usage.runtimeMs > limits.maxRuntimeMs) return { ok: false, reason: 'Runtime budget exceeded.' }
   if (usage.cpuMs > limits.maxCpuMs) return { ok: false, reason: 'CPU budget exceeded.' }
   if (usage.memoryMb > limits.maxMemoryMb) return { ok: false, reason: 'Memory budget exceeded.' }
@@ -603,11 +609,14 @@ export class AppendOnlyAuditLog {
       metadata: redactAuditMetadata(event.metadata ?? {}),
     }
     this.events.push(created)
-    return created
+    return { ...created, metadata: { ...created.metadata } }
   }
 
   recent(limit = 20): AuditEvent[] {
-    return this.events.slice(-Math.max(0, limit))
+    return this.events.slice(-Math.max(0, limit)).map(event => ({
+      ...event,
+      metadata: { ...event.metadata },
+    }))
   }
 }
 

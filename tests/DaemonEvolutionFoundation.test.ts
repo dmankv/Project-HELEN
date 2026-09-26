@@ -139,12 +139,22 @@ describe('evolution run state machine', () => {
     expect(progressed.stage).toBe('promote')
     expect(progressed.endedAt).toBeNull()
 
-    const completed = completeEvolutionRun(progressed)
+    const completed = completeEvolutionRun(progressed, {
+      allowed: true,
+      status: 'healthy',
+      reason: 'Promotion accepted.',
+    })
     expect(completed.status).toBe('succeeded')
     expect(completed.endedAt).toBeTruthy()
+
+    expect(completeEvolutionRun(progressed, {
+      allowed: false,
+      status: 'denied',
+      reason: 'Promotion denied.',
+    }).status).toBe('running')
   })
 
-  it('stops safely on invalid transitions and keeps last known good version on stop', () => {
+  it('stops safely on invalid transitions and restores the deployed version on stop', () => {
     const run = createEvolutionRun('candidate-v2', 'stable-v1')
     const invalid = transitionEvolutionStage(run, 'test')
 
@@ -153,16 +163,18 @@ describe('evolution run state machine', () => {
 
     const deniedRun = stopEvolutionRun(createEvolutionRun('candidate-v3', 'stable-v2'), 'denied')
     expect(deniedRun.status).toBe('denied')
-    expect(deniedRun.candidateVersion).toBe('stable-v2')
+    expect(deniedRun.candidateVersion).toBe('candidate-v3')
+    expect(deniedRun.deployedVersion).toBe('stable-v2')
   })
 
-  it('supports rollback transition that restores last known good version', () => {
+  it('supports rollback transition that preserves candidate identity', () => {
     const run = createEvolutionRun('candidate-v3', 'stable-v2')
     const rollback = transitionEvolutionStage(run, 'rollback')
 
     expect(rollback.status).toBe('rolled_back')
     expect(rollback.stage).toBe('rollback')
-    expect(rollback.candidateVersion).toBe('stable-v2')
+    expect(rollback.candidateVersion).toBe('candidate-v3')
+    expect(rollback.deployedVersion).toBe('stable-v2')
   })
 })
 
@@ -257,6 +269,11 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       { maxRuntimeMs: 90, maxCpuMs: 100, maxMemoryMb: 200, maxApiCalls: 10, maxSpendUsd: 2 },
     )
     expect(within.ok).toBe(true)
+
+    expect(enforceEvolutionBudget(
+      { runtimeMs: Number.NaN, cpuMs: 0, memoryMb: 0, apiCalls: 0, spendUsd: 0 },
+      { maxRuntimeMs: 1, maxCpuMs: 1, maxMemoryMb: 1, maxApiCalls: 1, maxSpendUsd: 1 },
+    ).ok).toBe(false)
   })
 
   it('redacts sensitive audit fields and secrets from stored events', () => {
@@ -275,6 +292,13 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     expect(event.metadata.authToken).toBe('[REDACTED]')
     expect(event.metadata.apiKey).toBe('[REDACTED]')
     expect(event.metadata.detail).toBe('safe value')
+
+    event.message = 'mutated'
+    event.metadata.detail = 'mutated'
+    expect(log.recent()[0]).toMatchObject({
+      message: 'recording policy decision',
+      metadata: { detail: 'safe value' },
+    })
   })
 
   it('refuses canary/promotion by default and requests rollback path', () => {

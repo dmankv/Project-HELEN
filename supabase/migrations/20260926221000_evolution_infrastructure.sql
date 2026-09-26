@@ -10,6 +10,7 @@ create table if not exists public.evolution_runs (
   candidate_version    text not null,
   candidate_snapshot_id uuid not null,
   last_known_good      text not null,
+  deployed_version     text not null,
   stage                text not null,
   status               text not null,
   policy_version       text not null default '1.0.0',

@@ -49,11 +49,14 @@ jobs:
           printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{7,40}$'
           test -n "$CANDIDATE_VERSION"
 
-      - name: Verify regression gate status is passed
+      - name: Verify bound required gate attestations
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
         run: |
           WORKFLOW_RUNS_URL="https://api.github.com/repos/${REPO}/actions/workflows/live-eval.yml/runs?branch=main&status=completed&per_page=20"
           RUN_ID="$(curl --fail --silent --show-error \
@@ -76,7 +79,7 @@ jobs:
             "$DOWNLOAD_URL" \
             -o /tmp/evolution-gates/evolution-gate-results.zip
           unzip -q -o /tmp/evolution-gates/evolution-gate-results.zip -d /tmp/evolution-gates
-          node -e "const fs=require('fs');const p='/tmp/evolution-gates/evolution-gate-results.json';const doc=JSON.parse(fs.readFileSync(p,'utf8'));const gate=(doc.gates||[]).find(g=>g.gate==='regression');if(!gate||gate.status!=='passed'){console.error('Required regression gate missing or not passed.');process.exit(1);}"
+          node -e "const fs=require('fs');const p='/tmp/evolution-gates/evolution-gate-results.json';const doc=JSON.parse(fs.readFileSync(p,'utf8'));const required=['typecheck','lint','unit','build','security_scan','secret_scan','resource_budget','regression'];const expected={candidate_sha:process.env.CANDIDATE_SHA,run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.CANDIDATE_VERSION,candidate_snapshot_id:process.env.CANDIDATE_SNAPSHOT_ID};if(!Object.entries(expected).every(([key,value])=>doc[key]===value)){console.error('Gate attestation identity does not match candidate.');process.exit(1)}const gates=Array.isArray(doc.gates)?doc.gates:[];for(const gate of required){const matches=gates.filter(result=>result&&result.gate===gate&&result.required===true);if(matches.length!==1||matches[0].status!=='passed'){console.error('Required gate missing, duplicated, or not passed: '+gate);process.exit(1)}}"
 
       - name: Trigger immutable canary backend
         env:
@@ -85,12 +88,13 @@ jobs:
           EVOLUTION_RUN_ID: ${{ inputs.run_id }}
           EVOLUTION_CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           EVOLUTION_CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
+          EVOLUTION_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           if [ -z "$EVOLUTION_CANARY_BACKEND_URL" ] || [ -z "$EVOLUTION_CANARY_BACKEND_TOKEN" ]; then
             echo "Canary backend is not configured."
             exit 1
           fi
-          payload="$(node -e \"process.stdout.write(JSON.stringify({run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.EVOLUTION_CANDIDATE_VERSION,candidate_snapshot_id:process.env.EVOLUTION_CANDIDATE_SNAPSHOT_ID}))\")"
+          payload="$(node -e \"process.stdout.write(JSON.stringify({run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.EVOLUTION_CANDIDATE_VERSION,candidate_snapshot_id:process.env.EVOLUTION_CANDIDATE_SNAPSHOT_ID,candidate_sha:process.env.EVOLUTION_CANDIDATE_SHA}))\")"
           curl --fail --show-error --silent \
             -X POST "$EVOLUTION_CANARY_BACKEND_URL" \
             -H "X-Canary-Token: $EVOLUTION_CANARY_BACKEND_TOKEN" \
