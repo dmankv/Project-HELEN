@@ -471,18 +471,39 @@ section('CLI regression – one-shot --message')
 // 15. Live model tests (skipped unless DAEMON_EVAL_LIVE=true)
 // ---------------------------------------------------------------------------
 section('Live model tests')
+const liveEvalMetricsPath = process.env.DAEMON_EVAL_METRICS_PATH
+let liveEvalApiCalls = 0
+let liveEvalPeakMemoryMb = Math.ceil(process.memoryUsage().rss / 1024 / 1024)
+
+function observeLiveEvalMemory() {
+  liveEvalPeakMemoryMb = Math.max(
+    liveEvalPeakMemoryMb,
+    Math.ceil(process.memoryUsage().rss / 1024 / 1024),
+  )
+}
+
+async function writeLiveEvalMetrics(metrics) {
+  if (!liveEvalMetricsPath) return
+  const fs = await import('node:fs')
+  fs.writeFileSync(liveEvalMetricsPath, JSON.stringify(metrics, null, 2))
+}
+
 if (process.env.DAEMON_EVAL_LIVE !== 'true') {
   console.log('  ⏭️  Skipped (set DAEMON_EVAL_LIVE=true to run)')
 } else {
   const apiUrl = process.env.VITE_DAEMON_API_URL ?? 'http://localhost:3001'
   console.log('  Running live tests against ' + apiUrl)
+  const liveEvalStartedAt = Date.now()
+  const failedBeforeLiveEval = failed
 
   async function liveChatRequest(messages) {
     const token = process.env.DAEMON_EVAL_API_TOKEN
     const origin = process.env.DAEMON_EVAL_ORIGIN
     const headers = { 'Content-Type': 'application/json' }
+    observeLiveEvalMemory()
     if (token) headers['X-DAEMON-API-TOKEN'] = token
     if (origin) headers.Origin = origin
+    liveEvalApiCalls++
     const res = await fetch(apiUrl + '/api/chat', {
       method: 'POST',
       headers,
@@ -490,6 +511,7 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
     })
     if (!res.ok) throw new Error('HTTP ' + res.status)
     const data = await res.json()
+    observeLiveEvalMemory()
     return data.message
   }
 
@@ -507,6 +529,14 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
   } catch (err) {
     console.error('  ❌ Live test error:', err.message)
     failed++
+  } finally {
+    observeLiveEvalMemory()
+    await writeLiveEvalMetrics({
+      runtimeMs: Date.now() - liveEvalStartedAt,
+      memoryMb: liveEvalPeakMemoryMb,
+      apiCalls: liveEvalApiCalls,
+      failed: failed > failedBeforeLiveEval,
+    })
   }
 }
 

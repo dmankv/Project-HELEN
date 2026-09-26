@@ -869,7 +869,7 @@ export function buildAdminEvolutionStatusModel(input: {
     gateResults: input.gateResults ?? run?.gateResults ?? [],
     canaryStatus: input.canaryStatus ?? 'not_started',
     rollbackStatus: input.rollbackStatus ?? 'not_needed',
-    budgetUsage: input.budgetUsage ?? {
+    budgetUsage: input.budgetUsage ?? run?.budgetUsage ?? {
       runtimeMs: 0,
       cpuMs: 0,
       memoryMb: 0,

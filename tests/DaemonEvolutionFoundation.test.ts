@@ -464,6 +464,24 @@ describe('admin observability model', () => {
     expect(status.canaryStatus).toBe('not_started')
     expect(status.rollbackStatus).toBe('not_needed')
   })
+
+  it('falls back to budget usage stored on the active run', () => {
+    const status = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: {
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        budgetUsage: { runtimeMs: 12, cpuMs: 8, memoryMb: 64, apiCalls: 2, spendUsd: 0.5 },
+      },
+    })
+
+    expect(status.budgetUsage).toEqual({
+      runtimeMs: 12,
+      cpuMs: 8,
+      memoryMb: 64,
+      apiCalls: 2,
+      spendUsd: 0.5,
+    })
+  })
 })
 
 describe('evolution infrastructure adapter creation', () => {

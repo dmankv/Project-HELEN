@@ -178,11 +178,6 @@ create trigger prevent_evolution_run_identity_change
   before update on public.evolution_runs
   for each row execute function public.prevent_evolution_run_identity_change();
 
-drop trigger if exists prevent_evolution_run_update on public.evolution_runs;
-create trigger prevent_evolution_run_update
-  before update on public.evolution_runs
-  for each row execute function public.prevent_evolution_run_mutation();
-
 drop trigger if exists prevent_evolution_run_delete on public.evolution_runs;
 create trigger prevent_evolution_run_delete
   before delete on public.evolution_runs
