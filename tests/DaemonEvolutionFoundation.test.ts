@@ -146,6 +146,7 @@ describe('evolution run state machine', () => {
     })
     expect(completed.status).toBe('succeeded')
     expect(completed.endedAt).toBeTruthy()
+    expect(completed.deployedVersion).toBe('candidate-v2')
 
     expect(completeEvolutionRun(progressed, {
       allowed: false,
@@ -299,6 +300,7 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       message: 'recording policy decision',
       metadata: { detail: 'safe value' },
     })
+    expect(log.recent(0)).toEqual([])
   })
 
   it('refuses canary/promotion by default and requests rollback path', () => {

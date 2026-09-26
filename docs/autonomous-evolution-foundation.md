@@ -44,7 +44,7 @@ Current baseline is intentionally fail-closed:
 - `DeniedSandboxAdapter` blocks writes when no secure execution backend is configured.
 - `DeniedCanaryAdapter` refuses canary/promotion until immutable deployment integration exists.
 - Missing required evaluation gates are marked `unavailable` and block promotion.
-- Budget overruns stop runs and preserve the last known good version.
+- Budget overruns block promotion and preserve the last known good version.
 - Audit metadata is append-only and redacted before storage.
 
 A configurable backend path now exists and remains opt-in via immutable

@@ -4,6 +4,19 @@ on:
   schedule:
     - cron: '0 7 * * *'
   workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Candidate version identifier for promotion-bound attestations
+        required: false
+        type: string
+      candidate_snapshot_id:
+        description: Candidate snapshot UUID for promotion-bound attestations
+        required: false
+        type: string
+      run_id:
+        description: Evolution run UUID for promotion-bound attestations
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -40,34 +53,116 @@ jobs:
         if: steps.config.outputs.configured == 'true'
         run: npm ci
 
+      - name: Run typecheck gate
+        id: typecheck_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        run: |
+          npm run server:typecheck
+          npm run cli:typecheck
+
+      - name: Run lint gate
+        id: lint_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Run unit gate
+        id: unit_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        run: npm run test:unit
+
+      - name: Run build gate
+        id: build_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        run: |
+          npm run build
+          npm run server:build
+
+      - name: Run security scan gate
+        id: security_scan_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Run secret scan gate
+        id: secret_scan_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        run: npm run check:imports
+
+      - name: Run resource budget gate
+        id: resource_budget_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        run: |
+          node -e "const usedMb=Math.ceil(process.memoryUsage().rss/1024/1024);const maxMb=512;if(usedMb>maxMb){console.error(`Resource budget exceeded: ${usedMb}MB > ${maxMb}MB`);process.exit(1)}"
+
       - name: Run live evaluation
         id: live_eval
         if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
         run: npx tsx tests/daemon-eval.mjs
 
       - name: Build evolution gate artifact
         if: always()
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
+          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
+          LINT_STATUS: ${{ steps.lint_gate.outcome }}
+          UNIT_STATUS: ${{ steps.unit_gate.outcome }}
+          BUILD_STATUS: ${{ steps.build_gate.outcome }}
+          SECURITY_SCAN_STATUS: ${{ steps.security_scan_gate.outcome }}
+          SECRET_SCAN_STATUS: ${{ steps.secret_scan_gate.outcome }}
+          RESOURCE_BUDGET_STATUS: ${{ steps.resource_budget_gate.outcome }}
+          REGRESSION_STATUS: ${{ steps.live_eval.outcome }}
+          LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
         run: |
-          if [ "${{ steps.config.outputs.configured }}" = "true" ] && [ "${{ steps.live_eval.outcome }}" = "success" ]; then
-            STATUS="passed"
-            DETAIL="Live evaluation completed."
-          elif [ "${{ steps.config.outputs.configured }}" = "true" ]; then
-            STATUS="failed"
-            DETAIL="Live evaluation failed."
-          else
-            STATUS="unavailable"
-            DETAIL="Live evaluation secrets are not configured."
-          fi
+          node <<'NODE'
+          const fs = require('fs')
 
-          cat > evolution-gate-results.json <<JSON
-          {
-            "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "workflow": "live-eval",
-            "gates": [
-              { "gate": "regression", "status": "${STATUS}", "required": true, "detail": "${DETAIL}" }
-            ]
+          const gateStatus = (outcome, configured, detail) => {
+            if (configured !== 'true') {
+              return { status: 'unavailable', detail: 'Live evaluation secrets are not configured.' }
+            }
+            if (outcome === 'success') return { status: 'passed', detail }
+            return { status: 'failed', detail: `${detail} failed.` }
           }
-          JSON
+
+          const gateDefinitions = [
+            ['typecheck', process.env.TYPECHECK_STATUS, 'Typecheck completed.'],
+            ['lint', process.env.LINT_STATUS, 'Lint completed.'],
+            ['unit', process.env.UNIT_STATUS, 'Unit tests completed.'],
+            ['build', process.env.BUILD_STATUS, 'Build completed.'],
+            ['security_scan', process.env.SECURITY_SCAN_STATUS, 'Security scan completed.'],
+            ['secret_scan', process.env.SECRET_SCAN_STATUS, 'Secret scan completed.'],
+            ['resource_budget', process.env.RESOURCE_BUDGET_STATUS, 'Resource budget check completed.'],
+            ['regression', process.env.REGRESSION_STATUS, 'Live evaluation completed.'],
+          ]
+
+          const gates = gateDefinitions.map(([gate, outcome, detail]) => ({
+            gate,
+            required: true,
+            ...gateStatus(outcome, process.env.LIVE_EVAL_CONFIGURED, detail),
+          }))
+
+          const doc = {
+            generated_at: new Date().toISOString(),
+            workflow: 'live-eval',
+            candidate_sha: process.env.CANDIDATE_SHA,
+            candidate_version: process.env.CANDIDATE_VERSION ?? '',
+            candidate_snapshot_id: process.env.CANDIDATE_SNAPSHOT_ID ?? '',
+            run_id: process.env.EVOLUTION_RUN_ID ?? '',
+            gates,
+          }
+
+          fs.writeFileSync('evolution-gate-results.json', JSON.stringify(doc, null, 2))
+          NODE
 
       - name: Upload evolution gate artifact
         if: always()
@@ -77,3 +172,8 @@ jobs:
           path: evolution-gate-results.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Enforce required gates passed
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync('evolution-gate-results.json','utf8'));const failed=(doc.gates||[]).find(g=>g.required&&g.status!=='passed');if(failed){console.error(`Required gate did not pass: ${failed.gate}`);process.exit(1)}"

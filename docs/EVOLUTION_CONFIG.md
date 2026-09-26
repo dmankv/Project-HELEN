@@ -42,7 +42,7 @@ Response returns non-secret configuration status only:
 
 - `sandbox_mode`
 - `canary_mode`
-- `backend_configured`
+- `backend_id_configured`
 - `auto_promote_enabled`
 - `max_file_bytes`
 
@@ -54,5 +54,6 @@ It requires:
 - `DAEMON_EVOLUTION_CANARY_ENABLED=true` as a GitHub Actions secret on the `evolution-canary` environment.
 - `EVOLUTION_CANARY_BACKEND_URL` as a GitHub Actions secret on the `evolution-canary` environment.
 - `EVOLUTION_CANARY_BACKEND_TOKEN` as a GitHub Actions secret on the `evolution-canary` environment.
-- workflow input `candidate_sha` matching a successful `live-eval.yml` run SHA.
-- a non-expired `evolution-gate-results` artifact from that exact SHA with `regression` gate status `passed`.
+- workflow input `candidate_sha` set to the full 40-character commit SHA for the promoted candidate.
+- a successful `live-eval.yml` run for that exact SHA with a non-expired `evolution-gate-results` artifact bound to the same `candidate_sha`, `run_id`, `candidate_version`, and `candidate_snapshot_id`.
+- exactly one required passed gate result for each of: `typecheck`, `lint`, `unit`, `build`, `security_scan`, `secret_scan`, `resource_budget`, and `regression`.

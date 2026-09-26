@@ -405,6 +405,7 @@ export function completeEvolutionRun(
     status: 'succeeded',
     endedAt: now,
     updatedAt: now,
+    deployedVersion: run.candidateVersion,
   }
 }
 
@@ -613,7 +614,11 @@ export class AppendOnlyAuditLog {
   }
 
   recent(limit = 20): AuditEvent[] {
-    return this.events.slice(-Math.max(0, limit)).map(event => ({
+    const normalizedLimit = Number.isFinite(limit)
+      ? Math.max(0, Math.floor(limit))
+      : 0
+    if (normalizedLimit === 0) return []
+    return this.events.slice(-normalizedLimit).map(event => ({
       ...event,
       metadata: { ...event.metadata },
     }))
