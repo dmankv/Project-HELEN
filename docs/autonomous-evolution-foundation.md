@@ -48,8 +48,7 @@ Current baseline is intentionally fail-closed:
 - Audit metadata is append-only and redacted before storage.
 
 A configurable backend path now exists and remains opt-in via immutable
-server-side settings. See
-`/home/runner/work/Project-HELEN/Project-HELEN/docs/EVOLUTION_CONFIG.md`.
+server-side settings. See `docs/EVOLUTION_CONFIG.md`.
 
 ## State machine
 

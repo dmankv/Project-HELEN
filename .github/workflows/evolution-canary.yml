@@ -15,8 +15,13 @@ on:
         description: Evolution run UUID
         required: true
         type: string
+      candidate_sha:
+        description: Commit SHA tied to candidate gate validation
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -36,29 +41,53 @@ jobs:
         run: |
           echo "${{ inputs.candidate_snapshot_id }}" | grep -Eq '^[0-9a-fA-F-]{36}$'
           echo "${{ inputs.run_id }}" | grep -Eq '^[0-9a-fA-F-]{36}$'
+          echo "${{ inputs.candidate_sha }}" | grep -Eq '^[0-9a-fA-F]{7,40}$'
           test -n "${{ inputs.candidate_version }}"
 
-      - name: Download latest evolution gate artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: evolution-gate-results
-          path: /tmp/evolution-gates
-
       - name: Verify regression gate status is passed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
+          WORKFLOW_RUNS_URL="https://api.github.com/repos/${REPO}/actions/workflows/live-eval.yml/runs?branch=main&status=completed&per_page=20"
+          RUN_ID="$(curl --fail --silent --show-error \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$WORKFLOW_RUNS_URL" \
+            | node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync(0,'utf8'));const target=(process.env.CANDIDATE_SHA||'').toLowerCase();const run=(doc.workflow_runs||[]).find(r=>r.conclusion==='success' && ((r.head_sha||'').toLowerCase()===target));if(!run){process.exit(1)};process.stdout.write(String(run.id));")"
+
+          ARTIFACTS_URL="https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100"
+          DOWNLOAD_URL="$(curl --fail --silent --show-error \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$ARTIFACTS_URL" \
+            | node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync(0,'utf8'));const a=(doc.artifacts||[]).find(x=>x.name==='evolution-gate-results' && !x.expired);if(!a||!a.archive_download_url){process.exit(1)};process.stdout.write(a.archive_download_url);")"
+
+          mkdir -p /tmp/evolution-gates
+          curl --fail --silent --show-error -L \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$DOWNLOAD_URL" \
+            -o /tmp/evolution-gates/evolution-gate-results.zip
+          unzip -q -o /tmp/evolution-gates/evolution-gate-results.zip -d /tmp/evolution-gates
           node -e "const fs=require('fs');const p='/tmp/evolution-gates/evolution-gate-results.json';const doc=JSON.parse(fs.readFileSync(p,'utf8'));const gate=(doc.gates||[]).find(g=>g.gate==='regression');if(!gate||gate.status!=='passed'){console.error('Required regression gate missing or not passed.');process.exit(1);}"
 
       - name: Trigger immutable canary backend
         env:
           EVOLUTION_CANARY_BACKEND_URL: ${{ secrets.EVOLUTION_CANARY_BACKEND_URL }}
           EVOLUTION_CANARY_BACKEND_TOKEN: ${{ secrets.EVOLUTION_CANARY_BACKEND_TOKEN }}
+          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          EVOLUTION_CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          EVOLUTION_CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
         run: |
           if [ -z "$EVOLUTION_CANARY_BACKEND_URL" ] || [ -z "$EVOLUTION_CANARY_BACKEND_TOKEN" ]; then
             echo "Canary backend is not configured."
             exit 1
           fi
+          payload="$(node -e \"process.stdout.write(JSON.stringify({run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.EVOLUTION_CANDIDATE_VERSION,candidate_snapshot_id:process.env.EVOLUTION_CANDIDATE_SNAPSHOT_ID}))\")"
           curl --fail --show-error --silent \
             -X POST "$EVOLUTION_CANARY_BACKEND_URL" \
             -H "X-Canary-Token: $EVOLUTION_CANARY_BACKEND_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"run_id":"${{ inputs.run_id }}","candidate_version":"${{ inputs.candidate_version }}","candidate_snapshot_id":"${{ inputs.candidate_snapshot_id }}"}'
+            -d "$payload"

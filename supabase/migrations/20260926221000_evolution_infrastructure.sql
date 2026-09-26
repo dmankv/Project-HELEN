@@ -82,7 +82,7 @@ create policy "evolution_gate_results_insert_admin_own"
 
 create table if not exists public.evolution_audit_events (
   event_id             uuid primary key default gen_random_uuid(),
-  run_id               uuid not null references public.evolution_runs(run_id) on delete cascade,
+  run_id               uuid references public.evolution_runs(run_id) on delete cascade,
   user_id              uuid not null references auth.users(id) on delete cascade,
   event_type           text not null,
   message              text not null default '',
@@ -127,12 +127,25 @@ create trigger prevent_evolution_run_owner_change
   before update on public.evolution_runs
   for each row execute function public.prevent_evolution_owner_change();
 
-drop trigger if exists prevent_evolution_gate_owner_change on public.evolution_gate_results;
-create trigger prevent_evolution_gate_owner_change
-  before update on public.evolution_gate_results
-  for each row execute function public.prevent_evolution_owner_change();
-
 drop trigger if exists prevent_evolution_audit_owner_change on public.evolution_audit_events;
-create trigger prevent_evolution_audit_owner_change
+
+create or replace function public.prevent_evolution_audit_mutation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  raise exception 'Evolution audit events are append-only';
+end;
+$$;
+
+drop trigger if exists prevent_evolution_audit_update on public.evolution_audit_events;
+create trigger prevent_evolution_audit_update
   before update on public.evolution_audit_events
-  for each row execute function public.prevent_evolution_owner_change();
+  for each row execute function public.prevent_evolution_audit_mutation();
+
+drop trigger if exists prevent_evolution_audit_delete on public.evolution_audit_events;
+create trigger prevent_evolution_audit_delete
+  before delete on public.evolution_audit_events
+  for each row execute function public.prevent_evolution_audit_mutation();

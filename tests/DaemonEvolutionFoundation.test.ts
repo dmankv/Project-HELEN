@@ -17,6 +17,27 @@ import {
   type GateResult,
 } from '../src/services/daemonEvolutionFoundation'
 
+const REQUIRED_GATES_FOR_TESTS = [
+  'typecheck',
+  'lint',
+  'unit',
+  'build',
+  'security_scan',
+  'secret_scan',
+  'resource_budget',
+  'regression',
+] as const
+
+function passingRequiredGateResults(): GateResult[] {
+  return REQUIRED_GATES_FOR_TESTS.map(gate => ({
+    gate,
+    status: 'passed',
+    detail: `${gate} passed`,
+    durationMs: 1,
+    required: true,
+  }))
+}
+
 describe('daemon evolution foundation policy', () => {
   it('allowlists safe autonomous capabilities and denies privileged ones', () => {
     expect(decideDaemonCapability('read_repository').allowed).toBe(true)
@@ -197,6 +218,27 @@ describe('candidate evaluation gates', () => {
     expect(summary.passed).toBe(false)
     expect(summary.reason).toContain('Duplicate gate result')
   })
+
+  it('allows duplicate optional gate results without blocking required gate evaluation', () => {
+    const summary = evaluateCandidateGates([
+      {
+        gate: 'integration',
+        status: 'failed',
+        detail: 'optional run 1',
+        durationMs: 1,
+        required: false,
+      },
+      {
+        gate: 'integration',
+        status: 'passed',
+        detail: 'optional run 2',
+        durationMs: 1,
+        required: false,
+      },
+    ])
+    expect(summary.passed).toBe(false)
+    expect(summary.reason).toContain('Required gate unavailable')
+  })
 })
 
 describe('budgets, audit redaction, and canary fail-closed behavior', () => {
@@ -271,7 +313,11 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     const canaryDecision = adapter.deployCanary(run)
     expect(canaryDecision.allowed).toBe(true)
 
-    const promoteRun = transitionEvolutionStage(run, 'promote')
+    const promoteRun = {
+      ...run,
+      stage: 'promote' as const,
+      gateResults: passingRequiredGateResults(),
+    }
     const promoteDecision = adapter.promote(promoteRun)
     expect(promoteDecision.allowed).toBe(true)
     expect(adapter.rollback(promoteRun)).toBe('completed')
@@ -299,10 +345,42 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       ),
       'canary',
     )
-    const promoteRun = transitionEvolutionStage(run, 'promote')
+    const promoteRun = {
+      ...run,
+      stage: 'promote' as const,
+      gateResults: passingRequiredGateResults(),
+    }
     const decision = adapter.promote(promoteRun)
     expect(decision.allowed).toBe(false)
     expect(decision.reason).toContain('manual promotion gate')
+  })
+
+  it('configured canary denies promotion when required gates are not passed', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+    const run = transitionEvolutionStage(
+      transitionEvolutionStage(
+        transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
+              'propose',
+            ),
+            'write',
+          ),
+          'test',
+        ),
+        'evaluate',
+      ),
+      'canary',
+    )
+    const promoteRun = { ...run, stage: 'promote' as const, gateResults: [] }
+    const decision = adapter.promote(promoteRun)
+    expect(decision.allowed).toBe(false)
+    expect(decision.reason).toContain('required evaluation gates')
   })
 })
 

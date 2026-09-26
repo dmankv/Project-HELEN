@@ -51,7 +51,8 @@ Response returns non-secret configuration status only:
 Use `.github/workflows/evolution-canary.yml` to trigger canary deployment through immutable backend integration.
 It requires:
 
-- `DAEMON_EVOLUTION_CANARY_ENABLED=true`
-- `EVOLUTION_CANARY_BACKEND_URL`
-- `EVOLUTION_CANARY_BACKEND_TOKEN`
-- passing regression gate artifact from `live-eval.yml`.
+- `DAEMON_EVOLUTION_CANARY_ENABLED=true` as a GitHub Actions secret on the `evolution-canary` environment.
+- `EVOLUTION_CANARY_BACKEND_URL` as a GitHub Actions secret on the `evolution-canary` environment.
+- `EVOLUTION_CANARY_BACKEND_TOKEN` as a GitHub Actions secret on the `evolution-canary` environment.
+- workflow input `candidate_sha` matching a successful `live-eval.yml` run SHA.
+- a non-expired `evolution-gate-results` artifact from that exact SHA with `regression` gate status `passed`.

@@ -169,67 +169,6 @@ export class InMemorySandboxAdapter implements DaemonSandboxAdapter {
     }
   }
 
-  export interface ConfiguredSandboxAdapterOptions {
-    enabled: boolean
-    backendId: string
-    maxFileBytes: number
-  }
-
-  /**
-   * Backend-configured sandbox adapter.
-   *
-   * Uses the same isolated in-memory workspace model as the local lab adapter,
-   * but only when immutable infrastructure has explicitly enabled it.
-   */
-  export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
-    readonly kind = 'configured-sandbox' as const
-    private readonly delegate = new InMemorySandboxAdapter()
-    private readonly options: ConfiguredSandboxAdapterOptions
-
-    constructor(options: ConfiguredSandboxAdapterOptions) {
-      this.options = options
-    }
-
-    createWorkspace(seed: Record<string, string> = {}): SandboxWorkspaceState {
-      if (!this.options.enabled) {
-        return {
-          workspaceId: 'configured-sandbox-disabled',
-          files: {},
-          snapshots: [],
-        }
-      }
-      return this.delegate.createWorkspace(seed)
-    }
-
-    writeFile(workspaceId: string, filePath: string, content: string): SandboxWriteResult {
-      if (!this.options.enabled) {
-        return {
-          ok: false,
-          denied: true,
-          message: 'Sandbox write denied: configured backend is disabled by immutable policy.',
-        }
-      }
-      if (new TextEncoder().encode(content).byteLength > this.options.maxFileBytes) {
-        return {
-          ok: false,
-          denied: true,
-          message: `Sandbox write denied: file exceeds ${this.options.maxFileBytes} bytes.`,
-        }
-      }
-      return this.delegate.writeFile(workspaceId, filePath, content)
-    }
-
-    readFile(workspaceId: string, filePath: string): string | null {
-      if (!this.options.enabled) return null
-      return this.delegate.readFile(workspaceId, filePath)
-    }
-
-    createSnapshot(workspaceId: string, label: string): SandboxSnapshot | null {
-      if (!this.options.enabled) return null
-      return this.delegate.createSnapshot(workspaceId, `${this.options.backendId}:${label}`)
-    }
-  }
-
   writeFile(workspaceId: string, filePath: string, content: string): SandboxWriteResult {
     const state = this.workspaces.get(workspaceId)
     if (!state) {
@@ -266,6 +205,67 @@ export class InMemorySandboxAdapter implements DaemonSandboxAdapter {
     }
     state.snapshots.push(snapshot)
     return snapshot
+  }
+}
+
+export interface ConfiguredSandboxAdapterOptions {
+  enabled: boolean
+  backendId: string
+  maxFileBytes: number
+}
+
+/**
+ * Backend-configured sandbox adapter.
+ *
+ * Uses the same isolated in-memory workspace model as the local lab adapter,
+ * but only when immutable infrastructure has explicitly enabled it.
+ */
+export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
+  readonly kind = 'configured-sandbox' as const
+  private readonly delegate = new InMemorySandboxAdapter()
+  private readonly options: ConfiguredSandboxAdapterOptions
+
+  constructor(options: ConfiguredSandboxAdapterOptions) {
+    this.options = options
+  }
+
+  createWorkspace(seed: Record<string, string> = {}): SandboxWorkspaceState {
+    if (!this.options.enabled) {
+      return {
+        workspaceId: 'configured-sandbox-disabled',
+        files: {},
+        snapshots: [],
+      }
+    }
+    return this.delegate.createWorkspace(seed)
+  }
+
+  writeFile(workspaceId: string, filePath: string, content: string): SandboxWriteResult {
+    if (!this.options.enabled) {
+      return {
+        ok: false,
+        denied: true,
+        message: 'Sandbox write denied: configured backend is disabled by immutable policy.',
+      }
+    }
+    if (new TextEncoder().encode(content).byteLength > this.options.maxFileBytes) {
+      return {
+        ok: false,
+        denied: true,
+        message: `Sandbox write denied: file exceeds ${this.options.maxFileBytes} bytes.`,
+      }
+    }
+    return this.delegate.writeFile(workspaceId, filePath, content)
+  }
+
+  readFile(workspaceId: string, filePath: string): string | null {
+    if (!this.options.enabled) return null
+    return this.delegate.readFile(workspaceId, filePath)
+  }
+
+  createSnapshot(workspaceId: string, label: string): SandboxSnapshot | null {
+    if (!this.options.enabled) return null
+    return this.delegate.createSnapshot(workspaceId, `${this.options.backendId}:${label}`)
   }
 }
 
@@ -434,6 +434,7 @@ export interface GateEvaluationSummary {
 export function evaluateCandidateGates(providedResults: GateResult[]): GateEvaluationSummary {
   const gateCounts = new Map<GateName, number>()
   for (const result of providedResults) {
+    if (!result.required) continue
     gateCounts.set(result.gate, (gateCounts.get(result.gate) ?? 0) + 1)
   }
 
@@ -446,11 +447,15 @@ export function evaluateCandidateGates(providedResults: GateResult[]): GateEvalu
     }
   }
 
-  const resultByGate = new Map(providedResults.map(r => [r.gate, r]))
+  const requiredResultByGate = new Map(
+    providedResults
+      .filter(result => result.required)
+      .map(result => [result.gate, result]),
+  )
 
   const normalized: GateResult[] = []
   for (const gate of REQUIRED_GATES) {
-    const existing = resultByGate.get(gate)
+    const existing = requiredResultByGate.get(gate)
     if (existing) normalized.push(existing)
     else {
       normalized.push({
@@ -463,7 +468,7 @@ export function evaluateCandidateGates(providedResults: GateResult[]): GateEvalu
     }
   }
 
-  const optional = providedResults.filter(r => !REQUIRED_GATES.includes(r.gate))
+  const optional = providedResults.filter(r => !r.required)
   normalized.push(...optional)
 
   const blocking = normalized.find(result =>
@@ -478,6 +483,20 @@ export function evaluateCandidateGates(providedResults: GateResult[]): GateEvalu
   }
 
   return { results: normalized, passed: true, reason: 'All required gates passed.' }
+}
+
+function requiredGatesPassed(results: GateResult[]): boolean {
+  const requiredByGate = new Map<GateName, GateResult>()
+  for (const result of results) {
+    if (!result.required) continue
+    requiredByGate.set(result.gate, result)
+  }
+  if (requiredByGate.size === 0) return false
+  for (const gate of REQUIRED_GATES) {
+    const result = requiredByGate.get(gate)
+    if (!result || result.status !== 'passed') return false
+  }
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +690,20 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         allowed: false,
         status: 'denied',
         reason: 'Promotion denied: immutable infrastructure requires manual promotion gate.',
+      }
+    }
+    if (run.status !== 'running') {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: run is not active.',
+      }
+    }
+    if (!requiredGatesPassed(run.gateResults)) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: required evaluation gates are not fully passed.',
       }
     }
     if (run.stage !== 'promote') {

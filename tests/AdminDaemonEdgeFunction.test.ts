@@ -120,6 +120,16 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain("sandbox_mode")
     expect(src).toContain("canary_mode")
     expect(src).not.toContain("DAEMON_EVOLUTION_BACKEND_TOKEN")
+
+    const verifyAdminIndex = src.indexOf('const isAdmin = await verifyAdmin(')
+    const evolutionStatusIndex = src.indexOf('if (isEvolutionStatusRequest(body))')
+    const validateMessagesIndex = src.indexOf('const validation = validateMessages(body)')
+    expect(verifyAdminIndex).toBeGreaterThan(-1)
+    expect(evolutionStatusIndex).toBeGreaterThan(-1)
+    expect(validateMessagesIndex).toBeGreaterThan(-1)
+    expect(verifyAdminIndex).toBeLessThan(evolutionStatusIndex)
+    expect(evolutionStatusIndex).toBeLessThan(validateMessagesIndex)
+    expect(src).toContain("logAudit('admin_evolution_status'")
   })
 
   it('validates strategy against explicit allowlist', () => {
