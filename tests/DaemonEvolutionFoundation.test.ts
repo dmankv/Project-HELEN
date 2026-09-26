@@ -415,6 +415,24 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     expect(decision.reason).toContain('required evaluation gates')
   })
 
+  it('configured canary rejects promotion outside the promote stage before gate checks', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+    const run = {
+      ...createEvolutionRun('candidate-v2', 'v1'),
+      gateResults: passingRequiredGateResults(),
+      budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
+    }
+
+    const decision = adapter.promote(run)
+    expect(decision.allowed).toBe(false)
+    expect(decision.reason).toContain('not in promote stage')
+  })
+
   it('fails closed when promotion has no budget state or exceeds a budget', () => {
     const adapter = new ConfiguredCanaryAdapter({
       enabled: true,

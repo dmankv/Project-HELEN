@@ -727,6 +727,13 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         reason: 'Promotion denied: run is not active.',
       }
     }
+    if (run.stage !== 'promote') {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: run is not in promote stage.',
+      }
+    }
     if (!requiredGatesPassed(run.gateResults)) {
       return {
         allowed: false,
@@ -747,13 +754,6 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         allowed: false,
         status: 'denied',
         reason: `Promotion denied: ${budget.reason}`,
-      }
-    }
-    if (run.stage !== 'promote') {
-      return {
-        allowed: false,
-        status: 'denied',
-        reason: 'Promotion denied: run is not in promote stage.',
       }
     }
     return {
