@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   AppendOnlyAuditLog,
   buildAdminEvolutionStatusModel,
+  ConfiguredCanaryAdapter,
+  ConfiguredSandboxAdapter,
+  createEvolutionInfrastructureAdapters,
   createEvolutionRun,
   decideDaemonCapability,
   DeniedCanaryAdapter,
@@ -51,6 +54,33 @@ describe('sandbox adapters', () => {
     const snapshot = adapter.createSnapshot(workspace.workspaceId, 'manual-check')
     expect(snapshot?.files['a.ts']).toContain('a = 1')
     expect(snapshot?.files['b.ts']).toContain('b = 2')
+  })
+
+  it('configured sandbox stays fail-closed when backend is disabled', () => {
+    const adapter = new ConfiguredSandboxAdapter({
+      enabled: false,
+      backendId: 'immutable-controller',
+      maxFileBytes: 1024,
+    })
+    const workspace = adapter.createWorkspace()
+    const write = adapter.writeFile(workspace.workspaceId, 'x.ts', 'export {}')
+
+    expect(workspace.workspaceId).toBe('configured-sandbox-disabled')
+    expect(write.ok).toBe(false)
+    expect(write.denied).toBe(true)
+  })
+
+  it('configured sandbox enforces max file bytes when enabled', () => {
+    const adapter = new ConfiguredSandboxAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      maxFileBytes: 10,
+    })
+    const workspace = adapter.createWorkspace()
+    const write = adapter.writeFile(workspace.workspaceId, 'x.ts', 'export const value = 123')
+
+    expect(write.ok).toBe(false)
+    expect(write.message).toContain('exceeds 10 bytes')
   })
 })
 
@@ -215,6 +245,65 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     expect(promote.allowed).toBe(false)
     expect(adapter.rollback(run)).toBe('requested')
   })
+
+  it('configured canary allows deploy/promote only in valid stage with auto-promote enabled', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+    const run = transitionEvolutionStage(
+      transitionEvolutionStage(
+        transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
+              'propose',
+            ),
+            'write',
+          ),
+          'test',
+        ),
+        'evaluate',
+      ),
+      'canary',
+    )
+    const canaryDecision = adapter.deployCanary(run)
+    expect(canaryDecision.allowed).toBe(true)
+
+    const promoteRun = transitionEvolutionStage(run, 'promote')
+    const promoteDecision = adapter.promote(promoteRun)
+    expect(promoteDecision.allowed).toBe(true)
+    expect(adapter.rollback(promoteRun)).toBe('completed')
+  })
+
+  it('configured canary still denies promotion when immutable gate requires manual approval', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: false,
+    })
+    const run = transitionEvolutionStage(
+      transitionEvolutionStage(
+        transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
+              'propose',
+            ),
+            'write',
+          ),
+          'test',
+        ),
+        'evaluate',
+      ),
+      'canary',
+    )
+    const promoteRun = transitionEvolutionStage(run, 'promote')
+    const decision = adapter.promote(promoteRun)
+    expect(decision.allowed).toBe(false)
+    expect(decision.reason).toContain('manual promotion gate')
+  })
 })
 
 describe('admin observability model', () => {
@@ -226,5 +315,25 @@ describe('admin observability model', () => {
     expect(status.stage).toBe('idle')
     expect(status.canaryStatus).toBe('not_started')
     expect(status.rollbackStatus).toBe('not_needed')
+  })
+})
+
+describe('evolution infrastructure adapter creation', () => {
+  it('defaults to denied adapters when config is absent', () => {
+    const adapters = createEvolutionInfrastructureAdapters({})
+    expect(adapters.sandbox.kind).toBe('denied')
+    expect(adapters.canary.name).toBe('denied-canary')
+  })
+
+  it('creates configured adapters only with configured mode and backend id', () => {
+    const adapters = createEvolutionInfrastructureAdapters({
+      DAEMON_EVOLUTION_SANDBOX_MODE: 'configured',
+      DAEMON_EVOLUTION_CANARY_MODE: 'configured',
+      DAEMON_EVOLUTION_BACKEND_ID: 'immutable-controller',
+      DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE: 'true',
+      DAEMON_EVOLUTION_MAX_FILE_BYTES: '512',
+    })
+    expect(adapters.sandbox.kind).toBe('configured-sandbox')
+    expect(adapters.canary.name).toBe('configured-canary')
   })
 })

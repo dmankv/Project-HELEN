@@ -115,7 +115,7 @@ export interface SandboxWriteResult {
 }
 
 export interface DaemonSandboxAdapter {
-  kind: 'denied' | 'memory-sandbox'
+  kind: 'denied' | 'memory-sandbox' | 'configured-sandbox'
   createWorkspace(seed?: Record<string, string>): SandboxWorkspaceState
   writeFile(workspaceId: string, filePath: string, content: string): SandboxWriteResult
   readFile(workspaceId: string, filePath: string): string | null
@@ -166,6 +166,67 @@ export class InMemorySandboxAdapter implements DaemonSandboxAdapter {
       workspaceId,
       files: { ...state.files },
       snapshots: [...state.snapshots],
+    }
+  }
+
+  export interface ConfiguredSandboxAdapterOptions {
+    enabled: boolean
+    backendId: string
+    maxFileBytes: number
+  }
+
+  /**
+   * Backend-configured sandbox adapter.
+   *
+   * Uses the same isolated in-memory workspace model as the local lab adapter,
+   * but only when immutable infrastructure has explicitly enabled it.
+   */
+  export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
+    readonly kind = 'configured-sandbox' as const
+    private readonly delegate = new InMemorySandboxAdapter()
+    private readonly options: ConfiguredSandboxAdapterOptions
+
+    constructor(options: ConfiguredSandboxAdapterOptions) {
+      this.options = options
+    }
+
+    createWorkspace(seed: Record<string, string> = {}): SandboxWorkspaceState {
+      if (!this.options.enabled) {
+        return {
+          workspaceId: 'configured-sandbox-disabled',
+          files: {},
+          snapshots: [],
+        }
+      }
+      return this.delegate.createWorkspace(seed)
+    }
+
+    writeFile(workspaceId: string, filePath: string, content: string): SandboxWriteResult {
+      if (!this.options.enabled) {
+        return {
+          ok: false,
+          denied: true,
+          message: 'Sandbox write denied: configured backend is disabled by immutable policy.',
+        }
+      }
+      if (new TextEncoder().encode(content).byteLength > this.options.maxFileBytes) {
+        return {
+          ok: false,
+          denied: true,
+          message: `Sandbox write denied: file exceeds ${this.options.maxFileBytes} bytes.`,
+        }
+      }
+      return this.delegate.writeFile(workspaceId, filePath, content)
+    }
+
+    readFile(workspaceId: string, filePath: string): string | null {
+      if (!this.options.enabled) return null
+      return this.delegate.readFile(workspaceId, filePath)
+    }
+
+    createSnapshot(workspaceId: string, label: string): SandboxSnapshot | null {
+      if (!this.options.enabled) return null
+      return this.delegate.createSnapshot(workspaceId, `${this.options.backendId}:${label}`)
     }
   }
 
@@ -559,6 +620,132 @@ export class DeniedCanaryAdapter implements CanaryAdapter {
   rollback(): RollbackStatus {
     return 'requested'
   }
+}
+
+export interface ConfiguredCanaryAdapterOptions {
+  enabled: boolean
+  backendId: string
+  allowAutoPromote: boolean
+}
+
+export class ConfiguredCanaryAdapter implements CanaryAdapter {
+  readonly name = 'configured-canary' as const
+  private readonly options: ConfiguredCanaryAdapterOptions
+
+  constructor(options: ConfiguredCanaryAdapterOptions) {
+    this.options = options
+  }
+
+  deployCanary(run: EvolutionRunRecord): CanaryDecision {
+    if (!this.options.enabled) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Canary deployment denied: configured backend disabled by immutable policy.',
+      }
+    }
+    if (run.status !== 'running' || run.stage !== 'canary') {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Canary deployment denied: run is not in canary stage.',
+      }
+    }
+    return {
+      allowed: true,
+      status: 'running',
+      reason: `Canary deployment accepted by backend ${this.options.backendId}.`,
+    }
+  }
+
+  promote(run: EvolutionRunRecord): CanaryDecision {
+    if (!this.options.enabled) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: configured backend disabled by immutable policy.',
+      }
+    }
+    if (!this.options.allowAutoPromote) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: immutable infrastructure requires manual promotion gate.',
+      }
+    }
+    if (run.stage !== 'promote') {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: run is not in promote stage.',
+      }
+    }
+    return {
+      allowed: true,
+      status: 'healthy',
+      reason: `Promotion accepted by backend ${this.options.backendId}.`,
+    }
+  }
+
+  rollback(): RollbackStatus {
+    return 'completed'
+  }
+}
+
+export interface EvolutionInfrastructureEnv {
+  DAEMON_EVOLUTION_SANDBOX_MODE?: string
+  DAEMON_EVOLUTION_CANARY_MODE?: string
+  DAEMON_EVOLUTION_BACKEND_ID?: string
+  DAEMON_EVOLUTION_MAX_FILE_BYTES?: string
+  DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE?: string
+}
+
+export interface EvolutionInfrastructureAdapters {
+  sandbox: DaemonSandboxAdapter
+  canary: CanaryAdapter
+}
+
+function parsePositiveInteger(input: string | undefined, fallback: number): number {
+  const parsed = Number(input)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.floor(parsed)
+}
+
+function parseBoolean(input: string | undefined, fallback: boolean): boolean {
+  if (input === undefined) return fallback
+  return input === '1' || input.toLowerCase() === 'true'
+}
+
+/**
+ * Creates autonomous evolution adapters from immutable infrastructure config.
+ * Unknown/invalid settings always fail closed.
+ */
+export function createEvolutionInfrastructureAdapters(
+  env: EvolutionInfrastructureEnv,
+): EvolutionInfrastructureAdapters {
+  const sandboxMode = (env.DAEMON_EVOLUTION_SANDBOX_MODE ?? 'denied').toLowerCase()
+  const canaryMode = (env.DAEMON_EVOLUTION_CANARY_MODE ?? 'denied').toLowerCase()
+  const backendId = env.DAEMON_EVOLUTION_BACKEND_ID?.trim() || 'unconfigured'
+  const maxFileBytes = parsePositiveInteger(env.DAEMON_EVOLUTION_MAX_FILE_BYTES, 16_384)
+  const allowAutoPromote = parseBoolean(env.DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE, false)
+
+  const sandbox = sandboxMode === 'configured'
+    ? new ConfiguredSandboxAdapter({
+      enabled: backendId !== 'unconfigured',
+      backendId,
+      maxFileBytes,
+    })
+    : new DeniedSandboxAdapter()
+
+  const canary = canaryMode === 'configured'
+    ? new ConfiguredCanaryAdapter({
+      enabled: backendId !== 'unconfigured',
+      backendId,
+      allowAutoPromote,
+    })
+    : new DeniedCanaryAdapter()
+
+  return { sandbox, canary }
 }
 
 // ---------------------------------------------------------------------------

@@ -44,6 +44,8 @@ interface ChatMessage {
   content: string
 }
 
+type EvolutionMode = 'denied' | 'configured'
+
 const ALLOWED_STRATEGIES = [
   'direct-answer',
   'clarify-first',
@@ -310,6 +312,41 @@ function validateStrategyMetadata(body: unknown): {
   return { valid: true, strategy: parsedStrategy, contextKey: parsedContextKey, interactionId: parsedInteractionId }
 }
 
+function parseEvolutionMode(value: string | undefined): EvolutionMode {
+  return value?.toLowerCase() === 'configured' ? 'configured' : 'denied'
+}
+
+function isEvolutionStatusRequest(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  const requestType = (body as Record<string, unknown>).request_type
+  return requestType === 'evolution_status'
+}
+
+function buildEvolutionInfrastructureStatus(): {
+  sandbox_mode: EvolutionMode
+  canary_mode: EvolutionMode
+  backend_configured: boolean
+  auto_promote_enabled: boolean
+  max_file_bytes: number
+} {
+  const sandboxMode = parseEvolutionMode(Deno.env.get('DAEMON_EVOLUTION_SANDBOX_MODE') ?? undefined)
+  const canaryMode = parseEvolutionMode(Deno.env.get('DAEMON_EVOLUTION_CANARY_MODE') ?? undefined)
+  const backendId = (Deno.env.get('DAEMON_EVOLUTION_BACKEND_ID') ?? '').trim()
+  const parsedMaxFileBytes = Number(Deno.env.get('DAEMON_EVOLUTION_MAX_FILE_BYTES') ?? '16384')
+  const maxFileBytes = Number.isFinite(parsedMaxFileBytes) && parsedMaxFileBytes > 0
+    ? Math.floor(parsedMaxFileBytes)
+    : 16_384
+  const autoPromoteEnabled = (Deno.env.get('DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE') ?? '').toLowerCase() === 'true'
+
+  return {
+    sandbox_mode: sandboxMode,
+    canary_mode: canaryMode,
+    backend_configured: backendId.length > 0,
+    auto_promote_enabled: autoPromoteEnabled,
+    max_file_bytes: maxFileBytes,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AI provider call
 // ---------------------------------------------------------------------------
@@ -469,6 +506,19 @@ Deno.serve(async (req: Request) => {
     body = await req.json()
   } catch {
     return jsonErrorResponse('BAD_REQUEST', 400, headers)
+  }
+
+  if (isEvolutionStatusRequest(body)) {
+    logAudit('admin_evolution_status', { user_id: user.id })
+    return new Response(
+      JSON.stringify({
+        evolution: buildEvolutionInfrastructureStatus(),
+      }),
+      {
+        status: 200,
+        headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },
+      },
+    )
   }
 
   const validation = validateMessages(body)

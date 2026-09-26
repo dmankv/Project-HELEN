@@ -47,6 +47,10 @@ Current baseline is intentionally fail-closed:
 - Budget overruns stop runs and preserve the last known good version.
 - Audit metadata is append-only and redacted before storage.
 
+A configurable backend path now exists and remains opt-in via immutable
+server-side settings. See
+`/home/runner/work/Project-HELEN/Project-HELEN/docs/EVOLUTION_CONFIG.md`.
+
 ## State machine
 
 Evolution runs move through explicit stages:

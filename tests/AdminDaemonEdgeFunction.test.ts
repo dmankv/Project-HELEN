@@ -113,6 +113,15 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain('BAD_REQUEST')
   })
 
+  it('supports admin-only evolution_status diagnostics without exposing secrets', () => {
+    expect(src).toContain("request_type")
+    expect(src).toContain("evolution_status")
+    expect(src).toContain("buildEvolutionInfrastructureStatus")
+    expect(src).toContain("sandbox_mode")
+    expect(src).toContain("canary_mode")
+    expect(src).not.toContain("DAEMON_EVOLUTION_BACKEND_TOKEN")
+  })
+
   it('validates strategy against explicit allowlist', () => {
     expect(src).toContain('ALLOWED_STRATEGIES')
     expect(src).toContain('validateStrategyMetadata(')

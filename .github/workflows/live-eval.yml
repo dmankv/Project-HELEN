@@ -41,5 +41,39 @@ jobs:
         run: npm ci
 
       - name: Run live evaluation
+        id: live_eval
         if: steps.config.outputs.configured == 'true'
         run: npx tsx tests/daemon-eval.mjs
+
+      - name: Build evolution gate artifact
+        if: always()
+        run: |
+          if [ "${{ steps.config.outputs.configured }}" = "true" ] && [ "${{ steps.live_eval.outcome }}" = "success" ]; then
+            STATUS="passed"
+            DETAIL="Live evaluation completed."
+          elif [ "${{ steps.config.outputs.configured }}" = "true" ]; then
+            STATUS="failed"
+            DETAIL="Live evaluation failed."
+          else
+            STATUS="unavailable"
+            DETAIL="Live evaluation secrets are not configured."
+          fi
+
+          cat > evolution-gate-results.json <<JSON
+          {
+            "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "workflow": "live-eval",
+            "gates": [
+              { "gate": "regression", "status": "${STATUS}", "required": true, "detail": "${DETAIL}" }
+            ]
+          }
+          JSON
+
+      - name: Upload evolution gate artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evolution-gate-results
+          path: evolution-gate-results.json
+          if-no-files-found: error
+          retention-days: 14

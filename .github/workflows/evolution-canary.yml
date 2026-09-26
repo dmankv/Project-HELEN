@@ -1,0 +1,64 @@
+name: Evolution Canary Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Candidate version identifier
+        required: true
+        type: string
+      candidate_snapshot_id:
+        description: Candidate snapshot UUID
+        required: true
+        type: string
+      run_id:
+        description: Evolution run UUID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    environment:
+      name: evolution-canary
+    steps:
+      - name: Validate immutable enablement flag
+        run: |
+          if [ "${{ secrets.DAEMON_EVOLUTION_CANARY_ENABLED }}" != "true" ]; then
+            echo "Canary promotion is disabled by immutable infrastructure."
+            exit 1
+          fi
+
+      - name: Validate required identifiers
+        run: |
+          echo "${{ inputs.candidate_snapshot_id }}" | grep -Eq '^[0-9a-fA-F-]{36}$'
+          echo "${{ inputs.run_id }}" | grep -Eq '^[0-9a-fA-F-]{36}$'
+          test -n "${{ inputs.candidate_version }}"
+
+      - name: Download latest evolution gate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: evolution-gate-results
+          path: /tmp/evolution-gates
+
+      - name: Verify regression gate status is passed
+        run: |
+          node -e "const fs=require('fs');const p='/tmp/evolution-gates/evolution-gate-results.json';const doc=JSON.parse(fs.readFileSync(p,'utf8'));const gate=(doc.gates||[]).find(g=>g.gate==='regression');if(!gate||gate.status!=='passed'){console.error('Required regression gate missing or not passed.');process.exit(1);}"
+
+      - name: Trigger immutable canary backend
+        env:
+          EVOLUTION_CANARY_BACKEND_URL: ${{ secrets.EVOLUTION_CANARY_BACKEND_URL }}
+          EVOLUTION_CANARY_BACKEND_TOKEN: ${{ secrets.EVOLUTION_CANARY_BACKEND_TOKEN }}
+        run: |
+          if [ -z "$EVOLUTION_CANARY_BACKEND_URL" ] || [ -z "$EVOLUTION_CANARY_BACKEND_TOKEN" ]; then
+            echo "Canary backend is not configured."
+            exit 1
+          fi
+          curl --fail --show-error --silent \
+            -X POST "$EVOLUTION_CANARY_BACKEND_URL" \
+            -H "X-Canary-Token: $EVOLUTION_CANARY_BACKEND_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"run_id":"${{ inputs.run_id }}","candidate_version":"${{ inputs.candidate_version }}","candidate_snapshot_id":"${{ inputs.candidate_snapshot_id }}"}'
