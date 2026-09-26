@@ -713,13 +713,6 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         reason: 'Promotion denied: configured backend disabled by immutable policy.',
       }
     }
-    if (!this.options.allowAutoPromote) {
-      return {
-        allowed: false,
-        status: 'denied',
-        reason: 'Promotion denied: immutable infrastructure requires manual promotion gate.',
-      }
-    }
     if (run.status !== 'running') {
       return {
         allowed: false,
@@ -732,6 +725,13 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         allowed: false,
         status: 'denied',
         reason: 'Promotion denied: run is not in promote stage.',
+      }
+    }
+    if (!this.options.allowAutoPromote) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: immutable infrastructure requires manual promotion gate.',
       }
     }
     if (!requiredGatesPassed(run.gateResults)) {

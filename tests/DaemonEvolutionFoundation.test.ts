@@ -419,7 +419,7 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     const adapter = new ConfiguredCanaryAdapter({
       enabled: true,
       backendId: 'immutable-controller',
-      allowAutoPromote: true,
+      allowAutoPromote: false,
     })
     const run = {
       ...createEvolutionRun('candidate-v2', 'v1'),
