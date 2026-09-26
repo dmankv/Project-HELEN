@@ -47,8 +47,9 @@ Current baseline is intentionally fail-closed:
 - Budget overruns block promotion and preserve the last known good version.
 - Audit metadata is append-only and redacted before storage.
 
-A configurable backend path now exists and remains opt-in via immutable
-server-side settings. See `docs/EVOLUTION_CONFIG.md`.
+Immutable backend settings are documented as a reserved control-plane contract,
+but this repository still selects denied adapters until verified backend
+injection is implemented. See `docs/EVOLUTION_CONFIG.md`.
 
 ## State machine
 

@@ -1,6 +1,6 @@
 # Autonomous Evolution Backend Configuration
 
-This repository reserves backend configuration for autonomous self-write and canary/promotion. Configuration values alone do not enable either capability; both remain denied until a verified backend is injected.
+This repository reserves backend configuration for autonomous self-write and canary/promotion. Configuration values are documented here as the immutable control-plane contract and diagnostics surface, but adapter selection in this repository remains fail-closed until a verified backend is injected.
 
 ## Default behavior
 
@@ -11,7 +11,7 @@ Defaults are fail-closed:
 
 When denied, autonomous write/promotion is blocked.
 
-## Immutable control-plane inputs
+## Reserved immutable control-plane inputs
 
 Set these as server-side secrets/environment values (never in browser variables):
 
@@ -20,6 +20,8 @@ Set these as server-side secrets/environment values (never in browser variables)
 - `DAEMON_EVOLUTION_BACKEND_ID` (non-empty backend controller id)
 - `DAEMON_EVOLUTION_MAX_FILE_BYTES` (positive integer)
 - `DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE` (`true`/`false`)
+
+These keys are intentionally reserved for verified backend integration. In the current repository state they document the required contract and are surfaced through admin diagnostics, but they do not by themselves enable non-denied adapters.
 
 ## Backend infrastructure required before enabling configured mode
 

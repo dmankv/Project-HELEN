@@ -347,6 +347,18 @@ function buildEvolutionInfrastructureStatus(): {
   }
 }
 
+interface EvolutionStatusResponse {
+  request_type: 'evolution_status'
+  evolution: ReturnType<typeof buildEvolutionInfrastructureStatus>
+}
+
+function buildEvolutionStatusResponse(): EvolutionStatusResponse {
+  return {
+    request_type: 'evolution_status',
+    evolution: buildEvolutionInfrastructureStatus(),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AI provider call
 // ---------------------------------------------------------------------------
@@ -511,9 +523,7 @@ Deno.serve(async (req: Request) => {
   if (isEvolutionStatusRequest(body)) {
     logAudit('admin_evolution_status', { user_id: user.id })
     return new Response(
-      JSON.stringify({
-        evolution: buildEvolutionInfrastructureStatus(),
-      }),
+      JSON.stringify(buildEvolutionStatusResponse()),
       {
         status: 200,
         headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },
