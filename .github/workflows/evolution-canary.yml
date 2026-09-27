@@ -60,16 +60,21 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
           EXPECTED_ARTIFACT_NAME: ${{ format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id) }}
+          MAX_LIVE_EVAL_LOOKUP_PAGES: '5'
         run: |
           RUN_IDS="$(node <<'NODE'
           const repo = process.env.REPO
           const token = process.env.GITHUB_TOKEN
           const refName = (process.env.REF_NAME || '').trim()
           const target = (process.env.CANDIDATE_SHA || '').toLowerCase()
+          const maxPages = Number(process.env.MAX_LIVE_EVAL_LOOKUP_PAGES || '5')
 
           async function loadRuns() {
+            if (!Number.isInteger(maxPages) || maxPages <= 0) {
+              throw new Error(`Invalid MAX_LIVE_EVAL_LOOKUP_PAGES: ${process.env.MAX_LIVE_EVAL_LOOKUP_PAGES}`)
+            }
             const matched = []
-            for (let page = 1; ; page += 1) {
+            for (let page = 1; page <= maxPages; page += 1) {
               const params = new URLSearchParams({
                 status: 'completed',
                 event: 'workflow_dispatch',
@@ -116,7 +121,9 @@ jobs:
               }
             }
 
-            if (matched.length === 0) process.exit(1)
+            if (matched.length === 0) {
+              throw new Error(`No matching recent live-eval attestations found within ${maxPages} page(s) of workflow_dispatch runs.`)
+            }
             process.stdout.write(matched.join('\n'))
           }
 

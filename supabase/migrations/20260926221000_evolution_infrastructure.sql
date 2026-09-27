@@ -458,7 +458,7 @@ begin
   end if;
   if rollback_finalization_requested
    and not rollback_transition_allowed then
-   raise exception 'Evolution rollback is allowed only from canary/promote stages or a succeeded promotion.';
+   raise exception 'Evolution rollback finalization requires a privileged rollback attestation bound to an eligible canary/promote or succeeded promotion run.';
   end if;
   if terminal_transition and not row_unchanged and not rollback_transition_allowed then
     raise exception 'Evolution run lifecycle state is immutable after terminal status.';
