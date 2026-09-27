@@ -675,18 +675,16 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
         transitionEvolutionStage(
           transitionEvolutionStage(
             transitionEvolutionStage(
-              transitionEvolutionStage(
-                transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
-                'propose',
-              ),
-              'write',
+              transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
+              'propose',
             ),
-            'test',
+            'write',
           ),
-          'evaluate',
+          'test',
         ),
-        'canary',
-      )
+        'evaluate',
+      ),
+      'canary',
     )
     const run = {
       ...recordCanaryDecision(canaryRun, {
