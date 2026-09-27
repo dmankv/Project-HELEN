@@ -220,6 +220,8 @@ declare
   canary_attestation_present boolean;
   promotion_finalization_attested boolean;
   rollback_attestation_present boolean;
+  promotion_finalization_requested boolean;
+  rollback_finalization_requested boolean;
   expected_next_stage text;
   sequential_transition_allowed boolean;
   stop_transition_allowed boolean;
@@ -264,10 +266,28 @@ begin
   canary_attestation_present := false;
   promotion_finalization_attested := false;
   rollback_attestation_present := false;
-  if old.status = 'running'
+  promotion_finalization_requested := (
+    old.status = 'running'
     and old.stage = 'promote'
     and new.stage = 'promote'
-    and new.status = 'succeeded' then
+    and new.status = 'succeeded'
+  );
+  rollback_finalization_requested := (
+    new.stage = 'rollback'
+    and new.status = 'rolled_back'
+    and (
+      (
+        old.status = 'running'
+        and old.stage in ('canary', 'promote', 'rollback')
+      )
+      or (
+        old.deployed_version = old.candidate_version
+        and old.stage = 'promote'
+        and old.status = 'succeeded'
+      )
+    )
+  );
+  if promotion_finalization_requested then
     canary_attestation_present := exists (
       select 1
       from (
@@ -324,8 +344,7 @@ begin
         )
     );
   end if;
-  if new.stage = 'rollback'
-    and new.status = 'rolled_back' then
+  if rollback_finalization_requested then
     rollback_attestation_present := exists (
       select 1
       from (
