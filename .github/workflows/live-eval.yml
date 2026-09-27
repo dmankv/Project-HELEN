@@ -91,12 +91,10 @@ jobs:
           fi
 
       - name: Install dependencies
-        if: steps.config.outputs.configured == 'true'
         run: npm ci
 
       - name: Run typecheck gate
         id: typecheck_gate
-        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         run: |
           npm run server:typecheck
@@ -104,19 +102,16 @@ jobs:
 
       - name: Run lint gate
         id: lint_gate
-        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         run: npm run lint
 
       - name: Run unit gate
         id: unit_gate
-        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         run: npm run test:unit
 
       - name: Run build gate
         id: build_gate
-        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         run: |
           npm run build
@@ -124,13 +119,11 @@ jobs:
 
       - name: Run security scan gate
         id: security_scan_gate
-        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=critical
 
       - name: Run secret scan gate
         id: secret_scan_gate
-        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         run: |
           export GITLEAKS_CONFIG_TOML="$(cat <<'EOF'
@@ -433,8 +426,8 @@ jobs:
           node <<'NODE'
           const fs = require('fs')
 
-          const gateStatus = (outcome, configured, detail) => {
-            if (configured !== 'true') {
+          const gateStatus = (outcome, configured, detail, requiresRemoteConfig) => {
+            if (requiresRemoteConfig && configured !== 'true') {
               return { status: 'unavailable', detail: 'Live evaluation secrets are not configured.' }
             }
             if (outcome === 'success') return { status: 'passed', detail }
@@ -443,20 +436,20 @@ jobs:
           }
 
           const gateDefinitions = [
-            ['typecheck', process.env.TYPECHECK_STATUS, 'Typecheck completed.'],
-            ['lint', process.env.LINT_STATUS, 'Lint completed.'],
-            ['unit', process.env.UNIT_STATUS, 'Unit tests completed.'],
-            ['build', process.env.BUILD_STATUS, 'Build completed.'],
-            ['security_scan', process.env.SECURITY_SCAN_STATUS, 'Security scan completed.'],
-            ['secret_scan', process.env.SECRET_SCAN_STATUS, 'Secret scan completed.'],
-            ['resource_budget', process.env.RESOURCE_BUDGET_STATUS, 'Resource budget check completed.'],
-            ['regression', process.env.REGRESSION_STATUS, 'Live evaluation completed.'],
+            ['typecheck', process.env.TYPECHECK_STATUS, 'Typecheck completed.', false],
+            ['lint', process.env.LINT_STATUS, 'Lint completed.', false],
+            ['unit', process.env.UNIT_STATUS, 'Unit tests completed.', false],
+            ['build', process.env.BUILD_STATUS, 'Build completed.', false],
+            ['security_scan', process.env.SECURITY_SCAN_STATUS, 'Security scan completed.', false],
+            ['secret_scan', process.env.SECRET_SCAN_STATUS, 'Secret scan completed.', false],
+            ['resource_budget', process.env.RESOURCE_BUDGET_STATUS, 'Resource budget check completed.', true],
+            ['regression', process.env.REGRESSION_STATUS, 'Live evaluation completed.', true],
           ]
 
-          const gates = gateDefinitions.map(([gate, outcome, detail]) => ({
+          const gates = gateDefinitions.map(([gate, outcome, detail, requiresRemoteConfig]) => ({
             gate,
             required: true,
-            ...gateStatus(outcome, process.env.LIVE_EVAL_CONFIGURED, detail),
+            ...gateStatus(outcome, process.env.LIVE_EVAL_CONFIGURED, detail, requiresRemoteConfig),
           }))
 
           const doc = {

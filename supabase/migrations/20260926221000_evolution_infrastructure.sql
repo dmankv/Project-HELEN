@@ -314,13 +314,13 @@ begin
 end;
 $$;
 
-drop trigger if exists prevent_evolution_run_identity_change on public.evolution_runs;
 drop trigger if exists prevent_evolution_run_owner_change on public.evolution_runs;
 drop trigger if exists enforce_evolution_run_initial_state on public.evolution_runs;
 create trigger enforce_evolution_run_initial_state
   before insert on public.evolution_runs
   for each row execute function public.enforce_evolution_run_initial_state();
 
+drop trigger if exists prevent_evolution_run_identity_change on public.evolution_runs;
 create trigger prevent_evolution_run_identity_change
   before update on public.evolution_runs
   for each row execute function public.prevent_evolution_run_identity_change();
