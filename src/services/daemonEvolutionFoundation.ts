@@ -395,6 +395,7 @@ export function transitionEvolutionStage(
     return {
       ...run,
       status: 'failed',
+      deployedVersion: run.lastKnownGoodVersion,
       updatedAt: now,
       endedAt: now,
     }

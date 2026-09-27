@@ -162,6 +162,7 @@ describe('evolution run state machine', () => {
 
     expect(invalid.status).toBe('failed')
     expect(invalid.endedAt).toBeTruthy()
+    expect(invalid.deployedVersion).toBe('stable-v1')
 
     const deniedRun = stopEvolutionRun(createEvolutionRun('candidate-v3', 'stable-v2'), 'denied')
     expect(deniedRun.status).toBe('denied')
