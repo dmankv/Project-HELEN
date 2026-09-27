@@ -136,6 +136,13 @@ describe('sandbox adapters', () => {
     expect(blockedWrite.message).toContain('modify_deployment_credentials')
     expect(() => adapter.createWorkspace({ 'supabase/migrations/unsafe.sql': 'select 1' }))
       .toThrow('modify_rls')
+    expect(() => adapter.createWorkspace({ 'infrastructure/terraform/main.tf': 'resource "x" "y" {}' }))
+      .toThrow('change_control_plane_policy')
+    expect(adapter.writeFile(workspace.workspaceId, 'infrastructure/terraform/main.tf', 'resource "x" "y" {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
 
     const delegate = (adapter as unknown as { delegate: InMemorySandboxAdapter }).delegate
     delegate.writeFile(workspace.workspaceId, '.env.production', 'secret=value')

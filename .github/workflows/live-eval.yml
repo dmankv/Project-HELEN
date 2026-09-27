@@ -512,6 +512,38 @@ jobs:
           retention-days: 14
 
       - name: Enforce required gates passed
-        if: always() && steps.binding.outcome != 'failure' && steps.binding.outputs.ready == 'true' && steps.live_eval.outcome == 'success'
+        if: always() && steps.binding.outcome != 'failure' && steps.binding.outputs.ready == 'true'
+        env:
+          LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
+          TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
+          LINT_STATUS: ${{ steps.lint_gate.outcome }}
+          UNIT_STATUS: ${{ steps.unit_gate.outcome }}
+          BUILD_STATUS: ${{ steps.build_gate.outcome }}
+          SECURITY_SCAN_STATUS: ${{ steps.security_scan_gate.outcome }}
+          SECRET_SCAN_STATUS: ${{ steps.secret_scan_gate.outcome }}
+          LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
+          RESOURCE_BUDGET_STATUS: ${{ steps.resource_budget_gate.outcome }}
+          REGRESSION_STATUS: ${{ steps.regression_gate.outcome }}
         run: |
-          node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync('evolution-gate-results.json','utf8'));const failed=(doc.gates||[]).find(g=>g.required&&g.status!=='passed');if(failed){console.error(`Required gate did not pass: ${failed.gate}`);process.exit(1)}"
+          node <<'NODE'
+          if (process.env.LIVE_EVAL_CONFIGURED !== 'true') {
+            console.error('Required gate did not pass: live evaluation configuration is missing.')
+            process.exit(1)
+          }
+          const requiredGateOutcomes = [
+            ['typecheck', process.env.TYPECHECK_STATUS],
+            ['lint', process.env.LINT_STATUS],
+            ['unit', process.env.UNIT_STATUS],
+            ['build', process.env.BUILD_STATUS],
+            ['security_scan', process.env.SECURITY_SCAN_STATUS],
+            ['secret_scan', process.env.SECRET_SCAN_STATUS],
+            ['live_eval', process.env.LIVE_EVAL_STATUS],
+            ['resource_budget', process.env.RESOURCE_BUDGET_STATUS],
+            ['regression', process.env.REGRESSION_STATUS],
+          ]
+          const failed = requiredGateOutcomes.find(([, outcome]) => outcome !== 'success')
+          if (failed) {
+            console.error(`Required gate did not pass: ${failed[0]}`)
+            process.exit(1)
+          }
+          NODE

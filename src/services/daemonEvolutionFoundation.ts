@@ -70,6 +70,11 @@ const PROTECTED_SANDBOX_PATHS = Object.freeze([
   { prefix: 'src/services/daemonEvolutionFoundation.ts', capability: 'change_control_plane_policy' },
   { prefix: '.env', capability: 'modify_secrets' },
 ] as const satisfies ReadonlyArray<{ prefix: string, capability: DaemonCapability }>)
+const SANDBOX_WRITABLE_PATH_ALLOWLIST = Object.freeze([
+  /^(src|tests?|docs?)\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/i,
+  /^supabase\/functions\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/i,
+  /^[a-z0-9._-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/i,
+])
 
 export function decideDaemonCapability(capability: DaemonCapability): CapabilityDecision {
   const allowed = ALLOWLIST.has(capability)
@@ -97,23 +102,29 @@ export function decideDaemonCapability(capability: DaemonCapability): Capability
 }
 
 function decideSandboxWritePath(filePath: string): CapabilityDecision {
-  const normalizedPath = filePath.replace(/\\/g, '/')
+  const normalizedPath = filePath.trim().replace(/\\/g, '/')
+  const normalizedPathForMatching = normalizedPath.toLowerCase()
   const isUnsafePath = normalizedPath.length === 0
-    || normalizedPath.startsWith('/')
-    || /^[a-zA-Z]:\//.test(normalizedPath)
-    || normalizedPath.split('/').some((segment: string) => (
+    || normalizedPathForMatching.startsWith('/')
+    || /^[a-zA-Z]:\//.test(normalizedPathForMatching)
+    || normalizedPathForMatching.split('/').some((segment: string) => (
       segment.length === 0 || segment === '.' || segment === '..'
     ))
   const protectedPath = PROTECTED_SANDBOX_PATHS.find(({ prefix }) => (
     prefix === '.env'
-      ? normalizedPath === prefix || normalizedPath.startsWith(`${prefix}.`)
-      : normalizedPath === prefix || normalizedPath.startsWith(prefix)
+      ? normalizedPathForMatching === prefix || normalizedPathForMatching.startsWith(`${prefix}.`)
+      : normalizedPathForMatching === prefix || normalizedPathForMatching.startsWith(prefix)
   ))
+  const writablePath = SANDBOX_WRITABLE_PATH_ALLOWLIST.some(pattern => pattern.test(normalizedPathForMatching))
 
   return decideDaemonCapability(
     isUnsafePath
       ? 'change_control_plane_policy'
-      : protectedPath?.capability ?? 'write_sandbox',
+      : protectedPath
+        ? protectedPath.capability
+        : writablePath
+          ? 'write_sandbox'
+          : 'change_control_plane_policy',
   )
 }
 
