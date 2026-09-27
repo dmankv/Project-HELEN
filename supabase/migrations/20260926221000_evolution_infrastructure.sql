@@ -449,6 +449,7 @@ begin
     or (
       old.stage = 'rollback'
       and old.status = 'running'
+      and old.deployed_version in (old.last_known_good, old.candidate_version)
       and new.deployed_version = old.last_known_good
     )
     or (
