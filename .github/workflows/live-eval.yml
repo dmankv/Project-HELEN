@@ -222,9 +222,9 @@ jobs:
         id: binding
         if: always()
         env:
-          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
-          CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
-          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
+          CANDIDATE_SNAPSHOT_ID: ${{ github.event.inputs.candidate_snapshot_id || '' }}
+          EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
         run: |
           if [ -n "$CANDIDATE_VERSION" ] && [ -n "$CANDIDATE_SNAPSHOT_ID" ] && [ -n "$EVOLUTION_RUN_ID" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
