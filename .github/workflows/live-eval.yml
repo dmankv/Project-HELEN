@@ -55,9 +55,10 @@ jobs:
         id: config
         env:
           VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: |
-          if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
+          if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "Live evaluation cannot run: required secrets are not configured."
           else
@@ -146,7 +147,7 @@ jobs:
           ]
           EOF
           )"
-          docker run --rm -e GITLEAKS_CONFIG_TOML -v "$PWD:/repo" -w /repo zricethezav/gitleaks:latest \
+          docker run --rm -e GITLEAKS_CONFIG_TOML -v "$PWD:/repo" -w /repo zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             dir . --redact --no-banner
 
       - name: Run live evaluation

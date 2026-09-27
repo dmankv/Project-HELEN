@@ -142,9 +142,7 @@ jobs:
               MATCHED_RUN_ID="$RUN_ID"
               break
             fi
-          done <<EOF
-$RUN_IDS
-EOF
+          done <<<"$RUN_IDS"
 
           test -n "$MATCHED_RUN_ID"
 

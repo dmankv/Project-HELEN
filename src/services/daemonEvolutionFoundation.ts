@@ -329,6 +329,7 @@ export interface EvolutionRunRecord {
   auditEventIds: string[]
   lastKnownGoodVersion: string
   deployedVersion: string
+  canaryDecision: PersistedCanaryDecision | null
 }
 
 const STAGE_ORDER: EvolutionStage[] = [
@@ -360,6 +361,38 @@ export function createEvolutionRun(candidateVersion: string, lastKnownGoodVersio
     auditEventIds: [],
     lastKnownGoodVersion,
     deployedVersion: lastKnownGoodVersion,
+    canaryDecision: null,
+  }
+}
+
+export interface PersistedCanaryDecision extends CanaryDecision {
+  runId: string
+  candidateSnapshotId: string
+  candidateVersion: string
+}
+
+function hasHealthyCanaryDecision(run: EvolutionRunRecord): boolean {
+  return run.canaryDecision?.allowed === true
+    && run.canaryDecision.status === 'healthy'
+    && run.canaryDecision.runId === run.runId
+    && run.canaryDecision.candidateSnapshotId === run.candidateSnapshotId
+    && run.canaryDecision.candidateVersion === run.candidateVersion
+}
+
+export function recordCanaryDecision(
+  run: EvolutionRunRecord,
+  decision: CanaryDecision,
+): EvolutionRunRecord {
+  const now = new Date().toISOString()
+  return {
+    ...run,
+    updatedAt: now,
+    canaryDecision: {
+      ...decision,
+      runId: run.runId,
+      candidateSnapshotId: run.candidateSnapshotId,
+      candidateVersion: run.candidateVersion,
+    },
   }
 }
 
@@ -388,6 +421,7 @@ export function transitionEvolutionStage(
     }
   }
   if (run.status !== 'running') return run
+  if (run.stage === 'canary' && nextStage === 'promote' && !hasHealthyCanaryDecision(run)) return run
   const currentIndex = STAGE_ORDER.indexOf(run.stage)
   const nextIndex = STAGE_ORDER.indexOf(nextStage)
   if (nextIndex !== currentIndex + 1) return run
@@ -717,7 +751,7 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
     }
     return {
       allowed: true,
-      status: 'running',
+      status: 'healthy',
       reason: `Canary deployment accepted by backend ${this.options.backendId}.`,
     }
   }
@@ -749,6 +783,13 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         allowed: false,
         status: 'denied',
         reason: 'Promotion denied: deployment is no longer at the last-known-good version.',
+      }
+    }
+    if (!hasHealthyCanaryDecision(run)) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: a healthy canary decision bound to this run is required.',
       }
     }
     if (!this.options.allowAutoPromote) {
@@ -888,6 +929,7 @@ function deriveCanaryStatus(run: EvolutionRunRecord | null): CanaryStatus {
   if (!run) return 'not_started'
   if (run.status === 'failed' || run.status === 'denied' || run.status === 'timed_out') return 'failed'
   if (run.stage === 'rollback' || run.status === 'rolled_back') return 'failed'
+  if (hasHealthyCanaryDecision(run)) return 'healthy'
   if (run.stage === 'promote') {
     return run.status === 'running' || run.status === 'succeeded'
       ? 'healthy'

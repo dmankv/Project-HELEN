@@ -13,6 +13,7 @@ import {
   enforceEvolutionBudget,
   evaluateCandidateGates,
   InMemorySandboxAdapter,
+  recordCanaryDecision,
   transitionEvolutionStage,
   stopEvolutionRun,
   type GateResult,
@@ -117,7 +118,7 @@ describe('evolution run state machine', () => {
     expect(run.status).toBe('running')
 
     const progressed = transitionEvolutionStage(
-      transitionEvolutionStage(
+      recordCanaryDecision(transitionEvolutionStage(
         transitionEvolutionStage(
           transitionEvolutionStage(
             transitionEvolutionStage(
@@ -132,7 +133,11 @@ describe('evolution run state machine', () => {
           'evaluate',
         ),
         'canary',
-      ),
+      ), {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }),
       'promote',
     )
 
@@ -404,13 +409,12 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     const canaryDecision = adapter.deployCanary(run)
     expect(canaryDecision.allowed).toBe(true)
 
-    const promoteRun = {
-      ...run,
-      stage: 'promote' as const,
+    const promoteRun = transitionEvolutionStage({
+      ...recordCanaryDecision(run, canaryDecision),
       gateResults: passingRequiredGateResults(),
       budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
       budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
-    }
+    }, 'promote')
     const promoteDecision = adapter.promote(promoteRun)
     expect(promoteDecision.allowed).toBe(true)
     expect(adapter.rollback(promoteRun)).toBe('completed')
@@ -476,7 +480,11 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       'canary',
     )
     const promoteRun = {
-      ...run,
+      ...recordCanaryDecision(run, {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }),
       stage: 'promote' as const,
       gateResults: passingRequiredGateResults(),
       budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
@@ -509,7 +517,15 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       ),
       'canary',
     )
-    const promoteRun = { ...run, stage: 'promote' as const, gateResults: [] }
+    const promoteRun = {
+      ...recordCanaryDecision(run, {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }),
+      stage: 'promote' as const,
+      gateResults: [],
+    }
     const decision = adapter.promote(promoteRun)
     expect(decision.allowed).toBe(false)
     expect(decision.reason).toContain('required evaluation gates')
@@ -521,8 +537,8 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       backendId: 'immutable-controller',
       allowAutoPromote: true,
     })
-    const run = {
-      ...transitionEvolutionStage(
+    const canaryRun = transitionEvolutionStage(
+      transitionEvolutionStage(
         transitionEvolutionStage(
           transitionEvolutionStage(
             transitionEvolutionStage(
@@ -537,7 +553,14 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
           'evaluate',
         ),
         'canary',
-      ),
+      )
+    )
+    const run = {
+      ...recordCanaryDecision(canaryRun, {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }),
       stage: 'promote' as const,
       gateResults: passingRequiredGateResults(),
       budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
@@ -568,6 +591,42 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     expect(decision.reason).toContain('not in promote stage')
   })
 
+  it('requires a persisted healthy canary decision before promoting or auto-promoting', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+    const canaryRun = transitionEvolutionStage(
+      transitionEvolutionStage(
+        transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
+              'propose',
+            ),
+            'write',
+          ),
+          'test',
+        ),
+        'evaluate',
+      ),
+      'canary',
+    )
+
+    expect(transitionEvolutionStage(canaryRun, 'promote')).toBe(canaryRun)
+
+    const deniedPromotion = adapter.promote({
+      ...canaryRun,
+      stage: 'promote',
+      gateResults: passingRequiredGateResults(),
+      budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
+    })
+    expect(deniedPromotion.allowed).toBe(false)
+    expect(deniedPromotion.reason).toContain('healthy canary decision')
+  })
+
   it('fails closed when promotion has no budget state or exceeds a budget', () => {
     const adapter = new ConfiguredCanaryAdapter({
       enabled: true,
@@ -575,7 +634,11 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       allowAutoPromote: true,
     })
     const run = {
-      ...createEvolutionRun('candidate-v2', 'v1'),
+      ...recordCanaryDecision(createEvolutionRun('candidate-v2', 'v1'), {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }),
       stage: 'promote' as const,
       gateResults: passingRequiredGateResults(),
     }
