@@ -153,6 +153,21 @@ create policy "evolution_audit_events_insert_admin_own"
     )
   );
 
+drop policy if exists "evolution_audit_events_insert_service_canary" on public.evolution_audit_events;
+create policy "evolution_audit_events_insert_service_canary"
+  on public.evolution_audit_events for insert
+  to service_role
+  with check (
+    evolution_audit_events.event_type = 'canary_decision'
+    and evolution_audit_events.run_id is not null
+    and exists (
+      select 1
+      from public.evolution_runs
+      where run_id = evolution_audit_events.run_id
+        and user_id = evolution_audit_events.user_id
+    )
+  );
+
 create or replace function public.prevent_evolution_run_identity_change()
 returns trigger
 language plpgsql
