@@ -491,19 +491,17 @@ jobs:
           NODE
 
       - name: Upload evolution gate artifact
-        if: always() && steps.binding.outcome != 'failure'
+        if: always() && steps.binding.outcome != 'failure' && steps.binding.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: >-
             ${{
-              steps.binding.outputs.ready == 'true'
-                && format(
-                  'evolution-gate-results-{0}-{1}-{2}',
-                  github.event.inputs.candidate_version,
-                  github.event.inputs.candidate_snapshot_id,
-                  github.event.inputs.run_id
-                )
-                || format('evolution-gate-results-{0}', steps.binding.outputs.candidate_sha)
+              format(
+                'evolution-gate-results-{0}-{1}-{2}',
+                github.event.inputs.candidate_version,
+                github.event.inputs.candidate_snapshot_id,
+                github.event.inputs.run_id
+              )
             }}
           path: evolution-gate-results.json
           if-no-files-found: error

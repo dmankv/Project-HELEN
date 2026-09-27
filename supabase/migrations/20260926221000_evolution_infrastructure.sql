@@ -226,6 +226,7 @@ declare
   sequential_transition_allowed boolean;
   stop_transition_allowed boolean;
   promotion_transition_allowed boolean;
+  rollback_entry_allowed boolean;
   rollback_transition_allowed boolean;
 begin
   row_unchanged := (
@@ -424,6 +425,21 @@ begin
     and new.stage = 'promote'
     and new.status = 'succeeded'
   );
+  rollback_entry_allowed := (
+    (
+      old.status = 'running'
+      and old.stage in ('canary', 'promote')
+      and new.deployed_version = old.deployed_version
+    )
+    or (
+      old.deployed_version = old.candidate_version
+      and old.stage = 'promote'
+      and old.status = 'succeeded'
+      and new.deployed_version = old.deployed_version
+    )
+  )
+    and new.stage = 'rollback'
+    and new.status = 'running';
   rollback_transition_allowed := (
     (
       old.status = 'running'
@@ -460,13 +476,14 @@ begin
    and not rollback_transition_allowed then
    raise exception 'Evolution rollback finalization requires a privileged rollback attestation bound to an eligible canary/promote or succeeded promotion run.';
   end if;
-  if terminal_transition and not row_unchanged and not rollback_transition_allowed then
+  if terminal_transition and not row_unchanged and not rollback_entry_allowed and not rollback_transition_allowed then
     raise exception 'Evolution run lifecycle state is immutable after terminal status.';
   end if;
 
   if not sequential_transition_allowed
     and not stop_transition_allowed
     and not promotion_transition_allowed
+    and not rollback_entry_allowed
     and not rollback_transition_allowed then
     raise exception 'Invalid evolution lifecycle transition.';
   end if;
