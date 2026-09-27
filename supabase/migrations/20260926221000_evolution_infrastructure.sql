@@ -217,6 +217,9 @@ begin
     when new.status = 'running' then null
     else coalesce(old.ended_at, now())
   end;
+  if lifecycle_unchanged then
+    return new;
+  end if;
   terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
   expected_next_stage := case old.stage
     when 'observe' then 'learn'
@@ -231,10 +234,6 @@ begin
 
   if terminal_transition and not lifecycle_unchanged then
     raise exception 'Evolution run lifecycle state is immutable after terminal status.';
-  end if;
-
-  if lifecycle_unchanged then
-    return new;
   end if;
 
   sequential_transition_allowed := (

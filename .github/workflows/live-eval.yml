@@ -61,7 +61,6 @@ jobs:
           if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "Live evaluation cannot run: required secrets are not configured."
-            exit 1
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
@@ -413,7 +412,7 @@ jobs:
           NODE
 
       - name: Build evolution gate artifact
-        if: always() && steps.config.outputs.configured == 'true' && steps.binding.outcome != 'failure'
+        if: always() && steps.binding.outcome != 'failure'
         env:
           CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
           CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
@@ -475,7 +474,7 @@ jobs:
           NODE
 
       - name: Upload evolution gate artifact
-        if: always() && steps.config.outputs.configured == 'true' && steps.binding.outcome != 'failure'
+        if: always() && steps.binding.outcome != 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: >-
@@ -494,6 +493,6 @@ jobs:
           retention-days: 14
 
       - name: Enforce required gates passed
-        if: steps.config.outputs.configured == 'true' && steps.binding.outcome != 'failure'
+        if: always() && steps.binding.outcome != 'failure'
         run: |
           node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync('evolution-gate-results.json','utf8'));const failed=(doc.gates||[]).find(g=>g.required&&g.status!=='passed');if(failed){console.error(`Required gate did not pass: ${failed.gate}`);process.exit(1)}"

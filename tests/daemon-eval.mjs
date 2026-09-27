@@ -541,8 +541,10 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
 
   async function liveChatRequest(messages) {
     const origin = process.env.DAEMON_EVAL_ORIGIN
+    const apiToken = process.env.DAEMON_EVAL_API_TOKEN
     const headers = { 'Content-Type': 'application/json' }
     if (origin) headers.Origin = origin
+    if (apiToken) headers['X-DAEMON-API-TOKEN'] = apiToken
     liveEvalApiCalls++
     const res = await fetch(apiUrl + '/api/chat', {
       method: 'POST',
