@@ -75,6 +75,7 @@ jobs:
             const matched = []
             for (let page = 1; page <= maxPages; page += 1) {
               const params = new URLSearchParams({
+                event: 'workflow_dispatch',
                 status: 'completed',
                 per_page: '100',
                 page: `${page}`,
