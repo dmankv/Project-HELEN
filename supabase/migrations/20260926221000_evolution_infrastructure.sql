@@ -445,8 +445,8 @@ begin
     and new.status = 'rolled_back';
 
   if (
-   (new.stage = 'promote' and new.status = 'succeeded')
-   or (new.stage = 'rollback' and new.status = 'rolled_back')
+   promotion_finalization_requested
+   or rollback_finalization_requested
   ) and not privileged_control_plane_actor then
    raise exception 'Only provider-side privileged context can finalize promotion or rollback evolution runs.';
   end if;
