@@ -429,7 +429,7 @@ jobs:
           NODE
 
       - name: Build evolution gate artifact
-        if: always() && steps.binding.outcome != 'failure'
+        if: always() && steps.binding.outcome != 'failure' && steps.binding.outputs.ready == 'true'
         env:
           CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
           CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
