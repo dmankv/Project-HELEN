@@ -179,11 +179,56 @@ security definer
 set search_path = public
 as $$
 declare
+  lifecycle_unchanged boolean;
+  terminal_transition boolean;
+  expected_next_stage text;
+  sequential_transition_allowed boolean;
+  stop_transition_allowed boolean;
   promotion_transition_allowed boolean;
   rollback_transition_allowed boolean;
 begin
+  lifecycle_unchanged := (
+    old.stage = new.stage
+    and old.status = new.status
+    and old.deployed_version = new.deployed_version
+  );
+  terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
+  expected_next_stage := case old.stage
+    when 'observe' then 'learn'
+    when 'learn' then 'propose'
+    when 'propose' then 'write'
+    when 'write' then 'test'
+    when 'test' then 'evaluate'
+    when 'evaluate' then 'canary'
+    when 'canary' then 'promote'
+    else null
+  end;
+
+  if terminal_transition and not lifecycle_unchanged then
+    raise exception 'Evolution run lifecycle state is immutable after terminal status.';
+  end if;
+
+  if lifecycle_unchanged then
+    return new;
+  end if;
+
+  sequential_transition_allowed := (
+    old.status = 'running'
+    and new.status = 'running'
+    and expected_next_stage is not null
+    and new.stage = expected_next_stage
+    and new.deployed_version = old.deployed_version
+  );
+  stop_transition_allowed := (
+    old.status = 'running'
+    and new.stage = old.stage
+    and new.status in ('failed', 'denied', 'timed_out')
+    and new.deployed_version = old.last_known_good
+  );
   promotion_transition_allowed := (
-    old.deployed_version = old.last_known_good
+    old.status = 'running'
+    and old.stage = 'promote'
+    and old.deployed_version = old.last_known_good
     and new.deployed_version = old.candidate_version
     and new.stage = 'promote'
     and new.status = 'succeeded'
@@ -208,10 +253,11 @@ begin
     raise exception 'Evolution rollback is allowed only from canary/promote stages or a succeeded promotion.';
   end if;
 
-  if old.deployed_version is distinct from new.deployed_version
+  if not sequential_transition_allowed
+    and not stop_transition_allowed
     and not promotion_transition_allowed
     and not rollback_transition_allowed then
-    raise exception 'Evolution run deployed version can change only on successful promotion or rollback';
+    raise exception 'Invalid evolution lifecycle transition.';
   end if;
   return new;
 end;

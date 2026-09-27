@@ -432,7 +432,7 @@ export function completeEvolutionRun(
 
 export function stopEvolutionRun(
   run: EvolutionRunRecord,
-  reason: Exclude<EvolutionRunStatus, 'running' | 'succeeded'>,
+  reason: Exclude<EvolutionRunStatus, 'running' | 'succeeded' | 'rolled_back'>,
 ): EvolutionRunRecord {
   if (run.status !== 'running') return run
   const now = new Date().toISOString()

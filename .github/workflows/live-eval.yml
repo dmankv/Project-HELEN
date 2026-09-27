@@ -37,9 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DAEMON_EVAL_LIVE: 'true'
-      VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
-      DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
-      DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +49,10 @@ jobs:
 
       - name: Validate live-eval configuration
         id: config
+        env:
+          VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
+          DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: |
           if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -126,6 +127,9 @@ jobs:
         continue-on-error: true
         env:
           DAEMON_EVAL_METRICS_PATH: /tmp/daemon-eval-metrics.json
+          VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
+          DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: npx tsx tests/daemon-eval.mjs
 
       - name: Run resource budget gate
@@ -247,6 +251,8 @@ jobs:
           RESOURCE_BUDGET_STATUS: ${{ steps.resource_budget_gate.outcome }}
           REGRESSION_STATUS: ${{ steps.live_eval.outcome }}
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
+          LIVE_EVAL_WORKFLOW_REF: ${{ github.workflow_ref }}
+          LIVE_EVAL_WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           node <<'NODE'
           const fs = require('fs')
@@ -279,6 +285,8 @@ jobs:
           const doc = {
             generated_at: new Date().toISOString(),
             workflow: 'live-eval',
+            workflow_ref: process.env.LIVE_EVAL_WORKFLOW_REF ?? '',
+            workflow_sha: process.env.LIVE_EVAL_WORKFLOW_SHA ?? '',
             candidate_sha: process.env.CANDIDATE_SHA,
             candidate_version: process.env.CANDIDATE_VERSION ?? '',
             candidate_snapshot_id: process.env.CANDIDATE_SNAPSHOT_ID ?? '',
