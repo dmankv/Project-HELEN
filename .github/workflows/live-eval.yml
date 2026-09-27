@@ -53,7 +53,6 @@ jobs:
 
       - name: Validate live-eval configuration
         id: config
-        continue-on-error: true
         env:
           VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
           DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
@@ -93,17 +92,6 @@ jobs:
             echo "candidate_sha=$DEFAULT_CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
           else
             echo "Promotion-bound attestations require candidate_version, candidate_snapshot_id, run_id, and candidate_sha together."
-            exit 1
-          fi
-
-      - name: Enforce live-eval configuration
-        if: steps.config.outcome != 'success' || steps.config.outputs.configured != 'true'
-        env:
-          CONFIG_OUTCOME: ${{ steps.config.outcome }}
-          LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured || 'false' }}
-        run: |
-          if [ "$CONFIG_OUTCOME" != "success" ] || [ "$LIVE_EVAL_CONFIGURED" != "true" ]; then
-            echo "::error::Live evaluation cannot run: required secrets are not configured."
             exit 1
           fi
 
@@ -182,7 +170,7 @@ jobs:
 
       - name: Run live evaluation
         id: live_eval
-        if: steps.config.outputs.configured == 'true'
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true'
         continue-on-error: true
         env:
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
@@ -366,7 +354,7 @@ jobs:
 
       - name: Verify live evaluation deployment identity
         id: regression_gate
-        if: steps.config.outputs.configured == 'true'
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true'
         continue-on-error: true
         env:
           LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
@@ -404,7 +392,7 @@ jobs:
 
       - name: Run resource budget gate
         id: resource_budget_gate
-        if: steps.config.outputs.configured == 'true'
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true'
         continue-on-error: true
         env:
           DAEMON_EVAL_MAX_RUNTIME_MS: ${{ vars.DAEMON_EVAL_MAX_RUNTIME_MS }}
@@ -571,7 +559,7 @@ jobs:
           retention-days: 14
 
       - name: Enforce required gates passed
-        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
+        if: always() && steps.config.outcome == 'success' && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
         env:
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
           TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
