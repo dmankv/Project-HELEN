@@ -237,18 +237,24 @@ begin
     and old.deployed_version = new.deployed_version
   );
   terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
-  canary_attestation_present := exists (
-    select 1
-    from public.evolution_audit_events as event
-    where event.run_id = old.run_id
-      and event.user_id = old.user_id
-      and event.event_type = 'canary_decision'
-      and event.metadata ->> 'status' = 'healthy'
-      and event.metadata ->> 'allowed' = 'true'
-      and coalesce(event.metadata ->> 'runId', event.metadata ->> 'run_id') = old.run_id::text
-      and coalesce(event.metadata ->> 'candidateSnapshotId', event.metadata ->> 'candidate_snapshot_id') = old.candidate_snapshot_id::text
-      and coalesce(event.metadata ->> 'candidateVersion', event.metadata ->> 'candidate_version') = old.candidate_version
-  );
+  canary_attestation_present := false;
+  if old.status = 'running'
+    and old.stage = 'promote'
+    and new.stage = 'promote'
+    and new.status = 'succeeded' then
+    canary_attestation_present := exists (
+      select 1
+      from public.evolution_audit_events as event
+      where event.run_id = old.run_id
+        and event.user_id = old.user_id
+        and event.event_type = 'canary_decision'
+        and event.metadata ->> 'status' = 'healthy'
+        and event.metadata ->> 'allowed' = 'true'
+        and coalesce(event.metadata ->> 'runId', event.metadata ->> 'run_id') = old.run_id::text
+        and coalesce(event.metadata ->> 'candidateSnapshotId', event.metadata ->> 'candidate_snapshot_id') = old.candidate_snapshot_id::text
+        and coalesce(event.metadata ->> 'candidateVersion', event.metadata ->> 'candidate_version') = old.candidate_version
+    );
+  end if;
   if row_unchanged then
     new.updated_at := old.updated_at;
     new.ended_at := old.ended_at;
