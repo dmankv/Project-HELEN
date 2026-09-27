@@ -192,6 +192,14 @@ begin
     and old.status = new.status
     and old.deployed_version = new.deployed_version
   );
+  new.updated_at := case
+    when lifecycle_unchanged then old.updated_at
+    else now()
+  end;
+  new.ended_at := case
+    when new.status = 'running' then null
+    else coalesce(old.ended_at, now())
+  end;
   terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
   expected_next_stage := case old.stage
     when 'observe' then 'learn'

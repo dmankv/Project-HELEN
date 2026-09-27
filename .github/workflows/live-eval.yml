@@ -51,10 +51,9 @@ jobs:
         id: config
         env:
           VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
-          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: |
-          if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
+          if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "Skipping live evaluation: required secrets are not configured."
           else
@@ -128,9 +127,46 @@ jobs:
         env:
           DAEMON_EVAL_METRICS_PATH: /tmp/daemon-eval-metrics.json
           VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
-          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: npx tsx tests/daemon-eval.mjs
+
+      - name: Verify live evaluation deployment identity
+        id: regression_gate
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
+          EXPECTED_CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+
+          const metricsPath = '/tmp/daemon-eval-metrics.json'
+          if (process.env.LIVE_EVAL_STATUS !== 'success') {
+            console.error('Regression gate requires a successful live evaluation workload.')
+            process.exit(1)
+          }
+          if (!fs.existsSync(metricsPath)) {
+            console.error('Regression gate requires live evaluation metrics.')
+            process.exit(1)
+          }
+
+          const metrics = JSON.parse(fs.readFileSync(metricsPath, 'utf8'))
+          const deploymentSha = String(metrics.deploymentSha ?? '').trim()
+          const expectedSha = String(process.env.EXPECTED_CANDIDATE_SHA ?? '').trim()
+          if (!metrics.deploymentIdentityVerified) {
+            console.error('Regression gate requires a trusted deployment identity attestation from the evaluated endpoint.')
+            process.exit(1)
+          }
+          if (!/^[0-9a-f]{40}$/i.test(deploymentSha)) {
+            console.error('Regression gate requires a full 40-character deployment SHA attestation.')
+            process.exit(1)
+          }
+          if (!expectedSha || deploymentSha.toLowerCase() !== expectedSha.toLowerCase()) {
+            console.error(`Regression gate deployment SHA mismatch: ${deploymentSha || '(missing)'} !== ${expectedSha || '(missing)'}`)
+            process.exit(1)
+          }
+          NODE
 
       - name: Run resource budget gate
         id: resource_budget_gate
@@ -142,7 +178,6 @@ jobs:
           DAEMON_EVAL_MAX_MEMORY_MB: ${{ vars.DAEMON_EVAL_MAX_MEMORY_MB }}
           DAEMON_EVAL_MAX_API_CALLS: ${{ vars.DAEMON_EVAL_MAX_API_CALLS }}
           DAEMON_EVAL_MAX_SPEND_USD: ${{ vars.DAEMON_EVAL_MAX_SPEND_USD }}
-          DAEMON_EVAL_SPEND_USD_USED: ${{ vars.DAEMON_EVAL_SPEND_USD_USED }}
           LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
         run: |
           node <<'NODE'
@@ -181,15 +216,15 @@ jobs:
           const cpuMs = parseLimit(String(metrics.cpuMs ?? ''), Number.NaN)
           const memoryMb = parseLimit(String(metrics.memoryMb ?? ''), Number.NaN)
           const apiCalls = parseLimit(String(metrics.apiCalls ?? ''), Number.NaN)
+          const spendUsd = parseLimit(String(metrics.spendUsd ?? ''), Number.NaN)
           const maxRuntimeMs = parseLimit(process.env.DAEMON_EVAL_MAX_RUNTIME_MS, 600000)
           const maxCpuMs = parseRequiredLimit(process.env.DAEMON_EVAL_MAX_CPU_MS, 'DAEMON_EVAL_MAX_CPU_MS')
           const maxMemoryMb = parseLimit(process.env.DAEMON_EVAL_MAX_MEMORY_MB, 512)
           const maxApiCalls = parseLimit(process.env.DAEMON_EVAL_MAX_API_CALLS, 2)
           const maxSpendUsd = parseRequiredLimit(process.env.DAEMON_EVAL_MAX_SPEND_USD, 'DAEMON_EVAL_MAX_SPEND_USD')
-          const spendUsd = parseRequiredLimit(process.env.DAEMON_EVAL_SPEND_USD_USED, 'DAEMON_EVAL_SPEND_USD_USED')
 
-          if (![runtimeMs, cpuMs, memoryMb, apiCalls].every(Number.isFinite)) {
-            console.error('Resource budget gate requires finite live evaluation metrics.')
+          if (![runtimeMs, cpuMs, memoryMb, apiCalls, spendUsd].every(Number.isFinite)) {
+            console.error('Resource budget gate requires finite remote live evaluation metrics, including spend.')
             process.exit(1)
           }
           if (metrics.failed) {
@@ -249,7 +284,7 @@ jobs:
           SECURITY_SCAN_STATUS: ${{ steps.security_scan_gate.outcome }}
           SECRET_SCAN_STATUS: ${{ steps.secret_scan_gate.outcome }}
           RESOURCE_BUDGET_STATUS: ${{ steps.resource_budget_gate.outcome }}
-          REGRESSION_STATUS: ${{ steps.live_eval.outcome }}
+          REGRESSION_STATUS: ${{ steps.regression_gate.outcome }}
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
           LIVE_EVAL_WORKFLOW_REF: ${{ github.workflow_ref }}
           LIVE_EVAL_WORKFLOW_SHA: ${{ github.workflow_sha }}

@@ -473,14 +473,52 @@ section('CLI regression – one-shot --message')
 section('Live model tests')
 const liveEvalMetricsPath = process.env.DAEMON_EVAL_METRICS_PATH
 let liveEvalApiCalls = 0
-let liveEvalPeakMemoryMb = Math.ceil(process.memoryUsage().rss / 1024 / 1024)
-let liveEvalCpuStartedAt = process.cpuUsage()
+let liveEvalDeploymentSha = null
+let liveEvalDeploymentShaMissing = false
+let liveEvalDeploymentShaMismatch = false
+let liveEvalRemoteCpuMs = 0
+let liveEvalRemoteMemoryMb = 0
+let liveEvalRemoteSpendUsd = 0
+let liveEvalHasRemoteCpuMs = false
+let liveEvalHasRemoteMemoryMb = false
+let liveEvalHasRemoteSpendUsd = false
 
-function observeLiveEvalMemory() {
-  liveEvalPeakMemoryMb = Math.max(
-    liveEvalPeakMemoryMb,
-    Math.ceil(process.memoryUsage().rss / 1024 / 1024),
-  )
+function parseRemoteMetricHeader(response, headerName) {
+  const rawValue = response.headers.get(headerName)?.trim() ?? ''
+  if (!rawValue) return null
+  const parsed = Number(rawValue)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid live evaluation attestation header: ${headerName}`)
+  }
+  return parsed
+}
+
+function observeLiveEvalAttestation(response) {
+  const deploymentSha = response.headers.get('x-helen-deployment-sha')?.trim() ?? ''
+  if (!deploymentSha) {
+    liveEvalDeploymentShaMissing = true
+  } else if (liveEvalDeploymentSha && liveEvalDeploymentSha !== deploymentSha) {
+    liveEvalDeploymentShaMismatch = true
+  } else {
+    liveEvalDeploymentSha = deploymentSha
+  }
+
+  const cpuMs = parseRemoteMetricHeader(response, 'x-helen-live-eval-total-cpu-ms')
+  const memoryMb = parseRemoteMetricHeader(response, 'x-helen-live-eval-peak-memory-mb')
+  const spendUsd = parseRemoteMetricHeader(response, 'x-helen-live-eval-total-spend-usd')
+
+  if (cpuMs !== null) {
+    liveEvalHasRemoteCpuMs = true
+    liveEvalRemoteCpuMs = Math.max(liveEvalRemoteCpuMs, Math.ceil(cpuMs))
+  }
+  if (memoryMb !== null) {
+    liveEvalHasRemoteMemoryMb = true
+    liveEvalRemoteMemoryMb = Math.max(liveEvalRemoteMemoryMb, Math.ceil(memoryMb))
+  }
+  if (spendUsd !== null) {
+    liveEvalHasRemoteSpendUsd = true
+    liveEvalRemoteSpendUsd = Math.max(liveEvalRemoteSpendUsd, spendUsd)
+  }
 }
 
 async function writeLiveEvalMetrics(metrics) {
@@ -499,15 +537,11 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
   const apiUrl = process.env.VITE_DAEMON_API_URL ?? 'http://localhost:3001'
   console.log('  Running live tests against ' + apiUrl)
   const liveEvalStartedAt = Date.now()
-  liveEvalCpuStartedAt = process.cpuUsage()
   const failedBeforeLiveEval = failed
 
   async function liveChatRequest(messages) {
-    const token = process.env.DAEMON_EVAL_API_TOKEN
     const origin = process.env.DAEMON_EVAL_ORIGIN
     const headers = { 'Content-Type': 'application/json' }
-    observeLiveEvalMemory()
-    if (token) headers['X-DAEMON-API-TOKEN'] = token
     if (origin) headers.Origin = origin
     liveEvalApiCalls++
     const res = await fetch(apiUrl + '/api/chat', {
@@ -516,8 +550,8 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
       body: JSON.stringify({ messages }),
     })
     if (!res.ok) throw new Error('HTTP ' + res.status)
+    observeLiveEvalAttestation(res)
     const data = await res.json()
-    observeLiveEvalMemory()
     return data.message
   }
 
@@ -536,13 +570,18 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
     console.error('  ❌ Live test error:', err.message)
     failed++
   } finally {
-    observeLiveEvalMemory()
-    const cpuUsage = process.cpuUsage(liveEvalCpuStartedAt)
     await writeLiveEvalMetrics({
       runtimeMs: Date.now() - liveEvalStartedAt,
-      cpuMs: Math.ceil((cpuUsage.user + cpuUsage.system) / 1000),
-      memoryMb: liveEvalPeakMemoryMb,
+      cpuMs: liveEvalHasRemoteCpuMs ? liveEvalRemoteCpuMs : null,
+      memoryMb: liveEvalHasRemoteMemoryMb ? liveEvalRemoteMemoryMb : null,
       apiCalls: liveEvalApiCalls,
+      spendUsd: liveEvalHasRemoteSpendUsd
+        ? Number(liveEvalRemoteSpendUsd.toFixed(6))
+        : null,
+      deploymentSha: liveEvalDeploymentSha,
+      deploymentIdentityVerified: Boolean(liveEvalDeploymentSha)
+        && !liveEvalDeploymentShaMissing
+        && !liveEvalDeploymentShaMismatch,
       failed: failed > failedBeforeLiveEval,
     })
   }
