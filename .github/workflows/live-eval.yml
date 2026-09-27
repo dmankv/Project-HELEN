@@ -525,9 +525,8 @@ jobs:
           retention-days: 14
 
       - name: Enforce required gates passed
-        if: always() && steps.binding.outcome == 'success'
+        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
         env:
-          BINDING_READY: ${{ steps.binding.outputs.ready }}
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
           TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
           LINT_STATUS: ${{ steps.lint_gate.outcome }}
@@ -560,9 +559,6 @@ jobs:
           if (failed) {
             console.error(`Required gate did not pass: ${failed[0]}`)
             process.exit(1)
-          }
-          if (process.env.BINDING_READY !== 'true') {
-            process.exit(0)
           }
           if (!fs.existsSync('evolution-gate-results.json')) {
             console.error('Required gate artifact is missing.')
