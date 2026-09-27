@@ -343,9 +343,9 @@ jobs:
         if: always() && steps.config.outputs.configured == 'true' && steps.binding.outcome != 'failure'
         env:
           CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
-          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
-          CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
-          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
+          CANDIDATE_SNAPSHOT_ID: ${{ github.event.inputs.candidate_snapshot_id || '' }}
+          EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
           TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
           LINT_STATUS: ${{ steps.lint_gate.outcome }}
           UNIT_STATUS: ${{ steps.unit_gate.outcome }}
@@ -408,7 +408,12 @@ jobs:
           name: >-
             ${{
               steps.binding.outputs.ready == 'true'
-                && format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id)
+                && format(
+                  'evolution-gate-results-{0}-{1}-{2}',
+                  github.event.inputs.candidate_version,
+                  github.event.inputs.candidate_snapshot_id,
+                  github.event.inputs.run_id
+                )
                 || format('evolution-gate-results-{0}', steps.binding.outputs.candidate_sha)
             }}
           path: evolution-gate-results.json
