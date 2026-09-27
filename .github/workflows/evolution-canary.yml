@@ -54,6 +54,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EVOLUTION_RUN_ID: ${{ inputs.run_id }}
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
@@ -63,12 +64,20 @@ jobs:
           RUN_IDS="$(node <<'NODE'
           const repo = process.env.REPO
           const token = process.env.GITHUB_TOKEN
+          const refName = (process.env.REF_NAME || '').trim()
           const target = (process.env.CANDIDATE_SHA || '').toLowerCase()
 
           async function loadRuns() {
             const matched = []
             for (let page = 1; ; page += 1) {
-              const url = `https://api.github.com/repos/${repo}/actions/workflows/live-eval.yml/runs?status=completed&per_page=100&page=${page}`
+              const params = new URLSearchParams({
+                status: 'completed',
+                event: 'workflow_dispatch',
+                per_page: '100',
+                page: `${page}`,
+              })
+              if (refName) params.set('branch', refName)
+              const url = `https://api.github.com/repos/${repo}/actions/workflows/live-eval.yml/runs?${params.toString()}`
               const response = await fetch(url, {
                 headers: {
                   Authorization: `token ${token}`,
