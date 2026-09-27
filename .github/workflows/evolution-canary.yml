@@ -76,7 +76,6 @@ jobs:
             for (let page = 1; page <= maxPages; page += 1) {
               const params = new URLSearchParams({
                 status: 'completed',
-                event: 'workflow_dispatch',
                 per_page: '100',
                 page: `${page}`,
               })
@@ -95,10 +94,7 @@ jobs:
               const runs = Array.isArray(doc.workflow_runs) ? doc.workflow_runs : []
               if (runs.length === 0) break
               for (const run of runs) {
-                if (
-                  run.conclusion === 'success'
-                  && run.event === 'workflow_dispatch'
-                ) {
+                if (run.conclusion === 'success') {
                   const workflowSha = String(run.head_sha || '')
                   const workflowRef = String(run.workflow_ref || '').trim() || (() => {
                     const workflowPath = String(run.path || '').trim()

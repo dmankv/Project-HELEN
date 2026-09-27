@@ -760,6 +760,17 @@ describe('admin observability model', () => {
         stage: 'promote',
       }, 'rollback'),
     })
+    const rollbackAfterHealthyCanary = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: transitionEvolutionStage(recordCanaryDecision({
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        stage: 'promote',
+      }, {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }), 'rollback'),
+    })
 
     expect(runningCanary.canaryStatus).toBe('running')
     expect(runningCanary.rollbackStatus).toBe('not_needed')
@@ -767,6 +778,8 @@ describe('admin observability model', () => {
     expect(promoteWithoutCanary.canaryStatus).toBe('failed')
     expect(rolledBack.canaryStatus).toBe('failed')
     expect(rolledBack.rollbackStatus).toBe('requested')
+    expect(rollbackAfterHealthyCanary.canaryStatus).toBe('healthy')
+    expect(rollbackAfterHealthyCanary.rollbackStatus).toBe('requested')
     expect(buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
       run: stopEvolutionRun(createEvolutionRun('candidate-v2', 'baseline-safe'), 'failed'),
