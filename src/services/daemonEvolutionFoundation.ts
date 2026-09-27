@@ -886,6 +886,7 @@ export interface AdminEvolutionStatusModel {
 
 function deriveCanaryStatus(run: EvolutionRunRecord | null): CanaryStatus {
   if (!run) return 'not_started'
+  if (run.status === 'failed' || run.status === 'denied' || run.status === 'timed_out') return 'failed'
   if (run.stage === 'rollback' || run.status === 'rolled_back') return 'failed'
   if (run.stage === 'promote') {
     return run.status === 'running' || run.status === 'succeeded'

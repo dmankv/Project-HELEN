@@ -646,6 +646,10 @@ describe('admin observability model', () => {
     expect(promoteReady.canaryStatus).toBe('healthy')
     expect(rolledBack.canaryStatus).toBe('failed')
     expect(rolledBack.rollbackStatus).toBe('completed')
+    expect(buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: stopEvolutionRun(createEvolutionRun('candidate-v2', 'baseline-safe'), 'failed'),
+    }).canaryStatus).toBe('failed')
   })
 
   it('falls back to audit events projected from the active run', () => {
