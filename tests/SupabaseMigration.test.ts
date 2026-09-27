@@ -195,6 +195,7 @@ describe('Evolution infrastructure migration', () => {
     expect(normalizedSql).toContain("old.status is distinct from new.status")
     expect(normalizedSql).toContain("metadata ->> 'candidateversion' = old.candidate_version")
     expect(normalizedSql).toContain("metadata ->> 'targetdeployedversion' = old.last_known_good")
+    expect(normalizedSql).toContain("if promotion_finalization_requested")
     expect(normalizedSql).toContain("if rollback_finalization_requested")
     expect(normalizedSql).toContain(") and privileged_control_plane_actor")
     expect(normalizedSql).toContain("and rollback_attestation_present")

@@ -452,6 +452,10 @@ begin
   ) and not privileged_control_plane_actor then
    raise exception 'Only provider-side privileged context can finalize promotion or rollback evolution runs.';
   end if;
+  if promotion_finalization_requested
+   and not promotion_transition_allowed then
+   raise exception 'Evolution promotion requires privileged backend canary and run-finished attestations.';
+  end if;
   if rollback_finalization_requested
    and not rollback_transition_allowed then
    raise exception 'Evolution rollback is allowed only from canary/promote stages or a succeeded promotion.';
