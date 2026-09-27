@@ -165,14 +165,9 @@ jobs:
           esac
           EVAL_TIMEOUT_SECONDS=$(( (MAX_RUNTIME_MS + 30000 + 999) / 1000 ))
           PROXY_METRICS_PATH="$(mktemp /tmp/live-eval-proxy-metrics.XXXXXX.json)"
+          PROXY_SCRIPT_PATH="$(mktemp /tmp/live-eval-proxy.XXXXXX.cjs)"
           echo "LIVE_EVAL_PROXY_METRICS_PATH=$PROXY_METRICS_PATH" >> "$GITHUB_ENV"
-          DAEMON_EVAL_TARGET_URL='${{ secrets.DAEMON_EVAL_API_URL }}' \
-            DAEMON_EVAL_PROXY_TOKEN='${{ secrets.DAEMON_EVAL_API_TOKEN }}' \
-            DAEMON_EVAL_PROXY_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
-            DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" \
-            DAEMON_EVAL_MAX_RUNTIME_MS="$MAX_RUNTIME_MS" \
-            DAEMON_EVAL_PROXY_METRICS_PATH="$PROXY_METRICS_PATH" \
-            node <<'NODE' &
+          cat > "$PROXY_SCRIPT_PATH" <<'NODE'
           const fs = require('fs')
           const http = require('http')
 
@@ -302,8 +297,25 @@ jobs:
           process.on('exit', writeMetrics)
           server.listen(proxyPort, '127.0.0.1')
           NODE
+          DAEMON_EVAL_TARGET_URL='${{ secrets.DAEMON_EVAL_API_URL }}' \
+            DAEMON_EVAL_PROXY_TOKEN='${{ secrets.DAEMON_EVAL_API_TOKEN }}' \
+            DAEMON_EVAL_PROXY_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
+            DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" \
+            DAEMON_EVAL_MAX_RUNTIME_MS="$MAX_RUNTIME_MS" \
+            DAEMON_EVAL_PROXY_METRICS_PATH="$PROXY_METRICS_PATH" \
+            LIVE_EVAL_PROXY_SCRIPT="$PROXY_SCRIPT_PATH" \
+            python3 - <<'PY' &
+          import ctypes
+          import os
+
+          libc = ctypes.CDLL(None, use_errno=True)
+          if libc.prctl(4, 0, 0, 0, 0) != 0:
+            errno = ctypes.get_errno()
+            raise OSError(errno, os.strerror(errno))
+          os.execvp('node', ['node', os.environ['LIVE_EVAL_PROXY_SCRIPT']])
+          PY
           PROXY_PID=$!
-          trap 'kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true' EXIT
+          trap 'kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true; rm -f "$PROXY_SCRIPT_PATH"' EXIT
           sleep 1
           VITE_DAEMON_API_URL="http://127.0.0.1:${PROXY_PORT}" \
             DAEMON_EVAL_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
