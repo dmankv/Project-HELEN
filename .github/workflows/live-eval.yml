@@ -60,7 +60,8 @@ jobs:
         run: |
           if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping live evaluation: required secrets are not configured."
+            echo "Live evaluation cannot run: required secrets are not configured."
+            exit 1
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
