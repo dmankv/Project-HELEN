@@ -117,6 +117,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Capture trusted gate workspace snapshot
+        id: workspace_snapshot
+        run: |
+          SNAPSHOT_PATH="$(mktemp /tmp/live-eval-workspace.XXXXXX.tar)"
+          tar --exclude='./.git' -cf "$SNAPSHOT_PATH" .
+          echo "path=$SNAPSHOT_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Run typecheck gate
         id: typecheck_gate
         continue-on-error: true
@@ -133,6 +140,14 @@ jobs:
         id: unit_gate
         continue-on-error: true
         run: node_modules/.bin/vitest run
+
+      - name: Restore trusted gate workspace before build gate
+        env:
+          WORKSPACE_SNAPSHOT_PATH: ${{ steps.workspace_snapshot.outputs.path }}
+        run: |
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          tar -xf "$WORKSPACE_SNAPSHOT_PATH"
+          tar -df "$WORKSPACE_SNAPSHOT_PATH"
 
       - name: Run build gate
         id: build_gate
@@ -369,6 +384,9 @@ jobs:
           LIVE_EVAL_PROXY_PORT: ${{ steps.start_live_eval_proxy.outputs.proxy_port }}
           LIVE_EVAL_TIMEOUT_SECONDS: ${{ steps.start_live_eval_proxy.outputs.eval_timeout_seconds }}
         run: |
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          tar -xf "${{ steps.workspace_snapshot.outputs.path }}"
+          tar -df "${{ steps.workspace_snapshot.outputs.path }}"
           VITE_DAEMON_API_URL="http://127.0.0.1:${LIVE_EVAL_PROXY_PORT}" \
             DAEMON_EVAL_ORIGIN="$DAEMON_EVAL_ORIGIN" \
             timeout --signal=TERM "${LIVE_EVAL_TIMEOUT_SECONDS}s" npx tsx tests/daemon-eval.mjs
