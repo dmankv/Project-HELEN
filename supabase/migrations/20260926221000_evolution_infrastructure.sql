@@ -250,9 +250,18 @@ begin
         and event.event_type = 'canary_decision'
         and event.metadata ->> 'status' = 'healthy'
         and event.metadata ->> 'allowed' = 'true'
-        and coalesce(event.metadata ->> 'runId', event.metadata ->> 'run_id') = old.run_id::text
-        and coalesce(event.metadata ->> 'candidateSnapshotId', event.metadata ->> 'candidate_snapshot_id') = old.candidate_snapshot_id::text
-        and coalesce(event.metadata ->> 'candidateVersion', event.metadata ->> 'candidate_version') = old.candidate_version
+        and (
+          (event.metadata ? 'runId' and event.metadata ->> 'runId' = old.run_id::text)
+          or (event.metadata ? 'run_id' and event.metadata ->> 'run_id' = old.run_id::text)
+        )
+        and (
+          (event.metadata ? 'candidateSnapshotId' and event.metadata ->> 'candidateSnapshotId' = old.candidate_snapshot_id::text)
+          or (event.metadata ? 'candidate_snapshot_id' and event.metadata ->> 'candidate_snapshot_id' = old.candidate_snapshot_id::text)
+        )
+        and (
+          (event.metadata ? 'candidateVersion' and event.metadata ->> 'candidateVersion' = old.candidate_version)
+          or (event.metadata ? 'candidate_version' and event.metadata ->> 'candidate_version' = old.candidate_version)
+        )
     );
   end if;
   if row_unchanged then
