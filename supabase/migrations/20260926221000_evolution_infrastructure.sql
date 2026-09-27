@@ -75,7 +75,7 @@ create index if not exists evolution_gate_results_run_idx
   on public.evolution_gate_results (run_id, created_at asc);
 
 create unique index if not exists evolution_required_gate_unique_idx
-  on public.evolution_gate_results (user_id, run_id, gate)
+  on public.evolution_gate_results (run_id, gate)
   where required = true;
 
 alter table public.evolution_gate_results enable row level security;
