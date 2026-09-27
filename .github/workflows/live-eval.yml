@@ -526,6 +526,7 @@ jobs:
           REGRESSION_STATUS: ${{ steps.regression_gate.outcome }}
         run: |
           node <<'NODE'
+          const fs = require('fs')
           if (process.env.LIVE_EVAL_CONFIGURED !== 'true') {
             console.error('Required gate did not pass: live evaluation configuration is missing.')
             process.exit(1)
@@ -544,6 +545,16 @@ jobs:
           const failed = requiredGateOutcomes.find(([, outcome]) => outcome !== 'success')
           if (failed) {
             console.error(`Required gate did not pass: ${failed[0]}`)
+            process.exit(1)
+          }
+          if (!fs.existsSync('evolution-gate-results.json')) {
+            console.error('Required gate artifact is missing.')
+            process.exit(1)
+          }
+          const doc = JSON.parse(fs.readFileSync('evolution-gate-results.json', 'utf8'))
+          const failedGateResult = (doc.gates || []).find(gate => gate?.required && gate?.status !== 'passed')
+          if (failedGateResult) {
+            console.error(`Required gate did not pass: ${failedGateResult.gate}`)
             process.exit(1)
           }
           NODE
