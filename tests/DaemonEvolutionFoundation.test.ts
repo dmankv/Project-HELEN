@@ -161,6 +161,19 @@ describe('evolution run state machine', () => {
     }).status).toBe('running')
   })
 
+  it('does not complete a promote-stage run without a persisted healthy canary decision', () => {
+    const progressed = {
+      ...createEvolutionRun('candidate-v2', 'stable-v1'),
+      stage: 'promote' as const,
+    }
+
+    expect(completeEvolutionRun(progressed, {
+      allowed: true,
+      status: 'healthy',
+      reason: 'Promotion accepted.',
+    })).toBe(progressed)
+  })
+
   it('ignores invalid transitions and restores the deployed version on stop', () => {
     const run = createEvolutionRun('candidate-v2', 'stable-v1')
     const invalid = transitionEvolutionStage(run, 'test')

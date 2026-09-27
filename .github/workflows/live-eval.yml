@@ -430,6 +430,9 @@ jobs:
             if (requiresRemoteConfig && configured !== 'true') {
               return { status: 'unavailable', detail: 'Live evaluation secrets are not configured.' }
             }
+            if (requiresRemoteConfig && !outcome) {
+              return { status: 'unavailable', detail: `${detail} was not executed.` }
+            }
             if (outcome === 'success') return { status: 'passed', detail }
             if (outcome === 'skipped') return { status: 'unavailable', detail: `${detail} was skipped.` }
             return { status: 'failed', detail: `${detail} failed.` }

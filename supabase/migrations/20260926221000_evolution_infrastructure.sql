@@ -330,11 +330,13 @@ create trigger enforce_evolution_run_lifecycle_update
   before update on public.evolution_runs
   for each row execute function public.enforce_evolution_run_lifecycle_update();
 
+drop trigger if exists prevent_evolution_run_delete on public.evolution_runs;
 drop trigger if exists prevent_evolution_gate_result_update on public.evolution_gate_results;
 create trigger prevent_evolution_gate_result_update
   before update on public.evolution_gate_results
   for each row execute function public.prevent_evolution_gate_result_mutation();
 
+drop trigger if exists prevent_evolution_gate_result_delete on public.evolution_gate_results;
 drop trigger if exists prevent_evolution_audit_owner_change on public.evolution_audit_events;
 
 create or replace function public.prevent_evolution_audit_mutation()
@@ -352,6 +354,9 @@ drop trigger if exists prevent_evolution_audit_update on public.evolution_audit_
 create trigger prevent_evolution_audit_update
   before update on public.evolution_audit_events
   for each row execute function public.prevent_evolution_audit_mutation();
+
+drop trigger if exists prevent_evolution_audit_delete on public.evolution_audit_events;
+drop function if exists public.prevent_evolution_run_mutation();
 
 create or replace function public.redact_evolution_audit_metadata(value jsonb)
 returns jsonb

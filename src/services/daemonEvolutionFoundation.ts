@@ -443,6 +443,7 @@ export function completeEvolutionRun(
   if (
     run.status !== 'running'
     || run.stage !== 'promote'
+    || !hasHealthyCanaryDecision(run)
     || !promotionDecision.allowed
     || promotionDecision.status !== 'healthy'
   ) return run
