@@ -172,7 +172,7 @@ export class InMemorySandboxAdapter implements DaemonSandboxAdapter {
     return {
       workspaceId,
       files: { ...state.files },
-      snapshots: [...state.snapshots],
+      snapshots: state.snapshots.map(cloneSandboxSnapshot),
     }
   }
 
