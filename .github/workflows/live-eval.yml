@@ -75,7 +75,10 @@ jobs:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '' }}
           DEFAULT_CANDIDATE_SHA: ${{ github.sha }}
         run: |
+          UUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
           if [ -n "$CANDIDATE_VERSION" ] && [ -n "$CANDIDATE_SNAPSHOT_ID" ] && [ -n "$EVOLUTION_RUN_ID" ] && [ -n "$CANDIDATE_SHA" ]; then
+            printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq "$UUID_PATTERN"
+            printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq "$UUID_PATTERN"
             printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'
             echo "ready=true" >> "$GITHUB_OUTPUT"
             echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
