@@ -71,9 +71,9 @@ const PROTECTED_SANDBOX_PATHS = Object.freeze([
   { prefix: '.env', capability: 'modify_secrets' },
 ] as const satisfies ReadonlyArray<{ prefix: string, capability: DaemonCapability }>)
 const SANDBOX_WRITABLE_PATH_ALLOWLIST = Object.freeze([
-  /^(?!.*(?:^|\/)\.\.(?:\/|$))(src|tests?|docs?)\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
-  /^(?!.*(?:^|\/)\.\.(?:\/|$))supabase\/functions\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/,
-  /^(?!.*(?:^|\/)\.\.(?:\/|$))[a-z0-9._-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
+  /^(?!.*(?:^|\/)\.\.(?:\/|$))(src|tests?|docs?)\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
+  /^(?!.*(?:^|\/)\.\.(?:\/|$))supabase\/functions\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/,
+  /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
 ])
 
 export function decideDaemonCapability(capability: DaemonCapability): CapabilityDecision {
