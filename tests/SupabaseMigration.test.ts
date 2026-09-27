@@ -167,3 +167,32 @@ describe('Supabase adaptive profiles migration', () => {
     expect(normalizedSql.match(/set search_path = public/g)?.length).toBe(2)
   })
 })
+
+const evolutionInfrastructureMigrationPath = path.resolve(
+  process.cwd(),
+  'supabase/migrations/20260926221000_evolution_infrastructure.sql',
+)
+
+describe('Evolution infrastructure migration', () => {
+  const rawSql = fs.readFileSync(evolutionInfrastructureMigrationPath, 'utf8')
+  const normalizedSql = rawSql.toLowerCase()
+
+  it('keeps promotion and rollback finalization on provider-side privileged paths', () => {
+    expect(rawSql).toMatch(/auth\.role\(\)\s+in\s+\('service_role',\s*'supabase_admin'\)/i)
+    expect(rawSql).toMatch(/session_user\s+in\s+\('postgres',\s*'supabase_admin'\)/i)
+    expect(rawSql).toMatch(/Only provider-side privileged context can finalize promotion or rollback evolution runs\./i)
+  })
+
+  it('reserves control-plane audit events for service_role and blocks browser clients from forging them', () => {
+    expect(normalizedSql).toContain("event_type not in ('canary_decision', 'rollback_triggered', 'run_finished')")
+    expect(normalizedSql).toContain("event_type in ('canary_decision', 'rollback_triggered', 'run_finished')")
+    expect(normalizedSql).toContain('to service_role')
+  })
+
+  it('requires backend rollback and run-finished attestations bound to the run identity', () => {
+    expect(normalizedSql).toContain("event.event_type = 'run_finished'")
+    expect(normalizedSql).toContain("event.event_type = 'rollback_triggered'")
+    expect(normalizedSql).toContain("metadata ->> 'candidateversion' = old.candidate_version")
+    expect(normalizedSql).toContain("metadata ->> 'targetdeployedversion' = old.last_known_good")
+  })
+})

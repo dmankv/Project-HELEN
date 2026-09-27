@@ -141,7 +141,7 @@ create policy "evolution_audit_events_insert_admin_own"
   with check (
     auth.uid() = user_id
     and public.is_admin()
-    and evolution_audit_events.event_type <> 'canary_decision'
+    and evolution_audit_events.event_type not in ('canary_decision', 'rollback_triggered', 'run_finished')
     and (
       evolution_audit_events.run_id is null
       or exists (
@@ -153,12 +153,13 @@ create policy "evolution_audit_events_insert_admin_own"
     )
   );
 
+drop policy if exists "evolution_audit_events_insert_service_control_plane" on public.evolution_audit_events;
 drop policy if exists "evolution_audit_events_insert_service_canary" on public.evolution_audit_events;
-create policy "evolution_audit_events_insert_service_canary"
+create policy "evolution_audit_events_insert_service_control_plane"
   on public.evolution_audit_events for insert
   to service_role
   with check (
-    evolution_audit_events.event_type = 'canary_decision'
+    evolution_audit_events.event_type in ('canary_decision', 'rollback_triggered', 'run_finished')
     and evolution_audit_events.run_id is not null
     and exists (
       select 1
@@ -215,7 +216,10 @@ declare
   lifecycle_unchanged boolean;
   row_unchanged boolean;
   terminal_transition boolean;
+  privileged_control_plane_actor boolean;
   canary_attestation_present boolean;
+  promotion_finalization_attested boolean;
+  rollback_attestation_present boolean;
   expected_next_stage text;
   sequential_transition_allowed boolean;
   stop_transition_allowed boolean;
@@ -253,7 +257,13 @@ begin
     and old.deployed_version = new.deployed_version
   );
   terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
+  privileged_control_plane_actor := (
+    auth.role() in ('service_role', 'supabase_admin')
+    or session_user in ('postgres', 'supabase_admin')
+  );
   canary_attestation_present := false;
+  promotion_finalization_attested := false;
+  rollback_attestation_present := false;
   if old.status = 'running'
     and old.stage = 'promote'
     and new.stage = 'promote'
@@ -282,6 +292,66 @@ begin
         and (
           (latest_canary_decision.metadata ? 'candidateVersion' and latest_canary_decision.metadata ->> 'candidateVersion' = old.candidate_version)
           or (latest_canary_decision.metadata ? 'candidate_version' and latest_canary_decision.metadata ->> 'candidate_version' = old.candidate_version)
+        )
+    );
+    promotion_finalization_attested := exists (
+      select 1
+      from (
+        select event.metadata
+        from public.evolution_audit_events as event
+        where event.run_id = old.run_id
+          and event.user_id = old.user_id
+          and event.event_type = 'run_finished'
+        order by event.created_at desc, event.event_id desc
+        limit 1
+      ) as latest_run_finished
+      where latest_run_finished.metadata ->> 'status' = 'succeeded'
+        and (
+          (latest_run_finished.metadata ? 'runId' and latest_run_finished.metadata ->> 'runId' = old.run_id::text)
+          or (latest_run_finished.metadata ? 'run_id' and latest_run_finished.metadata ->> 'run_id' = old.run_id::text)
+        )
+        and (
+          (latest_run_finished.metadata ? 'candidateSnapshotId' and latest_run_finished.metadata ->> 'candidateSnapshotId' = old.candidate_snapshot_id::text)
+          or (latest_run_finished.metadata ? 'candidate_snapshot_id' and latest_run_finished.metadata ->> 'candidate_snapshot_id' = old.candidate_snapshot_id::text)
+        )
+        and (
+          (latest_run_finished.metadata ? 'candidateVersion' and latest_run_finished.metadata ->> 'candidateVersion' = old.candidate_version)
+          or (latest_run_finished.metadata ? 'candidate_version' and latest_run_finished.metadata ->> 'candidate_version' = old.candidate_version)
+        )
+        and (
+          (latest_run_finished.metadata ? 'deployedVersion' and latest_run_finished.metadata ->> 'deployedVersion' = old.candidate_version)
+          or (latest_run_finished.metadata ? 'deployed_version' and latest_run_finished.metadata ->> 'deployed_version' = old.candidate_version)
+        )
+    );
+  end if;
+  if new.stage = 'rollback'
+    and new.status = 'rolled_back' then
+    rollback_attestation_present := exists (
+      select 1
+      from (
+        select event.metadata
+        from public.evolution_audit_events as event
+        where event.run_id = old.run_id
+          and event.user_id = old.user_id
+          and event.event_type = 'rollback_triggered'
+        order by event.created_at desc, event.event_id desc
+        limit 1
+      ) as latest_rollback
+      where (
+          (latest_rollback.metadata ? 'runId' and latest_rollback.metadata ->> 'runId' = old.run_id::text)
+          or (latest_rollback.metadata ? 'run_id' and latest_rollback.metadata ->> 'run_id' = old.run_id::text)
+        )
+        and (
+          (latest_rollback.metadata ? 'candidateSnapshotId' and latest_rollback.metadata ->> 'candidateSnapshotId' = old.candidate_snapshot_id::text)
+          or (latest_rollback.metadata ? 'candidate_snapshot_id' and latest_rollback.metadata ->> 'candidate_snapshot_id' = old.candidate_snapshot_id::text)
+        )
+        and (
+          (latest_rollback.metadata ? 'candidateVersion' and latest_rollback.metadata ->> 'candidateVersion' = old.candidate_version)
+          or (latest_rollback.metadata ? 'candidate_version' and latest_rollback.metadata ->> 'candidate_version' = old.candidate_version)
+        )
+        and (
+          (latest_rollback.metadata ? 'targetDeployedVersion' and latest_rollback.metadata ->> 'targetDeployedVersion' = old.last_known_good)
+          or (latest_rollback.metadata ? 'target_deployed_version' and latest_rollback.metadata ->> 'target_deployed_version' = old.last_known_good)
         )
     );
   end if;
@@ -325,7 +395,9 @@ begin
   promotion_transition_allowed := (
     old.status = 'running'
     and old.stage = 'promote'
+    and privileged_control_plane_actor
     and canary_attestation_present
+    and promotion_finalization_attested
     and old.deployed_version = old.last_known_good
     and new.deployed_version = old.candidate_version
     and new.stage = 'promote'
@@ -343,12 +415,20 @@ begin
       and old.status = 'succeeded'
       and new.deployed_version = old.last_known_good
     )
-  ) and new.stage = 'rollback'
+  ) and privileged_control_plane_actor
+    and rollback_attestation_present
+    and new.stage = 'rollback'
     and new.status = 'rolled_back';
 
+  if (
+   (new.stage = 'promote' and new.status = 'succeeded')
+   or (new.stage = 'rollback' and new.status = 'rolled_back')
+  ) and not privileged_control_plane_actor then
+   raise exception 'Only provider-side privileged context can finalize promotion or rollback evolution runs.';
+  end if;
   if (new.stage = 'rollback' or new.status = 'rolled_back')
-    and not rollback_transition_allowed then
-    raise exception 'Evolution rollback is allowed only from canary/promote stages or a succeeded promotion.';
+   and not rollback_transition_allowed then
+   raise exception 'Evolution rollback is allowed only from canary/promote stages or a succeeded promotion.';
   end if;
   if terminal_transition and not row_unchanged and not rollback_transition_allowed then
     raise exception 'Evolution run lifecycle state is immutable after terminal status.';
