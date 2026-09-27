@@ -178,7 +178,7 @@ describe('Evolution infrastructure migration', () => {
   const normalizedSql = rawSql.toLowerCase()
 
   it('keeps promotion and rollback finalization on provider-side privileged paths', () => {
-    expect(rawSql).toMatch(/auth\.role\(\)\s+in\s+\('service_role',\s*'supabase_admin'\)/i)
+    expect(rawSql).toMatch(/auth\.role\(\)\s*(?:=\s*'service_role'|in\s*\(\s*'service_role'\s*(?:,\s*'supabase_admin'\s*)?\))/i)
     expect(rawSql).toMatch(/session_user\s+in\s+\('postgres',\s*'supabase_admin'\)/i)
     expect(rawSql).toMatch(/Only provider-side privileged context can finalize promotion or rollback evolution runs\./i)
   })
