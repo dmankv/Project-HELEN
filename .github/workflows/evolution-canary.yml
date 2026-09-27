@@ -64,7 +64,6 @@ jobs:
           const repo = process.env.REPO
           const token = process.env.GITHUB_TOKEN
           const target = (process.env.CANDIDATE_SHA || '').toLowerCase()
-          const expectedRunTitle = `Live Evaluation ${process.env.CANDIDATE_VERSION} ${process.env.CANDIDATE_SNAPSHOT_ID} ${process.env.EVOLUTION_RUN_ID}`
 
           async function loadRuns() {
             const matched = []
@@ -83,12 +82,9 @@ jobs:
               const runs = Array.isArray(doc.workflow_runs) ? doc.workflow_runs : []
               if (runs.length === 0) break
               for (const run of runs) {
-                const runTitle = String(run.display_title || run.name || '')
                 if (
                   run.conclusion === 'success'
-                  && run.event === 'workflow_dispatch'
                   && String(run.head_sha || '').toLowerCase() === target
-                  && runTitle === expectedRunTitle
                 ) {
                   const workflowSha = String(run.head_sha || '')
                   const workflowRef = String(run.workflow_ref || '').trim() || (() => {

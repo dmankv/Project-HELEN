@@ -236,6 +236,11 @@ begin
     and old.deployed_version = new.deployed_version
   );
   terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
+  if row_unchanged then
+    new.updated_at := old.updated_at;
+    new.ended_at := old.ended_at;
+    return new;
+  end if;
   if terminal_transition and not row_unchanged then
     raise exception 'Evolution run lifecycle state is immutable after terminal status.';
   end if;
@@ -247,9 +252,6 @@ begin
     when new.status = 'running' then null
     else coalesce(old.ended_at, now())
   end;
-  if lifecycle_unchanged then
-    return new;
-  end if;
   expected_next_stage := case old.stage
     when 'observe' then 'learn'
     when 'learn' then 'propose'
