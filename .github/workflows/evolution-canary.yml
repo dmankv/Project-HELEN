@@ -59,7 +59,6 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
           EXPECTED_ARTIFACT_NAME: ${{ format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id) }}
-          EXPECTED_WORKFLOW_REF: ${{ format('{0}/.github/workflows/live-eval.yml@refs/heads/{1}', github.repository, github.event.repository.default_branch) }}
         run: |
           RUN_IDS="$(node <<'NODE'
           const repo = process.env.REPO
@@ -92,8 +91,21 @@ jobs:
                   && runTitle === expectedRunTitle
                 ) {
                   const workflowSha = String(run.head_sha || '')
-                  if (/^[0-9a-fA-F]{40}$/.test(workflowSha)) {
-                    matched.push(`${run.id}:${workflowSha}`)
+                  const workflowRef = String(run.workflow_ref || '').trim() || (() => {
+                    const workflowPath = String(run.path || '').trim()
+                    const headBranch = String(run.head_branch || '').trim()
+                    if (!workflowPath || !headBranch) return ''
+                    if (workflowPath.startsWith(`${repo}/`)) {
+                      return workflowPath.includes('@')
+                        ? workflowPath
+                        : `${workflowPath}@refs/heads/${headBranch}`
+                    }
+                    return `${repo}/${workflowPath.includes('@')
+                      ? workflowPath
+                      : `${workflowPath}@refs/heads/${headBranch}`}`
+                  })()
+                  if (/^[0-9a-fA-F]{40}$/.test(workflowSha) && workflowRef) {
+                    matched.push(`${run.id}\t${workflowSha}\t${workflowRef}`)
                   }
                 }
               }
@@ -111,10 +123,8 @@ jobs:
           )"
 
           MATCHED_RUN_ID=""
-          for RUN_BINDING in $RUN_IDS; do
-            RUN_ID="${RUN_BINDING%%:*}"
-            RUN_WORKFLOW_SHA="${RUN_BINDING#*:}"
-            if [ -z "$RUN_ID" ] || [ -z "$RUN_WORKFLOW_SHA" ]; then
+          while IFS="$(printf '\t')" read -r RUN_ID RUN_WORKFLOW_SHA RUN_WORKFLOW_REF; do
+            if [ -z "$RUN_ID" ] || [ -z "$RUN_WORKFLOW_SHA" ] || [ -z "$RUN_WORKFLOW_REF" ]; then
               continue
             fi
             ARTIFACTS_URL="https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100"
@@ -132,11 +142,13 @@ jobs:
               "$DOWNLOAD_URL" \
               -o /tmp/evolution-gates/evolution-gate-results.zip
             unzip -q -o /tmp/evolution-gates/evolution-gate-results.zip -d /tmp/evolution-gates
-            if TRUSTED_WORKFLOW_SHA="$RUN_WORKFLOW_SHA" node -e "const fs=require('fs');const p='/tmp/evolution-gates/evolution-gate-results.json';const doc=JSON.parse(fs.readFileSync(p,'utf8'));const required=['typecheck','lint','unit','build','security_scan','secret_scan','resource_budget','regression'];const expected={candidate_sha:process.env.CANDIDATE_SHA,run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.CANDIDATE_VERSION,candidate_snapshot_id:process.env.CANDIDATE_SNAPSHOT_ID,workflow_ref:process.env.EXPECTED_WORKFLOW_REF,workflow_sha:process.env.TRUSTED_WORKFLOW_SHA};if(!Object.entries(expected).every(([key,value])=>doc[key]===value)){process.exit(1)}const gates=Array.isArray(doc.gates)?doc.gates:[];for(const gate of required){const matches=gates.filter(result=>result&&result.gate===gate&&result.required===true);if(matches.length!==1||matches[0].status!=='passed'){process.exit(1)}}"; then
+            if TRUSTED_WORKFLOW_SHA="$RUN_WORKFLOW_SHA" TRUSTED_WORKFLOW_REF="$RUN_WORKFLOW_REF" node -e "const fs=require('fs');const p='/tmp/evolution-gates/evolution-gate-results.json';const doc=JSON.parse(fs.readFileSync(p,'utf8'));const required=['typecheck','lint','unit','build','security_scan','secret_scan','resource_budget','regression'];const expected={candidate_sha:process.env.CANDIDATE_SHA,run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.CANDIDATE_VERSION,candidate_snapshot_id:process.env.CANDIDATE_SNAPSHOT_ID,workflow_ref:process.env.TRUSTED_WORKFLOW_REF,workflow_sha:process.env.TRUSTED_WORKFLOW_SHA};if(!Object.entries(expected).every(([key,value])=>doc[key]===value)){process.exit(1)}const gates=Array.isArray(doc.gates)?doc.gates:[];for(const gate of required){const matches=gates.filter(result=>result&&result.gate===gate&&result.required===true);if(matches.length!==1||matches[0].status!=='passed'){process.exit(1)}}"; then
               MATCHED_RUN_ID="$RUN_ID"
               break
             fi
-          done
+          done <<EOF
+$RUN_IDS
+EOF
 
           test -n "$MATCHED_RUN_ID"
 

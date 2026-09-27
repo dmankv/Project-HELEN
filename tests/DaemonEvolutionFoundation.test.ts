@@ -617,6 +617,36 @@ describe('admin observability model', () => {
       spendUsd: 0.5,
     })
   })
+
+  it('derives canary and rollback defaults from the active run lifecycle state', () => {
+    const runningCanary = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: {
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        stage: 'canary',
+      },
+    })
+    const promoteReady = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: {
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        stage: 'promote',
+      },
+    })
+    const rolledBack = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: transitionEvolutionStage({
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        stage: 'promote',
+      }, 'rollback'),
+    })
+
+    expect(runningCanary.canaryStatus).toBe('running')
+    expect(runningCanary.rollbackStatus).toBe('not_needed')
+    expect(promoteReady.canaryStatus).toBe('healthy')
+    expect(rolledBack.canaryStatus).toBe('failed')
+    expect(rolledBack.rollbackStatus).toBe('completed')
+  })
 })
 
 describe('evolution infrastructure adapter creation', () => {

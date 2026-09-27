@@ -222,7 +222,9 @@ describe('AdminDaemonInterface', () => {
     const diagnostics = await screen.findByRole('region', { name: 'Admin diagnostics' })
     expect(diagnostics).toHaveClass('admin-daemon-diagnostics-panel')
     expect(diagnostics).not.toHaveAttribute('style')
-    expect(diagnostics.querySelector('.admin-diagnostics-list')).toHaveAttribute('aria-live', 'polite')
+    expect(diagnostics.querySelector('.admin-diagnostics-list')).not.toHaveAttribute('aria-live')
+    expect(screen.getByText(/Evolution update: run idle, stage idle, canary not_started, rollback not_needed\./i))
+      .toHaveAttribute('aria-live', 'polite')
   })
 
   it('keeps admin identity labeling visible and accessible across sidebar and header', async () => {

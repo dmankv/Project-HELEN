@@ -884,6 +884,28 @@ export interface AdminEvolutionStatusModel {
   recentAuditEvents: AuditEvent[]
 }
 
+function deriveCanaryStatus(run: EvolutionRunRecord | null): CanaryStatus {
+  if (!run) return 'not_started'
+  if (run.stage === 'rollback' || run.status === 'rolled_back') return 'failed'
+  if (run.stage === 'promote') {
+    return run.status === 'running' || run.status === 'succeeded'
+      ? 'healthy'
+      : 'failed'
+  }
+  if (run.stage === 'canary') {
+    return run.status === 'running'
+      ? 'running'
+      : 'failed'
+  }
+  return 'not_started'
+}
+
+function deriveRollbackStatus(run: EvolutionRunRecord | null): RollbackStatus {
+  if (!run) return 'not_needed'
+  if (run.stage === 'rollback' || run.status === 'rolled_back') return 'completed'
+  return 'not_needed'
+}
+
 export function buildAdminEvolutionStatusModel(input: {
   currentVersion: string
   run?: EvolutionRunRecord | null
@@ -901,8 +923,8 @@ export function buildAdminEvolutionStatusModel(input: {
     candidateVersion: run?.candidateVersion ?? null,
     candidateSnapshotId: run?.candidateSnapshotId ?? null,
     gateResults: input.gateResults ?? run?.gateResults ?? [],
-    canaryStatus: input.canaryStatus ?? 'not_started',
-    rollbackStatus: input.rollbackStatus ?? 'not_needed',
+    canaryStatus: input.canaryStatus ?? deriveCanaryStatus(run),
+    rollbackStatus: input.rollbackStatus ?? deriveRollbackStatus(run),
     budgetUsage: input.budgetUsage ?? run?.budgetUsage ?? {
       runtimeMs: 0,
       cpuMs: 0,
