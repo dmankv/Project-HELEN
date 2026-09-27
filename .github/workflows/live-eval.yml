@@ -97,7 +97,7 @@ jobs:
           fi
 
       - name: Enforce live-eval configuration
-        if: always()
+        if: steps.config.outcome != 'success' || steps.config.outputs.configured != 'true'
         env:
           CONFIG_OUTCOME: ${{ steps.config.outcome }}
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured || 'false' }}
