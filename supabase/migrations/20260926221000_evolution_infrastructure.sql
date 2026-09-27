@@ -410,6 +410,11 @@ begin
       and new.deployed_version = old.last_known_good
     )
     or (
+      old.stage = 'rollback'
+      and old.status = 'running'
+      and new.deployed_version = old.last_known_good
+    )
+    or (
       old.deployed_version = old.candidate_version
       and old.stage = 'promote'
       and old.status = 'succeeded'
