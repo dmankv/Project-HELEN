@@ -172,6 +172,23 @@ begin
 end;
 $$;
 
+create or replace function public.enforce_evolution_run_initial_state()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.stage is distinct from 'observe'
+    or new.status is distinct from 'running'
+    or new.deployed_version is distinct from new.last_known_good
+    or new.ended_at is not null then
+    raise exception 'Evolution runs must start in observe/running with deployed_version = last_known_good and no ended_at.';
+  end if;
+  return new;
+end;
+$$;
+
 create or replace function public.enforce_evolution_run_lifecycle_update()
 returns trigger
 language plpgsql
@@ -273,6 +290,11 @@ $$;
 
 drop trigger if exists prevent_evolution_run_identity_change on public.evolution_runs;
 drop trigger if exists prevent_evolution_run_owner_change on public.evolution_runs;
+drop trigger if exists enforce_evolution_run_initial_state on public.evolution_runs;
+create trigger enforce_evolution_run_initial_state
+  before insert on public.evolution_runs
+  for each row execute function public.enforce_evolution_run_initial_state();
+
 create trigger prevent_evolution_run_identity_change
   before update on public.evolution_runs
   for each row execute function public.prevent_evolution_run_identity_change();

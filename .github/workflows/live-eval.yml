@@ -155,20 +155,79 @@ jobs:
         if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         env:
-          DAEMON_EVAL_METRICS_PATH: /tmp/daemon-eval-metrics.json
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: |
           PROXY_PORT=3301
-          DAEMON_EVAL_TARGET_URL='${{ secrets.DAEMON_EVAL_API_URL }}'
-          DAEMON_EVAL_PROXY_TOKEN='${{ secrets.DAEMON_EVAL_API_TOKEN }}'
-          DAEMON_EVAL_PROXY_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}'
-          DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" node <<'NODE' &
+          PROXY_METRICS_PATH="$(mktemp /tmp/live-eval-proxy-metrics.XXXXXX.json)"
+          echo "LIVE_EVAL_PROXY_METRICS_PATH=$PROXY_METRICS_PATH" >> "$GITHUB_ENV"
+          DAEMON_EVAL_TARGET_URL='${{ secrets.DAEMON_EVAL_API_URL }}' \
+            DAEMON_EVAL_PROXY_TOKEN='${{ secrets.DAEMON_EVAL_API_TOKEN }}' \
+            DAEMON_EVAL_PROXY_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
+            DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" \
+            DAEMON_EVAL_PROXY_METRICS_PATH="$PROXY_METRICS_PATH" \
+            node <<'NODE' &
+          const fs = require('fs')
           const http = require('http')
 
           const targetUrl = new URL(process.env.DAEMON_EVAL_TARGET_URL)
           const proxyToken = process.env.DAEMON_EVAL_PROXY_TOKEN
           const proxyOrigin = process.env.DAEMON_EVAL_PROXY_ORIGIN
           const proxyPort = Number(process.env.DAEMON_EVAL_PROXY_PORT || '3301')
+          const metricsPath = process.env.DAEMON_EVAL_PROXY_METRICS_PATH
+          const startedAt = Date.now()
+          let apiCalls = 0
+          let deploymentSha = ''
+          let deploymentShaMissing = false
+          let deploymentShaMismatch = false
+          let remoteCpuMs = null
+          let remoteMemoryMb = null
+          let remoteSpendUsd = null
+          let metricsWritten = false
+
+          const parseRemoteMetricHeader = (headers, headerName) => {
+            const rawValue = headers.get(headerName)?.trim() ?? ''
+            if (!rawValue) return null
+            const parsed = Number(rawValue)
+            if (!Number.isFinite(parsed) || parsed < 0) {
+              throw new Error(`Invalid live evaluation attestation header: ${headerName}`)
+            }
+            return parsed
+          }
+
+          const observeLiveEvalAttestation = headers => {
+            const responseDeploymentSha = headers.get('x-helen-deployment-sha')?.trim() ?? ''
+            if (!responseDeploymentSha) {
+              deploymentShaMissing = true
+            } else if (deploymentSha && deploymentSha !== responseDeploymentSha) {
+              deploymentShaMismatch = true
+            } else {
+              deploymentSha = responseDeploymentSha
+            }
+
+            const cpuMs = parseRemoteMetricHeader(headers, 'x-helen-live-eval-total-cpu-ms')
+            const memoryMb = parseRemoteMetricHeader(headers, 'x-helen-live-eval-peak-memory-mb')
+            const spendUsd = parseRemoteMetricHeader(headers, 'x-helen-live-eval-total-spend-usd')
+
+            if (cpuMs !== null) remoteCpuMs = Math.max(remoteCpuMs ?? 0, Math.ceil(cpuMs))
+            if (memoryMb !== null) remoteMemoryMb = Math.max(remoteMemoryMb ?? 0, Math.ceil(memoryMb))
+            if (spendUsd !== null) remoteSpendUsd = Math.max(remoteSpendUsd ?? 0, spendUsd)
+          }
+
+          const writeMetrics = () => {
+            if (metricsWritten || !metricsPath) return
+            metricsWritten = true
+            fs.writeFileSync(metricsPath, JSON.stringify({
+              runtimeMs: Date.now() - startedAt,
+              cpuMs: remoteCpuMs,
+              memoryMb: remoteMemoryMb,
+              apiCalls,
+              spendUsd: remoteSpendUsd === null ? null : Number(remoteSpendUsd.toFixed(6)),
+              deploymentSha,
+              deploymentIdentityVerified: Boolean(deploymentSha)
+                && !deploymentShaMissing
+                && !deploymentShaMismatch,
+            }, null, 2))
+          }
 
           const forwardHeaders = [
             'content-type',
@@ -186,6 +245,7 @@ jobs:
             }
 
             try {
+              apiCalls += 1
               const chunks = []
               for await (const chunk of request) chunks.push(chunk)
 
@@ -198,6 +258,7 @@ jobs:
                 },
                 body: Buffer.concat(chunks),
               })
+              observeLiveEvalAttestation(upstream.headers)
 
               const headers = {}
               for (const name of forwardHeaders) {
@@ -213,9 +274,19 @@ jobs:
             }
           })
 
+          const shutdown = () => {
+            writeMetrics()
+            server.close(() => process.exit(0))
+            setTimeout(() => process.exit(0), 1_000).unref()
+          }
+
+          process.on('SIGINT', shutdown)
+          process.on('SIGTERM', shutdown)
+          process.on('exit', writeMetrics)
           server.listen(proxyPort, '127.0.0.1')
           NODE
-          trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
+          PROXY_PID=$!
+          trap 'kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true' EXIT
           sleep 1
           VITE_DAEMON_API_URL="http://127.0.0.1:${PROXY_PORT}" \
             DAEMON_EVAL_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
@@ -232,12 +303,12 @@ jobs:
           node <<'NODE'
           const fs = require('fs')
 
-          const metricsPath = '/tmp/daemon-eval-metrics.json'
+          const metricsPath = process.env.LIVE_EVAL_PROXY_METRICS_PATH?.trim()
           if (process.env.LIVE_EVAL_STATUS !== 'success') {
             console.error('Regression gate requires a successful live evaluation workload.')
             process.exit(1)
           }
-          if (!fs.existsSync(metricsPath)) {
+          if (!metricsPath || !fs.existsSync(metricsPath)) {
             console.error('Regression gate requires live evaluation metrics.')
             process.exit(1)
           }
@@ -279,8 +350,8 @@ jobs:
             process.exit(1)
           }
 
-          const metricsPath = '/tmp/daemon-eval-metrics.json'
-          if (!fs.existsSync(metricsPath)) {
+          const metricsPath = process.env.LIVE_EVAL_PROXY_METRICS_PATH?.trim()
+          if (!metricsPath || !fs.existsSync(metricsPath)) {
             console.error('Resource budget gate requires live evaluation metrics.')
             process.exit(1)
           }
@@ -316,10 +387,6 @@ jobs:
 
           if (![runtimeMs, cpuMs, memoryMb, apiCalls, spendUsd].every(Number.isFinite)) {
             console.error('Resource budget gate requires finite remote live evaluation metrics, including spend.')
-            process.exit(1)
-          }
-          if (metrics.failed) {
-            console.error('Resource budget gate cannot pass when the live evaluation workload failed.')
             process.exit(1)
           }
           if (runtimeMs > maxRuntimeMs) {
