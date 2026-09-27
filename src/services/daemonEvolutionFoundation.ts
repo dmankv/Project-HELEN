@@ -460,6 +460,7 @@ export function recordCanaryDecision(
   run: EvolutionRunRecord,
   decision: CanaryDecision,
 ): EvolutionRunRecord {
+  if (run.status !== 'running' || run.stage !== 'canary') return run
   const now = new Date().toISOString()
   return {
     ...run,

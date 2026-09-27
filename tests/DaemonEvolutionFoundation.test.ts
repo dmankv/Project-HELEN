@@ -219,6 +219,32 @@ describe('evolution run state machine', () => {
     }).status).toBe('running')
   })
 
+  it('records canary decisions only for active canary runs', () => {
+    const decision = {
+      allowed: true,
+      status: 'healthy' as const,
+      reason: 'Canary is healthy.',
+    }
+    const observeRun = createEvolutionRun('candidate-v2', 'v1')
+    const canaryRun = {
+      ...observeRun,
+      stage: 'canary' as const,
+    }
+    const failedRun = {
+      ...canaryRun,
+      status: 'failed' as const,
+    }
+
+    expect(recordCanaryDecision(canaryRun, decision).canaryDecision).toMatchObject({
+      ...decision,
+      runId: canaryRun.runId,
+      candidateSnapshotId: canaryRun.candidateSnapshotId,
+      candidateVersion: canaryRun.candidateVersion,
+    })
+    expect(recordCanaryDecision(observeRun, decision)).toBe(observeRun)
+    expect(recordCanaryDecision(failedRun, decision)).toBe(failedRun)
+  })
+
   it('does not complete a promote-stage run without a persisted healthy canary decision', () => {
     const progressed = {
       ...createEvolutionRun('candidate-v2', 'stable-v1'),
@@ -765,12 +791,14 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       allowAutoPromote: true,
     })
     const run = {
-      ...recordCanaryDecision(createEvolutionRun('candidate-v2', 'v1'), {
+      ...transitionEvolutionStage(recordCanaryDecision({
+        ...createEvolutionRun('candidate-v2', 'v1'),
+        stage: 'canary',
+      }, {
         allowed: true,
         status: 'healthy',
         reason: 'Canary is healthy.',
-      }),
-      stage: 'promote' as const,
+      }), 'promote'),
       gateResults: passingRequiredGateResults(),
     }
 
@@ -822,14 +850,14 @@ describe('admin observability model', () => {
     })
     const promoteReady = buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
-      run: recordCanaryDecision({
+      run: transitionEvolutionStage(recordCanaryDecision({
         ...createEvolutionRun('candidate-v2', 'baseline-safe'),
-        stage: 'promote',
+        stage: 'canary',
       }, {
         allowed: true,
         status: 'healthy',
         reason: 'Canary is healthy.',
-      }),
+      }), 'promote'),
     })
     const promoteWithoutCanary = buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
@@ -847,14 +875,17 @@ describe('admin observability model', () => {
     })
     const rollbackAfterHealthyCanary = buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
-      run: transitionEvolutionStage(recordCanaryDecision({
-        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
-        stage: 'promote',
-      }, {
-        allowed: true,
-        status: 'healthy',
-        reason: 'Canary is healthy.',
-      }), 'rollback'),
+      run: transitionEvolutionStage(
+        transitionEvolutionStage(recordCanaryDecision({
+          ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+          stage: 'canary',
+        }, {
+          allowed: true,
+          status: 'healthy',
+          reason: 'Canary is healthy.',
+        }), 'promote'),
+        'rollback',
+      ),
     })
 
     expect(runningCanary.canaryStatus).toBe('running')

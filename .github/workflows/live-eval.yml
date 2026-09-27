@@ -168,11 +168,13 @@ jobs:
           docker run --rm -e GITLEAKS_CONFIG_TOML -v "$PWD:/repo" -w /repo zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             dir . --redact --no-banner
 
-      - name: Run live evaluation
-        id: live_eval
+      - name: Start live evaluation proxy
+        id: start_live_eval_proxy
         if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true'
         continue-on-error: true
         env:
+          DAEMON_EVAL_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
           DAEMON_EVAL_MAX_RUNTIME_MS: ${{ vars.DAEMON_EVAL_MAX_RUNTIME_MS }}
         run: |
@@ -187,7 +189,12 @@ jobs:
           EVAL_TIMEOUT_SECONDS=$(( (MAX_RUNTIME_MS + 30000 + 999) / 1000 ))
           PROXY_METRICS_PATH="$(mktemp /tmp/live-eval-proxy-metrics.XXXXXX.json)"
           PROXY_SCRIPT_PATH="$(mktemp /tmp/live-eval-proxy.XXXXXX.cjs)"
-          echo "LIVE_EVAL_PROXY_METRICS_PATH=$PROXY_METRICS_PATH" >> "$GITHUB_ENV"
+          PROXY_PID_PATH="$(mktemp /tmp/live-eval-proxy-pid.XXXXXX)"
+          echo "proxy_port=$PROXY_PORT" >> "$GITHUB_OUTPUT"
+          echo "eval_timeout_seconds=$EVAL_TIMEOUT_SECONDS" >> "$GITHUB_OUTPUT"
+          echo "proxy_metrics_path=$PROXY_METRICS_PATH" >> "$GITHUB_OUTPUT"
+          echo "proxy_script_path=$PROXY_SCRIPT_PATH" >> "$GITHUB_OUTPUT"
+          echo "proxy_pid_path=$PROXY_PID_PATH" >> "$GITHUB_OUTPUT"
           cat > "$PROXY_SCRIPT_PATH" <<'NODE'
           const fs = require('fs')
           const http = require('http')
@@ -328,14 +335,14 @@ jobs:
           process.on('exit', writeMetrics)
           server.listen(proxyPort, '127.0.0.1')
           NODE
-          DAEMON_EVAL_TARGET_URL='${{ secrets.DAEMON_EVAL_API_URL }}' \
-            DAEMON_EVAL_PROXY_TOKEN='${{ secrets.DAEMON_EVAL_API_TOKEN }}' \
-            DAEMON_EVAL_PROXY_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
+          DAEMON_EVAL_TARGET_URL="$DAEMON_EVAL_API_URL" \
+            DAEMON_EVAL_PROXY_TOKEN="$DAEMON_EVAL_API_TOKEN" \
+            DAEMON_EVAL_PROXY_ORIGIN="$DAEMON_EVAL_ORIGIN" \
             DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" \
             DAEMON_EVAL_MAX_RUNTIME_MS="$MAX_RUNTIME_MS" \
             DAEMON_EVAL_PROXY_METRICS_PATH="$PROXY_METRICS_PATH" \
             LIVE_EVAL_PROXY_SCRIPT="$PROXY_SCRIPT_PATH" \
-            python3 - <<'PY' &
+            nohup python3 - <<'PY' >/dev/null 2>&1 &
           import ctypes
           import os
 
@@ -346,11 +353,44 @@ jobs:
           os.execvp('node', ['node', os.environ['LIVE_EVAL_PROXY_SCRIPT']])
           PY
           PROXY_PID=$!
-          trap 'kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true; rm -f "$PROXY_SCRIPT_PATH"' EXIT
+          echo "$PROXY_PID" > "$PROXY_PID_PATH"
           sleep 1
-          VITE_DAEMON_API_URL="http://127.0.0.1:${PROXY_PORT}" \
-            DAEMON_EVAL_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
-            timeout --signal=TERM "${EVAL_TIMEOUT_SECONDS}s" npx tsx tests/daemon-eval.mjs
+          if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+            echo 'Live evaluation proxy failed to start.'
+            exit 1
+          fi
+
+      - name: Run live evaluation
+        id: live_eval
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true' && steps.start_live_eval_proxy.outcome == 'success'
+        continue-on-error: true
+        env:
+          DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
+          LIVE_EVAL_PROXY_PORT: ${{ steps.start_live_eval_proxy.outputs.proxy_port }}
+          LIVE_EVAL_TIMEOUT_SECONDS: ${{ steps.start_live_eval_proxy.outputs.eval_timeout_seconds }}
+        run: |
+          VITE_DAEMON_API_URL="http://127.0.0.1:${LIVE_EVAL_PROXY_PORT}" \
+            DAEMON_EVAL_ORIGIN="$DAEMON_EVAL_ORIGIN" \
+            timeout --signal=TERM "${LIVE_EVAL_TIMEOUT_SECONDS}s" npx tsx tests/daemon-eval.mjs
+
+      - name: Stop live evaluation proxy
+        if: always() && steps.config.outcome == 'success' && steps.config.outputs.configured == 'true' && steps.start_live_eval_proxy.outcome == 'success'
+        env:
+          LIVE_EVAL_PROXY_PID_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_pid_path }}
+          LIVE_EVAL_PROXY_SCRIPT_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_script_path }}
+        run: |
+          if [ -f "$LIVE_EVAL_PROXY_PID_PATH" ]; then
+            PROXY_PID="$(cat "$LIVE_EVAL_PROXY_PID_PATH")"
+            kill "$PROXY_PID" 2>/dev/null || true
+            for _ in 1 2 3 4 5; do
+              if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            kill -9 "$PROXY_PID" 2>/dev/null || true
+          fi
+          rm -f "$LIVE_EVAL_PROXY_PID_PATH" "$LIVE_EVAL_PROXY_SCRIPT_PATH"
 
       - name: Verify live evaluation deployment identity
         id: regression_gate
@@ -358,6 +398,7 @@ jobs:
         continue-on-error: true
         env:
           LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
+          LIVE_EVAL_PROXY_METRICS_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_metrics_path }}
           EXPECTED_CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
         run: |
           node <<'NODE'
@@ -401,6 +442,7 @@ jobs:
           DAEMON_EVAL_MAX_API_CALLS: ${{ vars.DAEMON_EVAL_MAX_API_CALLS }}
           DAEMON_EVAL_MAX_SPEND_USD: ${{ vars.DAEMON_EVAL_MAX_SPEND_USD }}
           LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
+          LIVE_EVAL_PROXY_METRICS_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_metrics_path }}
         run: |
           node <<'NODE'
           const fs = require('fs')
