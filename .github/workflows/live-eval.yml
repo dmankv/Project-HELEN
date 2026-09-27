@@ -94,8 +94,26 @@ jobs:
             exit 1
           fi
 
+      - name: Restore trusted gate control-plane files
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$DEFAULT_BRANCH"
+          TRUSTED_REF="origin/$DEFAULT_BRANCH"
+          git checkout "$TRUSTED_REF" -- \
+            package.json \
+            package-lock.json \
+            eslint.config.js \
+            tsconfig.json \
+            tsconfig.cli.json \
+            tsconfig.node.json \
+            tsconfig.test.json \
+            vite.config.ts \
+            server/package.json \
+            server/tsconfig.json
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Run typecheck gate
         id: typecheck_gate
@@ -189,6 +207,7 @@ jobs:
           let remoteCpuMs = null
           let remoteMemoryMb = null
           let remoteSpendUsd = null
+          let metricAttestationIncomplete = false
           let metricsWritten = false
 
           const parseRemoteMetricHeader = (headers, headerName) => {
@@ -215,9 +234,14 @@ jobs:
             const memoryMb = parseRemoteMetricHeader(headers, 'x-helen-live-eval-peak-memory-mb')
             const spendUsd = parseRemoteMetricHeader(headers, 'x-helen-live-eval-total-spend-usd')
 
-            if (cpuMs !== null) remoteCpuMs = Math.max(remoteCpuMs ?? 0, Math.ceil(cpuMs))
-            if (memoryMb !== null) remoteMemoryMb = Math.max(remoteMemoryMb ?? 0, Math.ceil(memoryMb))
-            if (spendUsd !== null) remoteSpendUsd = Math.max(remoteSpendUsd ?? 0, spendUsd)
+            if (cpuMs === null || memoryMb === null || spendUsd === null) {
+              metricAttestationIncomplete = true
+              return
+            }
+
+            remoteCpuMs = Math.max(remoteCpuMs ?? 0, Math.ceil(cpuMs))
+            remoteMemoryMb = Math.max(remoteMemoryMb ?? 0, Math.ceil(memoryMb))
+            remoteSpendUsd = Math.max(remoteSpendUsd ?? 0, spendUsd)
           }
 
           const writeMetrics = () => {
@@ -233,6 +257,10 @@ jobs:
               deploymentIdentityVerified: Boolean(deploymentSha)
                 && !deploymentShaMissing
                 && !deploymentShaMismatch,
+              resourceAttestationVerified: !metricAttestationIncomplete
+                && remoteCpuMs !== null
+                && remoteMemoryMb !== null
+                && remoteSpendUsd !== null,
             }, null, 2))
           }
 
@@ -409,6 +437,10 @@ jobs:
           const memoryMb = parseLimit(String(metrics.memoryMb ?? ''), Number.NaN)
           const apiCalls = parseLimit(String(metrics.apiCalls ?? ''), Number.NaN)
           const spendUsd = parseLimit(String(metrics.spendUsd ?? ''), Number.NaN)
+          if (metrics.resourceAttestationVerified !== true) {
+            console.error('Resource budget gate requires complete CPU, memory, and spend attestations on every live evaluation response.')
+            process.exit(1)
+          }
           const maxRuntimeMs = parseLimit(process.env.DAEMON_EVAL_MAX_RUNTIME_MS, 600000)
           const maxCpuMs = parseRequiredLimit(process.env.DAEMON_EVAL_MAX_CPU_MS, 'DAEMON_EVAL_MAX_CPU_MS')
           const maxMemoryMb = parseLimit(process.env.DAEMON_EVAL_MAX_MEMORY_MB, 512)
