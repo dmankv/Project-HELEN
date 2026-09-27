@@ -512,7 +512,7 @@ jobs:
           retention-days: 14
 
       - name: Enforce required gates passed
-        if: always() && steps.binding.outcome != 'failure' && steps.binding.outputs.ready == 'true'
+        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
         env:
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
           TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}

@@ -71,9 +71,9 @@ const PROTECTED_SANDBOX_PATHS = Object.freeze([
   { prefix: '.env', capability: 'modify_secrets' },
 ] as const satisfies ReadonlyArray<{ prefix: string, capability: DaemonCapability }>)
 const SANDBOX_WRITABLE_PATH_ALLOWLIST = Object.freeze([
-  /^(src|tests?|docs?)\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/i,
-  /^supabase\/functions\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/i,
-  /^[a-z0-9._-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/i,
+  /^(src|tests?|docs?)\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
+  /^supabase\/functions\/[a-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/,
+  /^[a-z0-9._-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
 ])
 
 export function decideDaemonCapability(capability: DaemonCapability): CapabilityDecision {
@@ -103,19 +103,18 @@ export function decideDaemonCapability(capability: DaemonCapability): Capability
 
 function decideSandboxWritePath(filePath: string): CapabilityDecision {
   const normalizedPath = filePath.trim().replace(/\\/g, '/')
-  const normalizedPathForMatching = normalizedPath.toLowerCase()
   const isUnsafePath = normalizedPath.length === 0
-    || normalizedPathForMatching.startsWith('/')
-    || /^[a-zA-Z]:\//.test(normalizedPathForMatching)
-    || normalizedPathForMatching.split('/').some((segment: string) => (
+    || normalizedPath.startsWith('/')
+    || /^[a-zA-Z]:\//.test(normalizedPath)
+    || normalizedPath.split('/').some((segment: string) => (
       segment.length === 0 || segment === '.' || segment === '..'
     ))
   const protectedPath = PROTECTED_SANDBOX_PATHS.find(({ prefix }) => (
     prefix === '.env'
-      ? normalizedPathForMatching === prefix || normalizedPathForMatching.startsWith(`${prefix}.`)
-      : normalizedPathForMatching === prefix || normalizedPathForMatching.startsWith(prefix)
+      ? normalizedPath === prefix || normalizedPath.startsWith(`${prefix}.`)
+      : normalizedPath === prefix || normalizedPath.startsWith(prefix)
   ))
-  const writablePath = SANDBOX_WRITABLE_PATH_ALLOWLIST.some(pattern => pattern.test(normalizedPathForMatching))
+  const writablePath = SANDBOX_WRITABLE_PATH_ALLOWLIST.some(pattern => pattern.test(normalizedPath))
 
   return decideDaemonCapability(
     isUnsafePath
