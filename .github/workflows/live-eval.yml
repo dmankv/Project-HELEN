@@ -110,7 +110,8 @@ jobs:
             tsconfig.test.json \
             vite.config.ts \
             server/package.json \
-            server/tsconfig.json
+            server/tsconfig.json \
+            tests/daemon-eval.mjs
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
