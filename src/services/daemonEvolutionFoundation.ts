@@ -64,6 +64,12 @@ export const DAEMON_CONTROL_PLANE_POLICY = Object.freeze({
 
 const ALLOWLIST = new Set<string>(DAEMON_CONTROL_PLANE_POLICY.allowlist)
 const DENYLIST = new Set<string>(DAEMON_CONTROL_PLANE_POLICY.denylist)
+const PROTECTED_SANDBOX_PATHS = Object.freeze([
+  { prefix: '.github/workflows/', capability: 'modify_deployment_credentials' },
+  { prefix: 'supabase/migrations/', capability: 'modify_rls' },
+  { prefix: 'src/services/daemonEvolutionFoundation.ts', capability: 'change_control_plane_policy' },
+  { prefix: '.env', capability: 'modify_secrets' },
+] as const satisfies ReadonlyArray<{ prefix: string, capability: DaemonCapability }>)
 
 export function decideDaemonCapability(capability: DaemonCapability): CapabilityDecision {
   const allowed = ALLOWLIST.has(capability)
@@ -88,6 +94,27 @@ export function decideDaemonCapability(capability: DaemonCapability): Capability
     policyVersion: DAEMON_CONTROL_PLANE_POLICY.version,
     decidedAt: new Date().toISOString(),
   }
+}
+
+function decideSandboxWritePath(filePath: string): CapabilityDecision {
+  const normalizedPath = filePath.replace(/\\/g, '/')
+  const isUnsafePath = normalizedPath.length === 0
+    || normalizedPath.startsWith('/')
+    || /^[a-zA-Z]:\//.test(normalizedPath)
+    || normalizedPath.split('/').some((segment: string) => (
+      segment.length === 0 || segment === '.' || segment === '..'
+    ))
+  const protectedPath = PROTECTED_SANDBOX_PATHS.find(({ prefix }) => (
+    prefix === '.env'
+      ? normalizedPath === prefix || normalizedPath.startsWith(`${prefix}.`)
+      : normalizedPath === prefix || normalizedPath.startsWith(prefix)
+  ))
+
+  return decideDaemonCapability(
+    isUnsafePath
+      ? 'change_control_plane_policy'
+      : protectedPath?.capability ?? 'write_sandbox',
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +240,10 @@ export class InMemorySandboxAdapter implements DaemonSandboxAdapter {
     state.snapshots.push(snapshot)
     return cloneSandboxSnapshot(snapshot)
   }
+
+  listFilePaths(workspaceId: string): string[] {
+    return Object.keys(this.workspaces.get(workspaceId)?.files ?? {})
+  }
 }
 
 export interface ConfiguredSandboxAdapterOptions {
@@ -242,6 +273,13 @@ export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
     }
   }
 
+  private assertWriteAllowed(filePath: string): void {
+    const decision = decideSandboxWritePath(filePath)
+    if (!decision.allowed) {
+      throw new Error(`Sandbox write denied: ${filePath} requires ${decision.capability}.`)
+    }
+  }
+
   createWorkspace(seed: Record<string, string> = {}): SandboxWorkspaceState {
     if (!this.options.enabled) {
       return {
@@ -251,6 +289,7 @@ export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
       }
     }
     for (const [filePath, content] of Object.entries(seed)) {
+      this.assertWriteAllowed(filePath)
       this.assertWithinMaxFileBytes(filePath, content)
     }
     return this.delegate.createWorkspace(seed)
@@ -265,6 +304,7 @@ export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
       }
     }
     try {
+      this.assertWriteAllowed(filePath)
       this.assertWithinMaxFileBytes(filePath, content)
     } catch (error) {
       return {
@@ -285,6 +325,13 @@ export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
 
   createSnapshot(workspaceId: string, label: string): SandboxSnapshot | null {
     if (!this.options.enabled) return null
+    try {
+      for (const filePath of this.delegate.listFilePaths(workspaceId)) {
+        this.assertWriteAllowed(filePath)
+      }
+    } catch {
+      return null
+    }
     return this.delegate.createSnapshot(workspaceId, `${this.options.backendId}:${label}`)
   }
 }

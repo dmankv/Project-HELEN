@@ -114,6 +114,34 @@ describe('sandbox adapters', () => {
     expect(write.message).toContain('exceeds 10 bytes')
     expect(() => adapter.createWorkspace({ 'seed.ts': 'export const value = 123' })).toThrow('exceeds 10 bytes')
   })
+
+  it('configured sandbox denies protected paths and revalidates snapshots', () => {
+    const adapter = new ConfiguredSandboxAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      maxFileBytes: 1024,
+    })
+    const workspace = adapter.createWorkspace({ 'candidate.ts': 'export {}' })
+
+    const blockedWrite = adapter.writeFile(
+      workspace.workspaceId,
+      '.github/workflows/evolution-canary.yml',
+      'name: compromised',
+    )
+
+    expect(blockedWrite).toMatchObject({
+      ok: false,
+      denied: true,
+    })
+    expect(blockedWrite.message).toContain('modify_deployment_credentials')
+    expect(() => adapter.createWorkspace({ 'supabase/migrations/unsafe.sql': 'select 1' }))
+      .toThrow('modify_rls')
+
+    const delegate = (adapter as unknown as { delegate: InMemorySandboxAdapter }).delegate
+    delegate.writeFile(workspace.workspaceId, '.env.production', 'secret=value')
+
+    expect(adapter.createSnapshot(workspace.workspaceId, 'candidate-evaluation')).toBeNull()
+  })
 })
 
 describe('evolution run state machine', () => {
