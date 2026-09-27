@@ -141,6 +141,7 @@ create policy "evolution_audit_events_insert_admin_own"
   with check (
     auth.uid() = user_id
     and public.is_admin()
+    and evolution_audit_events.event_type <> 'canary_decision'
     and (
       evolution_audit_events.run_id is null
       or exists (
