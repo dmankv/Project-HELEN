@@ -399,10 +399,15 @@ jobs:
           NODE
 
       - name: Upload evolution gate artifact
-        if: always() && steps.config.outputs.configured == 'true' && steps.binding.outputs.ready == 'true'
+        if: always() && steps.config.outputs.configured == 'true' && steps.binding.outcome != 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id) }}
+          name: >-
+            ${{
+              steps.binding.outputs.ready == 'true'
+                && format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id)
+                || format('evolution-gate-results-{0}', steps.binding.outputs.candidate_sha)
+            }}
           path: evolution-gate-results.json
           if-no-files-found: error
           retention-days: 14
