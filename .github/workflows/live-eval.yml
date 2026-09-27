@@ -185,27 +185,32 @@ jobs:
               return
             }
 
-            const chunks = []
-            for await (const chunk of request) chunks.push(chunk)
+            try {
+              const chunks = []
+              for await (const chunk of request) chunks.push(chunk)
 
-            const upstream = await fetch(new URL('/api/chat', targetUrl), {
-              method: 'POST',
-              headers: {
-                'Content-Type': request.headers['content-type'] || 'application/json',
-                'Origin': proxyOrigin,
-                'X-DAEMON-API-TOKEN': proxyToken,
-              },
-              body: Buffer.concat(chunks),
-            })
+              const upstream = await fetch(new URL('/api/chat', targetUrl), {
+                method: 'POST',
+                headers: {
+                  'Content-Type': request.headers['content-type'] || 'application/json',
+                  'Origin': proxyOrigin,
+                  'X-DAEMON-API-TOKEN': proxyToken,
+                },
+                body: Buffer.concat(chunks),
+              })
 
-            const headers = {}
-            for (const name of forwardHeaders) {
-              const value = upstream.headers.get(name)
-              if (value) headers[name] = value
+              const headers = {}
+              for (const name of forwardHeaders) {
+                const value = upstream.headers.get(name)
+                if (value) headers[name] = value
+              }
+              response.writeHead(upstream.status, headers)
+              const body = Buffer.from(await upstream.arrayBuffer())
+              response.end(body)
+            } catch (error) {
+              response.writeHead(502, { 'content-type': 'application/json' })
+              response.end(JSON.stringify({ error: 'live_eval_proxy_unavailable' }))
             }
-            response.writeHead(upstream.status, headers)
-            const body = Buffer.from(await upstream.arrayBuffer())
-            response.end(body)
           })
 
           server.listen(proxyPort, '127.0.0.1')
