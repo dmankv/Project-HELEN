@@ -156,13 +156,11 @@ describe('evolution run state machine', () => {
     }).status).toBe('running')
   })
 
-  it('stops safely on invalid transitions and restores the deployed version on stop', () => {
+  it('ignores invalid transitions and restores the deployed version on stop', () => {
     const run = createEvolutionRun('candidate-v2', 'stable-v1')
     const invalid = transitionEvolutionStage(run, 'test')
 
-    expect(invalid.status).toBe('failed')
-    expect(invalid.endedAt).toBeTruthy()
-    expect(invalid.deployedVersion).toBe('stable-v1')
+    expect(invalid).toEqual(run)
 
     const deniedRun = stopEvolutionRun(createEvolutionRun('candidate-v3', 'stable-v2'), 'denied')
     expect(deniedRun.status).toBe('denied')

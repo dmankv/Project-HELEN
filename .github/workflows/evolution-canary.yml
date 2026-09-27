@@ -59,7 +59,7 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
           EXPECTED_ARTIFACT_NAME: ${{ format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id) }}
-          EXPECTED_WORKFLOW_REF: ${{ format('{0}/.github/workflows/live-eval.yml@refs/heads/main', github.repository) }}
+          EXPECTED_WORKFLOW_REF: ${{ format('{0}/.github/workflows/live-eval.yml@refs/heads/{1}', github.repository, github.event.repository.default_branch) }}
         run: |
           RUN_IDS="$(node <<'NODE'
           const repo = process.env.REPO

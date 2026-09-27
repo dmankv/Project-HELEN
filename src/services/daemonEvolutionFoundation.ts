@@ -390,16 +390,7 @@ export function transitionEvolutionStage(
   if (run.status !== 'running') return run
   const currentIndex = STAGE_ORDER.indexOf(run.stage)
   const nextIndex = STAGE_ORDER.indexOf(nextStage)
-  if (nextIndex !== currentIndex + 1) {
-    const now = new Date().toISOString()
-    return {
-      ...run,
-      status: 'failed',
-      deployedVersion: run.lastKnownGoodVersion,
-      updatedAt: now,
-      endedAt: now,
-    }
-  }
+  if (nextIndex !== currentIndex + 1) return run
 
   const now = new Date().toISOString()
   return {
