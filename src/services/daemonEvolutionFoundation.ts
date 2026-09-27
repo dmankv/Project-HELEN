@@ -503,7 +503,7 @@ export function stopEvolutionRun(
     status: reason,
     endedAt: now,
     updatedAt: now,
-    deployedVersion: run.lastKnownGoodVersion,
+    deployedVersion: run.deployedVersion,
   }
 }
 

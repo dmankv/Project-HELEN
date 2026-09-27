@@ -412,7 +412,7 @@ begin
     old.status = 'running'
     and new.stage = old.stage
     and new.status in ('failed', 'denied', 'timed_out')
-    and new.deployed_version = old.last_known_good
+    and new.deployed_version = old.deployed_version
   );
   promotion_transition_allowed := (
     old.status = 'running'

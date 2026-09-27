@@ -182,7 +182,7 @@ describe('evolution run state machine', () => {
     })).toBe(progressed)
   })
 
-  it('ignores invalid transitions and restores the deployed version on stop', () => {
+  it('ignores invalid transitions and preserves the deployed version on stop', () => {
     const run = createEvolutionRun('candidate-v2', 'stable-v1')
     const invalid = transitionEvolutionStage(run, 'test')
 
@@ -192,6 +192,39 @@ describe('evolution run state machine', () => {
     expect(deniedRun.status).toBe('denied')
     expect(deniedRun.candidateVersion).toBe('candidate-v3')
     expect(deniedRun.deployedVersion).toBe('stable-v2')
+
+    const promoted = completeEvolutionRun(
+      transitionEvolutionStage(
+        recordCanaryDecision(transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(
+                transitionEvolutionStage(
+                  transitionEvolutionStage(createEvolutionRun('candidate-v4', 'stable-v3'), 'learn'),
+                  'propose',
+                ),
+                'write',
+              ),
+              'test',
+            ),
+            'evaluate',
+          ),
+          'canary',
+        ), {
+          allowed: true,
+          status: 'healthy',
+          reason: 'Canary is healthy.',
+        }),
+        'promote',
+      ),
+      {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Promotion accepted.',
+      },
+    )
+    const failedRollback = stopEvolutionRun(transitionEvolutionStage(promoted, 'rollback'), 'failed')
+    expect(failedRollback.deployedVersion).toBe('candidate-v4')
   })
 
   it('keeps rollback pending from canary until completion is attested', () => {
@@ -239,27 +272,29 @@ describe('evolution run state machine', () => {
 
   it('allows rollback after a successful promotion', () => {
     const promoted = completeEvolutionRun(
-      {
-        ...transitionEvolutionStage(
+      transitionEvolutionStage(
+        recordCanaryDecision(transitionEvolutionStage(
           transitionEvolutionStage(
             transitionEvolutionStage(
               transitionEvolutionStage(
                 transitionEvolutionStage(
-                  transitionEvolutionStage(
-                    transitionEvolutionStage(createEvolutionRun('candidate-v4', 'stable-v3'), 'learn'),
-                    'propose',
-                  ),
-                  'write',
+                  transitionEvolutionStage(createEvolutionRun('candidate-v4', 'stable-v3'), 'learn'),
+                  'propose',
                 ),
-                'test',
+                'write',
               ),
-              'evaluate',
+              'test',
             ),
-            'canary',
+            'evaluate',
           ),
-          'promote',
-        ),
-      },
+          'canary',
+        ), {
+          allowed: true,
+          status: 'healthy',
+          reason: 'Canary is healthy.',
+        }),
+        'promote',
+      ),
       {
         allowed: true,
         status: 'healthy',
@@ -267,10 +302,12 @@ describe('evolution run state machine', () => {
       },
     )
 
+    expect(promoted.status).toBe('succeeded')
+    expect(promoted.deployedVersion).toBe('candidate-v4')
     const rollback = transitionEvolutionStage(promoted, 'rollback')
     expect(rollback.status).toBe('running')
     expect(rollback.stage).toBe('rollback')
-    expect(rollback.deployedVersion).toBe('stable-v3')
+    expect(rollback.deployedVersion).toBe('candidate-v4')
   })
 
   it('refuses rollback completion without a matching infrastructure attestation', () => {
