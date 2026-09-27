@@ -28,6 +28,10 @@ on:
         description: Evolution run UUID for promotion-bound attestations
         required: false
         type: string
+      candidate_sha:
+        description: Candidate commit SHA for promotion-bound attestations
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -51,13 +55,36 @@ jobs:
         id: config
         env:
           VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: |
-          if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
+          if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "Skipping live evaluation: required secrets are not configured."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve promotion binding identifiers
+        id: binding
+        if: always()
+        env:
+          CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
+          CANDIDATE_SNAPSHOT_ID: ${{ github.event.inputs.candidate_snapshot_id || '' }}
+          EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '' }}
+          DEFAULT_CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$CANDIDATE_VERSION" ] && [ -n "$CANDIDATE_SNAPSHOT_ID" ] && [ -n "$EVOLUTION_RUN_ID" ] && [ -n "$CANDIDATE_SHA" ]; then
+            printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          elif [ -z "$CANDIDATE_VERSION" ] && [ -z "$CANDIDATE_SNAPSHOT_ID" ] && [ -z "$EVOLUTION_RUN_ID" ] && [ -z "$CANDIDATE_SHA" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "candidate_sha=$DEFAULT_CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "Promotion-bound attestations require candidate_version, candidate_snapshot_id, run_id, and candidate_sha together."
+            exit 1
           fi
 
       - name: Install dependencies
@@ -126,9 +153,65 @@ jobs:
         continue-on-error: true
         env:
           DAEMON_EVAL_METRICS_PATH: /tmp/daemon-eval-metrics.json
-          VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
-        run: npx tsx tests/daemon-eval.mjs
+        run: |
+          PROXY_PORT=3301
+          DAEMON_EVAL_TARGET_URL='${{ secrets.DAEMON_EVAL_API_URL }}'
+          DAEMON_EVAL_PROXY_TOKEN='${{ secrets.DAEMON_EVAL_API_TOKEN }}'
+          DAEMON_EVAL_PROXY_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}'
+          DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" node <<'NODE' &
+          const http = require('http')
+
+          const targetUrl = new URL(process.env.DAEMON_EVAL_TARGET_URL)
+          const proxyToken = process.env.DAEMON_EVAL_PROXY_TOKEN
+          const proxyOrigin = process.env.DAEMON_EVAL_PROXY_ORIGIN
+          const proxyPort = Number(process.env.DAEMON_EVAL_PROXY_PORT || '3301')
+
+          const forwardHeaders = [
+            'content-type',
+            'x-helen-deployment-sha',
+            'x-helen-live-eval-total-cpu-ms',
+            'x-helen-live-eval-peak-memory-mb',
+            'x-helen-live-eval-total-spend-usd',
+          ]
+
+          const server = http.createServer(async (request, response) => {
+            if (request.method !== 'POST' || request.url !== '/api/chat') {
+              response.writeHead(404)
+              response.end('Not found')
+              return
+            }
+
+            const chunks = []
+            for await (const chunk of request) chunks.push(chunk)
+
+            const upstream = await fetch(new URL('/api/chat', targetUrl), {
+              method: 'POST',
+              headers: {
+                'Content-Type': request.headers['content-type'] || 'application/json',
+                'Origin': proxyOrigin,
+                'X-DAEMON-API-TOKEN': proxyToken,
+              },
+              body: Buffer.concat(chunks),
+            })
+
+            const headers = {}
+            for (const name of forwardHeaders) {
+              const value = upstream.headers.get(name)
+              if (value) headers[name] = value
+            }
+            response.writeHead(upstream.status, headers)
+            const body = Buffer.from(await upstream.arrayBuffer())
+            response.end(body)
+          })
+
+          server.listen(proxyPort, '127.0.0.1')
+          NODE
+          trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
+          sleep 1
+          VITE_DAEMON_API_URL="http://127.0.0.1:${PROXY_PORT}" \
+            DAEMON_EVAL_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
+            npx tsx tests/daemon-eval.mjs
 
       - name: Verify live evaluation deployment identity
         id: regression_gate
@@ -136,7 +219,7 @@ jobs:
         continue-on-error: true
         env:
           LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
-          EXPECTED_CANDIDATE_SHA: ${{ github.sha }}
+          EXPECTED_CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
         run: |
           node <<'NODE'
           const fs = require('fs')
@@ -253,27 +336,10 @@ jobs:
           }
           NODE
 
-      - name: Resolve promotion binding identifiers
-        id: binding
-        if: always()
-        env:
-          CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
-          CANDIDATE_SNAPSHOT_ID: ${{ github.event.inputs.candidate_snapshot_id || '' }}
-          EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
-        run: |
-          if [ -n "$CANDIDATE_VERSION" ] && [ -n "$CANDIDATE_SNAPSHOT_ID" ] && [ -n "$EVOLUTION_RUN_ID" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          elif [ -z "$CANDIDATE_VERSION" ] && [ -z "$CANDIDATE_SNAPSHOT_ID" ] && [ -z "$EVOLUTION_RUN_ID" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Promotion-bound attestations require candidate_version, candidate_snapshot_id, and run_id together."
-            exit 1
-          fi
-
       - name: Build evolution gate artifact
         if: always() && steps.config.outputs.configured == 'true' && steps.binding.outcome != 'failure'
         env:
-          CANDIDATE_SHA: ${{ github.sha }}
+          CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
           EVOLUTION_RUN_ID: ${{ inputs.run_id }}
