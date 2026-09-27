@@ -143,6 +143,16 @@ describe('sandbox adapters', () => {
         ok: false,
         denied: true,
       })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/../infrastructure/terraform/main.tf', 'resource "x" "y" {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
+    expect(adapter.writeFile(workspace.workspaceId, ' src/app.ts', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
 
     const delegate = (adapter as unknown as { delegate: InMemorySandboxAdapter }).delegate
     delegate.writeFile(workspace.workspaceId, '.env.production', 'secret=value')
