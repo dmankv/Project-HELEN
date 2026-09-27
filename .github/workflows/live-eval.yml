@@ -149,14 +149,24 @@ jobs:
         continue-on-error: true
         env:
           DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
+          DAEMON_EVAL_MAX_RUNTIME_MS: ${{ vars.DAEMON_EVAL_MAX_RUNTIME_MS }}
         run: |
           PROXY_PORT=3301
+          MAX_RUNTIME_MS="${DAEMON_EVAL_MAX_RUNTIME_MS:-600000}"
+          case "$MAX_RUNTIME_MS" in
+            ''|*[!0-9]*)
+              echo "Invalid DAEMON_EVAL_MAX_RUNTIME_MS: $MAX_RUNTIME_MS"
+              exit 1
+              ;;
+          esac
+          EVAL_TIMEOUT_SECONDS=$(( (MAX_RUNTIME_MS + 30000 + 999) / 1000 ))
           PROXY_METRICS_PATH="$(mktemp /tmp/live-eval-proxy-metrics.XXXXXX.json)"
           echo "LIVE_EVAL_PROXY_METRICS_PATH=$PROXY_METRICS_PATH" >> "$GITHUB_ENV"
           DAEMON_EVAL_TARGET_URL='${{ secrets.DAEMON_EVAL_API_URL }}' \
             DAEMON_EVAL_PROXY_TOKEN='${{ secrets.DAEMON_EVAL_API_TOKEN }}' \
             DAEMON_EVAL_PROXY_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
             DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" \
+            DAEMON_EVAL_MAX_RUNTIME_MS="$MAX_RUNTIME_MS" \
             DAEMON_EVAL_PROXY_METRICS_PATH="$PROXY_METRICS_PATH" \
             node <<'NODE' &
           const fs = require('fs')
@@ -167,6 +177,10 @@ jobs:
           const proxyOrigin = process.env.DAEMON_EVAL_PROXY_ORIGIN
           const proxyPort = Number(process.env.DAEMON_EVAL_PROXY_PORT || '3301')
           const metricsPath = process.env.DAEMON_EVAL_PROXY_METRICS_PATH
+          const maxRuntimeMs = Number(process.env.DAEMON_EVAL_MAX_RUNTIME_MS || '600000')
+          if (!Number.isFinite(maxRuntimeMs) || maxRuntimeMs <= 0) {
+            throw new Error(`Invalid runtime budget: ${process.env.DAEMON_EVAL_MAX_RUNTIME_MS}`)
+          }
           const startedAt = Date.now()
           let apiCalls = 0
           let deploymentSha = ''
@@ -244,6 +258,7 @@ jobs:
 
               const upstream = await fetch(new URL('/api/chat', targetUrl), {
                 method: 'POST',
+                signal: AbortSignal.timeout(maxRuntimeMs),
                 headers: {
                   'Content-Type': request.headers['content-type'] || 'application/json',
                   'Origin': proxyOrigin,
@@ -262,8 +277,13 @@ jobs:
               const body = Buffer.from(await upstream.arrayBuffer())
               response.end(body)
             } catch (error) {
-              response.writeHead(502, { 'content-type': 'application/json' })
-              response.end(JSON.stringify({ error: 'live_eval_proxy_unavailable' }))
+              const timeoutExceeded = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+              response.writeHead(timeoutExceeded ? 504 : 502, { 'content-type': 'application/json' })
+              response.end(JSON.stringify({
+                error: timeoutExceeded
+                  ? 'live_eval_proxy_timeout'
+                  : 'live_eval_proxy_unavailable',
+              }))
             }
           })
 
@@ -283,7 +303,7 @@ jobs:
           sleep 1
           VITE_DAEMON_API_URL="http://127.0.0.1:${PROXY_PORT}" \
             DAEMON_EVAL_ORIGIN='${{ secrets.DAEMON_EVAL_ORIGIN }}' \
-            npx tsx tests/daemon-eval.mjs
+            timeout --signal=TERM "${EVAL_TIMEOUT_SECONDS}s" npx tsx tests/daemon-eval.mjs
 
       - name: Verify live evaluation deployment identity
         id: regression_gate

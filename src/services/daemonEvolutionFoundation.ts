@@ -101,6 +101,13 @@ export interface SandboxSnapshot {
   files: Record<string, string>
 }
 
+function cloneSandboxSnapshot(snapshot: SandboxSnapshot): SandboxSnapshot {
+  return {
+    ...snapshot,
+    files: { ...snapshot.files },
+  }
+}
+
 export interface SandboxWorkspaceState {
   workspaceId: string
   files: Record<string, string>
@@ -204,7 +211,7 @@ export class InMemorySandboxAdapter implements DaemonSandboxAdapter {
       files: { ...state.files },
     }
     state.snapshots.push(snapshot)
-    return snapshot
+    return cloneSandboxSnapshot(snapshot)
   }
 }
 
@@ -371,6 +378,13 @@ export interface PersistedCanaryDecision extends CanaryDecision {
   candidateVersion: string
 }
 
+export interface RollbackCompletionAttestation {
+  runId: string
+  candidateSnapshotId: string
+  candidateVersion: string
+  deployedVersion: string
+}
+
 function hasHealthyCanaryDecision(run: EvolutionRunRecord): boolean {
   return run.canaryDecision?.allowed === true
     && run.canaryDecision.status === 'healthy'
@@ -414,10 +428,9 @@ export function transitionEvolutionStage(
     return {
       ...run,
       stage: 'rollback',
-      status: 'rolled_back',
+      status: 'running',
       updatedAt: now,
-      endedAt: now,
-      deployedVersion: run.lastKnownGoodVersion,
+      endedAt: null,
     }
   }
   if (run.status !== 'running') return run
@@ -454,6 +467,28 @@ export function completeEvolutionRun(
     endedAt: now,
     updatedAt: now,
     deployedVersion: run.candidateVersion,
+  }
+}
+
+export function completeRollbackRun(
+  run: EvolutionRunRecord,
+  attestation: RollbackCompletionAttestation,
+): EvolutionRunRecord {
+  if (
+    run.status !== 'running'
+    || run.stage !== 'rollback'
+    || attestation.runId !== run.runId
+    || attestation.candidateSnapshotId !== run.candidateSnapshotId
+    || attestation.candidateVersion !== run.candidateVersion
+    || attestation.deployedVersion !== run.lastKnownGoodVersion
+  ) return run
+  const now = new Date().toISOString()
+  return {
+    ...run,
+    status: 'rolled_back',
+    endedAt: now,
+    updatedAt: now,
+    deployedVersion: attestation.deployedVersion,
   }
 }
 
@@ -942,7 +977,8 @@ function deriveCanaryStatus(run: EvolutionRunRecord | null): CanaryStatus {
 
 function deriveRollbackStatus(run: EvolutionRunRecord | null): RollbackStatus {
   if (!run) return 'not_needed'
-  if (run.stage === 'rollback' || run.status === 'rolled_back') return 'completed'
+  if (run.status === 'rolled_back') return 'completed'
+  if (run.stage === 'rollback') return 'requested'
   return 'not_needed'
 }
 

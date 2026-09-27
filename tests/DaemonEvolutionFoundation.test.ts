@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AppendOnlyAuditLog,
   buildAdminEvolutionStatusModel,
+  completeRollbackRun,
   ConfiguredCanaryAdapter,
   ConfiguredSandboxAdapter,
   completeEvolutionRun,
@@ -77,6 +78,13 @@ describe('sandbox adapters', () => {
     const snapshot = adapter.createSnapshot(workspace.workspaceId, 'manual-check')
     expect(snapshot?.files['a.ts']).toContain('a = 1')
     expect(snapshot?.files['b.ts']).toContain('b = 2')
+
+    snapshot!.files['a.ts'] = 'mutated'
+    const storedSnapshot = (adapter as { workspaces: Map<string, { snapshots: Array<{ files: Record<string, string> }> }> })
+      .workspaces
+      .get(workspace.workspaceId)
+      ?.snapshots[1]
+    expect(storedSnapshot?.files['a.ts']).toContain('a = 1')
   })
 
   it('configured sandbox stays fail-closed when backend is disabled', () => {
@@ -186,7 +194,7 @@ describe('evolution run state machine', () => {
     expect(deniedRun.deployedVersion).toBe('stable-v2')
   })
 
-  it('supports rollback transition from canary path while preserving candidate identity', () => {
+  it('keeps rollback pending from canary until completion is attested', () => {
     const run = transitionEvolutionStage(
       transitionEvolutionStage(
         transitionEvolutionStage(
@@ -205,10 +213,21 @@ describe('evolution run state machine', () => {
     )
     const rollback = transitionEvolutionStage(run, 'rollback')
 
-    expect(rollback.status).toBe('rolled_back')
+    expect(rollback.status).toBe('running')
     expect(rollback.stage).toBe('rollback')
+    expect(rollback.endedAt).toBeNull()
     expect(rollback.candidateVersion).toBe('candidate-v3')
     expect(rollback.deployedVersion).toBe('stable-v2')
+
+    const completed = completeRollbackRun(rollback, {
+      runId: rollback.runId,
+      candidateSnapshotId: rollback.candidateSnapshotId,
+      candidateVersion: rollback.candidateVersion,
+      deployedVersion: rollback.lastKnownGoodVersion,
+    })
+    expect(completed.status).toBe('rolled_back')
+    expect(completed.endedAt).toBeTruthy()
+    expect(completed.deployedVersion).toBe('stable-v2')
   })
 
   it('does not allow rollback before canary or promotion', () => {
@@ -249,9 +268,23 @@ describe('evolution run state machine', () => {
     )
 
     const rollback = transitionEvolutionStage(promoted, 'rollback')
-    expect(rollback.status).toBe('rolled_back')
+    expect(rollback.status).toBe('running')
     expect(rollback.stage).toBe('rollback')
     expect(rollback.deployedVersion).toBe('stable-v3')
+  })
+
+  it('refuses rollback completion without a matching infrastructure attestation', () => {
+    const rollback = transitionEvolutionStage({
+      ...createEvolutionRun('candidate-v5', 'stable-v4'),
+      stage: 'promote',
+    }, 'rollback')
+
+    expect(completeRollbackRun(rollback, {
+      runId: rollback.runId,
+      candidateSnapshotId: rollback.candidateSnapshotId,
+      candidateVersion: rollback.candidateVersion,
+      deployedVersion: 'unexpected-version',
+    })).toBe(rollback)
   })
 })
 
@@ -733,7 +766,7 @@ describe('admin observability model', () => {
     expect(promoteReady.canaryStatus).toBe('healthy')
     expect(promoteWithoutCanary.canaryStatus).toBe('failed')
     expect(rolledBack.canaryStatus).toBe('failed')
-    expect(rolledBack.rollbackStatus).toBe('completed')
+    expect(rolledBack.rollbackStatus).toBe('requested')
     expect(buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
       run: stopEvolutionRun(createEvolutionRun('candidate-v2', 'baseline-safe'), 'failed'),
