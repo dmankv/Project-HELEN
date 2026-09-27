@@ -101,25 +101,26 @@ jobs:
         id: typecheck_gate
         continue-on-error: true
         run: |
-          npm run server:typecheck
-          npm run cli:typecheck
+          node_modules/.bin/tsc --project server/tsconfig.json --noEmit
+          node_modules/.bin/tsc --project tsconfig.cli.json --noEmit
 
       - name: Run lint gate
         id: lint_gate
         continue-on-error: true
-        run: npm run lint
+        run: node_modules/.bin/eslint src server
 
       - name: Run unit gate
         id: unit_gate
         continue-on-error: true
-        run: npm run test:unit
+        run: node_modules/.bin/vitest run
 
       - name: Run build gate
         id: build_gate
         continue-on-error: true
         run: |
-          npm run build
-          npm run server:build
+          node_modules/.bin/tsc
+          node_modules/.bin/vite build
+          node_modules/.bin/tsc --project server/tsconfig.json
 
       - name: Run security scan gate
         id: security_scan_gate
