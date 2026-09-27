@@ -67,13 +67,20 @@ const DENYLIST = new Set<string>(DAEMON_CONTROL_PLANE_POLICY.denylist)
 const PROTECTED_SANDBOX_PATHS = Object.freeze([
   { prefix: '.github/workflows/', capability: 'modify_deployment_credentials' },
   { prefix: 'supabase/migrations/', capability: 'modify_rls' },
+  { prefix: 'supabase/functions/', capability: 'modify_production_access_controls' },
+  { prefix: 'src/components/AdminDaemonInterface.tsx', capability: 'modify_production_access_controls' },
+  { prefix: 'src/components/LoginView.tsx', capability: 'modify_auth' },
+  { prefix: 'src/components/SupabaseProjectAccessPanel.tsx', capability: 'modify_production_access_controls' },
+  { prefix: 'src/services/adminDaemon', capability: 'modify_audit_controls' },
+  { prefix: 'src/services/daemonAuth', capability: 'modify_auth' },
   { prefix: 'src/services/daemonEvolutionFoundation.ts', capability: 'change_control_plane_policy' },
+  { prefix: 'src/services/supabaseAuth', capability: 'modify_auth' },
+  { prefix: 'src/services/supabasePersistence.ts', capability: 'modify_audit_controls' },
+  { prefix: 'src/services/supabaseProjectAccess.ts', capability: 'modify_production_access_controls' },
   { prefix: '.env', capability: 'modify_secrets' },
 ] as const satisfies ReadonlyArray<{ prefix: string, capability: DaemonCapability }>)
 const SANDBOX_WRITABLE_PATH_ALLOWLIST = Object.freeze([
   /^(?!.*(?:^|\/)\.\.(?:\/|$))(src|tests?|docs?)\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
-  /^(?!.*(?:^|\/)\.\.(?:\/|$))supabase\/functions\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/,
-  /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
 ])
 
 export function decideDaemonCapability(capability: DaemonCapability): CapabilityDecision {
@@ -501,7 +508,7 @@ export function transitionEvolutionStage(
   if (run.stage === 'canary' && nextStage === 'promote' && !hasHealthyCanaryDecision(run)) return run
   const currentIndex = STAGE_ORDER.indexOf(run.stage)
   const nextIndex = STAGE_ORDER.indexOf(nextStage)
-  if (nextIndex !== currentIndex + 1) return run
+  if (currentIndex === -1 || nextIndex === -1 || nextIndex !== currentIndex + 1) return run
 
   const now = new Date().toISOString()
   return {

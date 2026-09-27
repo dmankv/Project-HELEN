@@ -108,11 +108,11 @@ describe('sandbox adapters', () => {
       maxFileBytes: 10,
     })
     const workspace = adapter.createWorkspace()
-    const write = adapter.writeFile(workspace.workspaceId, 'x.ts', 'export const value = 123')
+    const write = adapter.writeFile(workspace.workspaceId, 'src/x.ts', 'export const value = 123')
 
     expect(write.ok).toBe(false)
     expect(write.message).toContain('exceeds 10 bytes')
-    expect(() => adapter.createWorkspace({ 'seed.ts': 'export const value = 123' })).toThrow('exceeds 10 bytes')
+    expect(() => adapter.createWorkspace({ 'src/seed.ts': 'export const value = 123' })).toThrow('exceeds 10 bytes')
   })
 
   it('configured sandbox denies protected paths and revalidates snapshots', () => {
@@ -121,7 +121,7 @@ describe('sandbox adapters', () => {
       backendId: 'immutable-controller',
       maxFileBytes: 1024,
     })
-    const workspace = adapter.createWorkspace({ 'candidate.ts': 'export {}' })
+    const workspace = adapter.createWorkspace({ 'src/candidate.ts': 'export {}' })
 
     const blockedWrite = adapter.writeFile(
       workspace.workspaceId,
@@ -134,6 +134,21 @@ describe('sandbox adapters', () => {
       denied: true,
     })
     expect(blockedWrite.message).toContain('modify_deployment_credentials')
+    expect(adapter.writeFile(workspace.workspaceId, 'supabase/functions/admin-daemon/index.ts', 'compromised'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/components/AdminDaemonInterface.tsx', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/services/daemonAuthAPI.ts', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
     expect(() => adapter.createWorkspace({ 'supabase/migrations/unsafe.sql': 'select 1' }))
       .toThrow('modify_rls')
     expect(() => adapter.createWorkspace({ 'infrastructure/terraform/main.tf': 'resource "x" "y" {}' }))
@@ -344,6 +359,15 @@ describe('evolution run state machine', () => {
     const rollback = transitionEvolutionStage(run, 'rollback')
 
     expect(rollback).toEqual(run)
+  })
+
+  it('does not allow rollback runs to transition back into the staged pipeline', () => {
+    const rollback = transitionEvolutionStage({
+      ...createEvolutionRun('candidate-v3', 'stable-v2'),
+      stage: 'rollback',
+    }, 'rollback')
+
+    expect(transitionEvolutionStage(rollback, 'observe')).toBe(rollback)
   })
 
   it('allows rollback after a successful promotion', () => {
