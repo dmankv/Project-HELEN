@@ -199,6 +199,7 @@ declare
   lifecycle_unchanged boolean;
   row_unchanged boolean;
   terminal_transition boolean;
+  canary_attestation_present boolean;
   expected_next_stage text;
   sequential_transition_allowed boolean;
   stop_transition_allowed boolean;
@@ -236,13 +237,22 @@ begin
     and old.deployed_version = new.deployed_version
   );
   terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
+  canary_attestation_present := exists (
+    select 1
+    from public.evolution_audit_events as event
+    where event.run_id = old.run_id
+      and event.user_id = old.user_id
+      and event.event_type = 'canary_decision'
+      and event.metadata ->> 'status' = 'healthy'
+      and event.metadata ->> 'allowed' = 'true'
+      and coalesce(event.metadata ->> 'runId', event.metadata ->> 'run_id') = old.run_id::text
+      and coalesce(event.metadata ->> 'candidateSnapshotId', event.metadata ->> 'candidate_snapshot_id') = old.candidate_snapshot_id::text
+      and coalesce(event.metadata ->> 'candidateVersion', event.metadata ->> 'candidate_version') = old.candidate_version
+  );
   if row_unchanged then
     new.updated_at := old.updated_at;
     new.ended_at := old.ended_at;
     return new;
-  end if;
-  if terminal_transition and not row_unchanged then
-    raise exception 'Evolution run lifecycle state is immutable after terminal status.';
   end if;
   new.updated_at := case
     when lifecycle_unchanged then old.updated_at
@@ -279,6 +289,7 @@ begin
   promotion_transition_allowed := (
     old.status = 'running'
     and old.stage = 'promote'
+    and canary_attestation_present
     and old.deployed_version = old.last_known_good
     and new.deployed_version = old.candidate_version
     and new.stage = 'promote'
@@ -302,6 +313,9 @@ begin
   if (new.stage = 'rollback' or new.status = 'rolled_back')
     and not rollback_transition_allowed then
     raise exception 'Evolution rollback is allowed only from canary/promote stages or a succeeded promotion.';
+  end if;
+  if terminal_transition and not row_unchanged and not rollback_transition_allowed then
+    raise exception 'Evolution run lifecycle state is immutable after terminal status.';
   end if;
 
   if not sequential_transition_allowed
