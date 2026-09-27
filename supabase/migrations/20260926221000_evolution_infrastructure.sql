@@ -244,23 +244,28 @@ begin
     and new.status = 'succeeded' then
     canary_attestation_present := exists (
       select 1
-      from public.evolution_audit_events as event
-      where event.run_id = old.run_id
-        and event.user_id = old.user_id
-        and event.event_type = 'canary_decision'
-        and event.metadata ->> 'status' = 'healthy'
-        and event.metadata ->> 'allowed' = 'true'
+      from (
+        select event.metadata
+        from public.evolution_audit_events as event
+        where event.run_id = old.run_id
+          and event.user_id = old.user_id
+          and event.event_type = 'canary_decision'
+        order by event.created_at desc, event.event_id desc
+        limit 1
+      ) as latest_canary_decision
+      where latest_canary_decision.metadata ->> 'status' = 'healthy'
+        and latest_canary_decision.metadata ->> 'allowed' = 'true'
         and (
-          (event.metadata ? 'runId' and event.metadata ->> 'runId' = old.run_id::text)
-          or (event.metadata ? 'run_id' and event.metadata ->> 'run_id' = old.run_id::text)
+          (latest_canary_decision.metadata ? 'runId' and latest_canary_decision.metadata ->> 'runId' = old.run_id::text)
+          or (latest_canary_decision.metadata ? 'run_id' and latest_canary_decision.metadata ->> 'run_id' = old.run_id::text)
         )
         and (
-          (event.metadata ? 'candidateSnapshotId' and event.metadata ->> 'candidateSnapshotId' = old.candidate_snapshot_id::text)
-          or (event.metadata ? 'candidate_snapshot_id' and event.metadata ->> 'candidate_snapshot_id' = old.candidate_snapshot_id::text)
+          (latest_canary_decision.metadata ? 'candidateSnapshotId' and latest_canary_decision.metadata ->> 'candidateSnapshotId' = old.candidate_snapshot_id::text)
+          or (latest_canary_decision.metadata ? 'candidate_snapshot_id' and latest_canary_decision.metadata ->> 'candidate_snapshot_id' = old.candidate_snapshot_id::text)
         )
         and (
-          (event.metadata ? 'candidateVersion' and event.metadata ->> 'candidateVersion' = old.candidate_version)
-          or (event.metadata ? 'candidate_version' and event.metadata ->> 'candidate_version' = old.candidate_version)
+          (latest_canary_decision.metadata ? 'candidateVersion' and latest_canary_decision.metadata ->> 'candidateVersion' = old.candidate_version)
+          or (latest_canary_decision.metadata ? 'candidate_version' and latest_canary_decision.metadata ->> 'candidate_version' = old.candidate_version)
         )
     );
   end if;
