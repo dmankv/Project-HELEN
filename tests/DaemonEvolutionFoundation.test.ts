@@ -103,6 +103,7 @@ describe('sandbox adapters', () => {
 
     expect(write.ok).toBe(false)
     expect(write.message).toContain('exceeds 10 bytes')
+    expect(() => adapter.createWorkspace({ 'seed.ts': 'export const value = 123' })).toThrow('exceeds 10 bytes')
   })
 })
 
@@ -168,14 +169,72 @@ describe('evolution run state machine', () => {
     expect(deniedRun.deployedVersion).toBe('stable-v2')
   })
 
-  it('supports rollback transition that preserves candidate identity', () => {
-    const run = createEvolutionRun('candidate-v3', 'stable-v2')
+  it('supports rollback transition from canary path while preserving candidate identity', () => {
+    const run = transitionEvolutionStage(
+      transitionEvolutionStage(
+        transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(createEvolutionRun('candidate-v3', 'stable-v2'), 'learn'),
+              'propose',
+            ),
+            'write',
+          ),
+          'test',
+        ),
+        'evaluate',
+      ),
+      'canary',
+    )
     const rollback = transitionEvolutionStage(run, 'rollback')
 
     expect(rollback.status).toBe('rolled_back')
     expect(rollback.stage).toBe('rollback')
     expect(rollback.candidateVersion).toBe('candidate-v3')
     expect(rollback.deployedVersion).toBe('stable-v2')
+  })
+
+  it('does not allow rollback before canary or promotion', () => {
+    const run = createEvolutionRun('candidate-v3', 'stable-v2')
+    const rollback = transitionEvolutionStage(run, 'rollback')
+
+    expect(rollback).toEqual(run)
+  })
+
+  it('allows rollback after a successful promotion', () => {
+    const promoted = completeEvolutionRun(
+      {
+        ...transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(
+                transitionEvolutionStage(
+                  transitionEvolutionStage(
+                    transitionEvolutionStage(createEvolutionRun('candidate-v4', 'stable-v3'), 'learn'),
+                    'propose',
+                  ),
+                  'write',
+                ),
+                'test',
+              ),
+              'evaluate',
+            ),
+            'canary',
+          ),
+          'promote',
+        ),
+      },
+      {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Promotion accepted.',
+      },
+    )
+
+    const rollback = transitionEvolutionStage(promoted, 'rollback')
+    expect(rollback.status).toBe('rolled_back')
+    expect(rollback.stage).toBe('rollback')
+    expect(rollback.deployedVersion).toBe('stable-v3')
   })
 })
 
@@ -286,20 +345,24 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       metadata: {
         authToken: 'ghp_12345678901234567890',
         apiKey: 'sk-secret-token',
-        detail: 'safe value',
+        detail: 'github_pat_123456789012345678901234567890',
+        jwt: 'eyJtoken.payload.signature',
+        label: 'token status label',
       },
     })
 
     expect(event.metadata.authToken).toBe('[REDACTED]')
     expect(event.metadata.apiKey).toBe('[REDACTED]')
-    expect(event.metadata.detail).toBe('safe value')
+    expect(event.metadata.detail).toBe('[REDACTED]')
+    expect(event.metadata.jwt).toBe('[REDACTED]')
+    expect(event.metadata.label).toBe('token status label')
     expect(event.runId).toBeNull()
 
     event.message = 'mutated'
     event.metadata.detail = 'mutated'
     expect(log.recent()[0]).toMatchObject({
       message: 'recording policy decision',
-      metadata: { detail: 'safe value' },
+      metadata: { detail: '[REDACTED]', jwt: '[REDACTED]', label: 'token status label' },
     })
     expect(log.recent(0)).toEqual([])
   })
@@ -352,6 +415,16 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     const promoteDecision = adapter.promote(promoteRun)
     expect(promoteDecision.allowed).toBe(true)
     expect(adapter.rollback(promoteRun)).toBe('completed')
+  })
+
+  it('configured canary requests rollback when the backend is disabled', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: false,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+
+    expect(adapter.rollback(createEvolutionRun('candidate-v2', 'v1'))).toBe('requested')
   })
 
   it('configured canary still denies promotion when immutable gate requires manual approval', () => {
@@ -414,6 +487,41 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     const decision = adapter.promote(promoteRun)
     expect(decision.allowed).toBe(false)
     expect(decision.reason).toContain('required evaluation gates')
+  })
+
+  it('configured canary denies promotion when deployment no longer matches last-known-good', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+    const run = {
+      ...transitionEvolutionStage(
+        transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(
+                transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
+                'propose',
+              ),
+              'write',
+            ),
+            'test',
+          ),
+          'evaluate',
+        ),
+        'canary',
+      ),
+      stage: 'promote' as const,
+      gateResults: passingRequiredGateResults(),
+      budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
+      deployedVersion: 'unexpected-version',
+    }
+
+    const decision = adapter.promote(run)
+    expect(decision.allowed).toBe(false)
+    expect(decision.reason).toContain('last-known-good version')
   })
 
   it('configured canary rejects promotion outside the promote stage before gate checks', () => {

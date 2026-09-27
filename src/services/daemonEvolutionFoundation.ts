@@ -229,6 +229,12 @@ export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
     this.options = options
   }
 
+  private assertWithinMaxFileBytes(filePath: string, content: string): void {
+    if (new TextEncoder().encode(content).byteLength > this.options.maxFileBytes) {
+      throw new Error(`Sandbox write denied: ${filePath} exceeds ${this.options.maxFileBytes} bytes.`)
+    }
+  }
+
   createWorkspace(seed: Record<string, string> = {}): SandboxWorkspaceState {
     if (!this.options.enabled) {
       return {
@@ -236,6 +242,9 @@ export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
         files: {},
         snapshots: [],
       }
+    }
+    for (const [filePath, content] of Object.entries(seed)) {
+      this.assertWithinMaxFileBytes(filePath, content)
     }
     return this.delegate.createWorkspace(seed)
   }
@@ -248,11 +257,15 @@ export class ConfiguredSandboxAdapter implements DaemonSandboxAdapter {
         message: 'Sandbox write denied: configured backend is disabled by immutable policy.',
       }
     }
-    if (new TextEncoder().encode(content).byteLength > this.options.maxFileBytes) {
+    try {
+      this.assertWithinMaxFileBytes(filePath, content)
+    } catch (error) {
       return {
         ok: false,
         denied: true,
-        message: `Sandbox write denied: file exceeds ${this.options.maxFileBytes} bytes.`,
+        message: error instanceof Error
+          ? error.message
+          : `Sandbox write denied: ${filePath} exceeds ${this.options.maxFileBytes} bytes.`,
       }
     }
     return this.delegate.writeFile(workspaceId, filePath, content)
@@ -354,9 +367,16 @@ export function transitionEvolutionStage(
   run: EvolutionRunRecord,
   nextStage: EvolutionStage,
 ): EvolutionRunRecord {
-  if (run.status !== 'running') return run
-
   if (nextStage === 'rollback') {
+    const canRollback = (
+      run.status === 'running'
+      && (run.stage === 'canary' || run.stage === 'promote')
+    ) || (
+        run.status === 'succeeded'
+        && run.stage === 'promote'
+        && run.deployedVersion === run.candidateVersion
+      )
+    if (!canRollback) return run
     const now = new Date().toISOString()
     return {
       ...run,
@@ -367,6 +387,7 @@ export function transitionEvolutionStage(
       deployedVersion: run.lastKnownGoodVersion,
     }
   }
+  if (run.status !== 'running') return run
   const currentIndex = STAGE_ORDER.indexOf(run.stage)
   const nextIndex = STAGE_ORDER.indexOf(nextStage)
   if (nextIndex !== currentIndex + 1) {
@@ -577,11 +598,15 @@ export interface AuditEvent {
 }
 
 const REDACT_VALUE_PATTERN = /(password|secret|token|api[-_]?key|access[-_]?key|private[-_]?key|authorization)/i
+const REDACT_TOKEN_PATTERNS = [
+  /sk-[a-zA-Z0-9_\-]{8,}/,
+  /ghp_[a-zA-Z0-9]{20,}/,
+  /github_pat_[a-zA-Z0-9_]{20,}/,
+  /eyJ[a-zA-Z0-9_-]{5,}\.[a-zA-Z0-9_-]{5,}\.[a-zA-Z0-9_-]{5,}/,
+]
 
 function redactStringValue(value: string): string {
-  if (REDACT_VALUE_PATTERN.test(value)) return '[REDACTED]'
-  if (/sk-[a-zA-Z0-9_\-]{8,}/.test(value)) return '[REDACTED]'
-  if (/ghp_[a-zA-Z0-9]{20,}/.test(value)) return '[REDACTED]'
+  if (REDACT_TOKEN_PATTERNS.some(pattern => pattern.test(value))) return '[REDACTED]'
   return value
 }
 
@@ -727,6 +752,13 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         reason: 'Promotion denied: run is not in promote stage.',
       }
     }
+    if (run.deployedVersion !== run.lastKnownGoodVersion) {
+      return {
+        allowed: false,
+        status: 'denied',
+        reason: 'Promotion denied: deployment is no longer at the last-known-good version.',
+      }
+    }
     if (!this.options.allowAutoPromote) {
       return {
         allowed: false,
@@ -764,6 +796,7 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
   }
 
   rollback(): RollbackStatus {
+    if (!this.options.enabled) return 'requested'
     return 'completed'
   }
 }

@@ -1,4 +1,15 @@
 name: Live Evaluation
+run-name: >-
+  ${{
+    inputs.run_id != ''
+      && format(
+        'Live Evaluation {0} {1} {2}',
+        inputs.candidate_version,
+        inputs.candidate_snapshot_id,
+        inputs.run_id
+      )
+      || format('Live Evaluation {0}', github.sha)
+  }}
 
 on:
   schedule:
@@ -123,6 +134,7 @@ jobs:
         continue-on-error: true
         env:
           DAEMON_EVAL_MAX_RUNTIME_MS: ${{ vars.DAEMON_EVAL_MAX_RUNTIME_MS }}
+          DAEMON_EVAL_MAX_CPU_MS: ${{ vars.DAEMON_EVAL_MAX_CPU_MS }}
           DAEMON_EVAL_MAX_MEMORY_MB: ${{ vars.DAEMON_EVAL_MAX_MEMORY_MB }}
           DAEMON_EVAL_MAX_API_CALLS: ${{ vars.DAEMON_EVAL_MAX_API_CALLS }}
           DAEMON_EVAL_MAX_SPEND_USD: ${{ vars.DAEMON_EVAL_MAX_SPEND_USD }}
@@ -153,17 +165,26 @@ jobs:
             }
             return parsed
           }
+          const parseRequiredLimit = (value, name) => {
+            const normalized = value?.trim?.() ?? ''
+            if (!normalized) {
+              throw new Error(`Missing required budget value: ${name}`)
+            }
+            return parseLimit(normalized, Number.NaN)
+          }
 
           const runtimeMs = parseLimit(String(metrics.runtimeMs ?? ''), Number.NaN)
+          const cpuMs = parseLimit(String(metrics.cpuMs ?? ''), Number.NaN)
           const memoryMb = parseLimit(String(metrics.memoryMb ?? ''), Number.NaN)
           const apiCalls = parseLimit(String(metrics.apiCalls ?? ''), Number.NaN)
           const maxRuntimeMs = parseLimit(process.env.DAEMON_EVAL_MAX_RUNTIME_MS, 600000)
+          const maxCpuMs = parseRequiredLimit(process.env.DAEMON_EVAL_MAX_CPU_MS, 'DAEMON_EVAL_MAX_CPU_MS')
           const maxMemoryMb = parseLimit(process.env.DAEMON_EVAL_MAX_MEMORY_MB, 512)
           const maxApiCalls = parseLimit(process.env.DAEMON_EVAL_MAX_API_CALLS, 2)
-          const maxSpendUsd = parseLimit(process.env.DAEMON_EVAL_MAX_SPEND_USD, Number.POSITIVE_INFINITY)
-          const spendUsd = parseLimit(process.env.DAEMON_EVAL_SPEND_USD_USED, 0)
+          const maxSpendUsd = parseRequiredLimit(process.env.DAEMON_EVAL_MAX_SPEND_USD, 'DAEMON_EVAL_MAX_SPEND_USD')
+          const spendUsd = parseRequiredLimit(process.env.DAEMON_EVAL_SPEND_USD_USED, 'DAEMON_EVAL_SPEND_USD_USED')
 
-          if (![runtimeMs, memoryMb, apiCalls].every(Number.isFinite)) {
+          if (![runtimeMs, cpuMs, memoryMb, apiCalls].every(Number.isFinite)) {
             console.error('Resource budget gate requires finite live evaluation metrics.')
             process.exit(1)
           }
@@ -173,6 +194,10 @@ jobs:
           }
           if (runtimeMs > maxRuntimeMs) {
             console.error(`Runtime budget exceeded: ${runtimeMs}ms > ${maxRuntimeMs}ms`)
+            process.exit(1)
+          }
+          if (cpuMs > maxCpuMs) {
+            console.error(`CPU budget exceeded: ${cpuMs}ms > ${maxCpuMs}ms`)
             process.exit(1)
           }
           if (memoryMb > maxMemoryMb) {
@@ -268,7 +293,7 @@ jobs:
         if: always() && steps.config.outputs.configured == 'true' && steps.binding.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: evolution-gate-results
+          name: ${{ format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id) }}
           path: evolution-gate-results.json
           if-no-files-found: error
           retention-days: 14

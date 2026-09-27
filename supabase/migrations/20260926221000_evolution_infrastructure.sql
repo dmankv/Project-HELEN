@@ -178,15 +178,40 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  promotion_transition_allowed boolean;
+  rollback_transition_allowed boolean;
 begin
+  promotion_transition_allowed := (
+    old.deployed_version = old.last_known_good
+    and new.deployed_version = old.candidate_version
+    and new.stage = 'promote'
+    and new.status = 'succeeded'
+  );
+  rollback_transition_allowed := (
+    (
+      old.status = 'running'
+      and old.stage in ('canary', 'promote')
+      and new.deployed_version = old.last_known_good
+    )
+    or (
+      old.deployed_version = old.candidate_version
+      and old.stage = 'promote'
+      and old.status = 'succeeded'
+      and new.deployed_version = old.last_known_good
+    )
+  ) and new.stage = 'rollback'
+    and new.status = 'rolled_back';
+
+  if (new.stage = 'rollback' or new.status = 'rolled_back')
+    and not rollback_transition_allowed then
+    raise exception 'Evolution rollback is allowed only from canary/promote stages or a succeeded promotion.';
+  end if;
+
   if old.deployed_version is distinct from new.deployed_version
-    and not (
-      old.deployed_version = old.last_known_good
-      and new.deployed_version = new.candidate_version
-      and new.stage = 'promote'
-      and new.status = 'succeeded'
-    ) then
-    raise exception 'Evolution run deployed version can change only on successful promotion';
+    and not promotion_transition_allowed
+    and not rollback_transition_allowed then
+    raise exception 'Evolution run deployed version can change only on successful promotion or rollback';
   end if;
   return new;
 end;
@@ -269,7 +294,7 @@ begin
         from jsonb_array_elements(value) as element
       ), '[]'::jsonb);
     when 'string' then
-      if trim(both '"' from value::text) ~* '(sk-[a-z0-9_-]{8,}|ghp_[a-z0-9]{20,})' then
+      if trim(both '"' from value::text) ~* '(sk-[a-z0-9_-]{8,}|ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}|eyj[a-z0-9_-]{5,}\.[a-z0-9_-]{5,}\.[a-z0-9_-]{5,})' then
         return '"[REDACTED]"'::jsonb;
       end if;
   end case;

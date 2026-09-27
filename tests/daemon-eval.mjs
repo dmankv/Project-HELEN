@@ -474,6 +474,7 @@ section('Live model tests')
 const liveEvalMetricsPath = process.env.DAEMON_EVAL_METRICS_PATH
 let liveEvalApiCalls = 0
 let liveEvalPeakMemoryMb = Math.ceil(process.memoryUsage().rss / 1024 / 1024)
+let liveEvalCpuStartedAt = process.cpuUsage()
 
 function observeLiveEvalMemory() {
   liveEvalPeakMemoryMb = Math.max(
@@ -485,7 +486,11 @@ function observeLiveEvalMemory() {
 async function writeLiveEvalMetrics(metrics) {
   if (!liveEvalMetricsPath) return
   const fs = await import('node:fs')
-  fs.writeFileSync(liveEvalMetricsPath, JSON.stringify(metrics, null, 2))
+  try {
+    fs.writeFileSync(liveEvalMetricsPath, JSON.stringify(metrics, null, 2))
+  } catch (error) {
+    console.error('  ⚠️  Unable to write live evaluation metrics:', error.message)
+  }
 }
 
 if (process.env.DAEMON_EVAL_LIVE !== 'true') {
@@ -494,6 +499,7 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
   const apiUrl = process.env.VITE_DAEMON_API_URL ?? 'http://localhost:3001'
   console.log('  Running live tests against ' + apiUrl)
   const liveEvalStartedAt = Date.now()
+  liveEvalCpuStartedAt = process.cpuUsage()
   const failedBeforeLiveEval = failed
 
   async function liveChatRequest(messages) {
@@ -531,8 +537,10 @@ if (process.env.DAEMON_EVAL_LIVE !== 'true') {
     failed++
   } finally {
     observeLiveEvalMemory()
+    const cpuUsage = process.cpuUsage(liveEvalCpuStartedAt)
     await writeLiveEvalMetrics({
       runtimeMs: Date.now() - liveEvalStartedAt,
+      cpuMs: Math.ceil((cpuUsage.user + cpuUsage.system) / 1000),
       memoryMb: liveEvalPeakMemoryMb,
       apiCalls: liveEvalApiCalls,
       failed: failed > failedBeforeLiveEval,

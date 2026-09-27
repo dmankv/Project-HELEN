@@ -44,7 +44,7 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
         run: |
-          UUID_PATTERN='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          UUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
           printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq "$UUID_PATTERN"
           printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq "$UUID_PATTERN"
           printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'
@@ -58,16 +58,18 @@ jobs:
           EVOLUTION_RUN_ID: ${{ inputs.run_id }}
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
+          EXPECTED_ARTIFACT_NAME: ${{ format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id) }}
         run: |
           RUN_IDS="$(node <<'NODE'
           const repo = process.env.REPO
           const token = process.env.GITHUB_TOKEN
           const target = (process.env.CANDIDATE_SHA || '').toLowerCase()
+          const expectedRunTitle = `Live Evaluation ${process.env.CANDIDATE_VERSION} ${process.env.CANDIDATE_SNAPSHOT_ID} ${process.env.EVOLUTION_RUN_ID}`
 
           async function loadRuns() {
             const matched = []
             for (let page = 1; ; page += 1) {
-              const url = `https://api.github.com/repos/${repo}/actions/workflows/live-eval.yml/runs?branch=main&status=completed&per_page=100&page=${page}`
+              const url = `https://api.github.com/repos/${repo}/actions/workflows/live-eval.yml/runs?status=completed&per_page=100&page=${page}`
               const response = await fetch(url, {
                 headers: {
                   Authorization: `token ${token}`,
@@ -81,7 +83,13 @@ jobs:
               const runs = Array.isArray(doc.workflow_runs) ? doc.workflow_runs : []
               if (runs.length === 0) break
               for (const run of runs) {
-                if (run.conclusion === 'success' && String(run.head_sha || '').toLowerCase() === target) {
+                const runTitle = String(run.display_title || run.name || '')
+                if (
+                  run.conclusion === 'success'
+                  && run.event === 'workflow_dispatch'
+                  && String(run.head_sha || '').toLowerCase() === target
+                  && runTitle === expectedRunTitle
+                ) {
                   matched.push(String(run.id))
                 }
               }
@@ -105,7 +113,7 @@ jobs:
               -H "Authorization: token ${GITHUB_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               "$ARTIFACTS_URL" \
-              | node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync(0,'utf8'));const a=(doc.artifacts||[]).find(x=>x.name==='evolution-gate-results' && !x.expired);if(!a||!a.archive_download_url){process.exit(1)};process.stdout.write(a.archive_download_url);" 2>/dev/null)" || continue
+              | node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync(0,'utf8'));const expected=process.env.EXPECTED_ARTIFACT_NAME;const a=(doc.artifacts||[]).find(x=>x.name===expected && !x.expired);if(!a||!a.archive_download_url){process.exit(1)};process.stdout.write(a.archive_download_url);" 2>/dev/null)" || continue
 
             rm -rf /tmp/evolution-gates
             mkdir -p /tmp/evolution-gates
