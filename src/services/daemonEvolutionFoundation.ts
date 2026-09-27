@@ -104,9 +104,11 @@ export function decideDaemonCapability(capability: DaemonCapability): Capability
 function decideSandboxWritePath(filePath: string): CapabilityDecision {
   const normalizedPath = filePath.replace(/\\/g, '/')
   const hasEdgeWhitespace = normalizedPath !== normalizedPath.trim()
+  const hasInlineWhitespace = /\s/.test(normalizedPath)
   const hasTraversalSegment = /(?:^|\/)\.\.(?:\/|$)/.test(normalizedPath)
   const isUnsafePath = normalizedPath.length === 0
     || hasEdgeWhitespace
+    || hasInlineWhitespace
     || hasTraversalSegment
     || normalizedPath.startsWith('/')
     || /^[a-zA-Z]:\//.test(normalizedPath)

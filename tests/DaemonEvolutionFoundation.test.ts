@@ -153,6 +153,11 @@ describe('sandbox adapters', () => {
         ok: false,
         denied: true,
       })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/My Component.tsx', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
 
     const delegate = (adapter as unknown as { delegate: InMemorySandboxAdapter }).delegate
     delegate.writeFile(workspace.workspaceId, '.env.production', 'secret=value')
