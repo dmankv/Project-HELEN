@@ -261,7 +261,7 @@ begin
   );
   terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
   privileged_control_plane_actor := (
-    auth.role() in ('service_role', 'supabase_admin')
+    auth.role() = 'service_role'
     or session_user in ('postgres', 'supabase_admin')
   );
   canary_attestation_present := false;

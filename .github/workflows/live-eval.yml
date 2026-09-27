@@ -445,7 +445,7 @@ jobs:
           REGRESSION_STATUS: ${{ steps.regression_gate.outcome }}
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
           LIVE_EVAL_WORKFLOW_REF: ${{ github.workflow_ref }}
-          LIVE_EVAL_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          LIVE_EVAL_WORKFLOW_SHA: ${{ github.sha }}
         run: |
           node <<'NODE'
           const fs = require('fs')
