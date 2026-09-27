@@ -268,6 +268,7 @@ begin
   rollback_attestation_present := false;
   promotion_finalization_requested := (
     old.status = 'running'
+    and old.status is distinct from new.status
     and old.stage = 'promote'
     and new.stage = 'promote'
     and new.status = 'succeeded'
@@ -275,6 +276,7 @@ begin
   rollback_finalization_requested := (
     new.stage = 'rollback'
     and new.status = 'rolled_back'
+    and old.status is distinct from new.status
     and (
       (
         old.status = 'running'

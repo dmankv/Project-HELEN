@@ -192,6 +192,7 @@ describe('Evolution infrastructure migration', () => {
   it('requires backend rollback and run-finished attestations bound to the run identity', () => {
     expect(normalizedSql).toContain("event.event_type = 'run_finished'")
     expect(normalizedSql).toContain("event.event_type = 'rollback_triggered'")
+    expect(normalizedSql).toContain("old.status is distinct from new.status")
     expect(normalizedSql).toContain("metadata ->> 'candidateversion' = old.candidate_version")
     expect(normalizedSql).toContain("metadata ->> 'targetdeployedversion' = old.last_known_good")
     expect(normalizedSql).toContain(") and privileged_control_plane_actor")
