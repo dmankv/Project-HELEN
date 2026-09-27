@@ -197,6 +197,7 @@ set search_path = public
 as $$
 declare
   lifecycle_unchanged boolean;
+  row_unchanged boolean;
   terminal_transition boolean;
   expected_next_stage text;
   sequential_transition_allowed boolean;
@@ -204,11 +205,40 @@ declare
   promotion_transition_allowed boolean;
   rollback_transition_allowed boolean;
 begin
+  row_unchanged := (
+    row(
+      old.run_id,
+      old.user_id,
+      old.candidate_version,
+      old.candidate_snapshot_id,
+      old.last_known_good,
+      old.deployed_version,
+      old.stage,
+      old.status,
+      old.policy_version,
+      old.started_at
+    ) is not distinct from row(
+      new.run_id,
+      new.user_id,
+      new.candidate_version,
+      new.candidate_snapshot_id,
+      new.last_known_good,
+      new.deployed_version,
+      new.stage,
+      new.status,
+      new.policy_version,
+      new.started_at
+    )
+  );
   lifecycle_unchanged := (
     old.stage = new.stage
     and old.status = new.status
     and old.deployed_version = new.deployed_version
   );
+  terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
+  if terminal_transition and not row_unchanged then
+    raise exception 'Evolution run lifecycle state is immutable after terminal status.';
+  end if;
   new.updated_at := case
     when lifecycle_unchanged then old.updated_at
     else now()
@@ -220,7 +250,6 @@ begin
   if lifecycle_unchanged then
     return new;
   end if;
-  terminal_transition := old.status in ('succeeded', 'failed', 'denied', 'timed_out', 'rolled_back');
   expected_next_stage := case old.stage
     when 'observe' then 'learn'
     when 'learn' then 'propose'
@@ -231,10 +260,6 @@ begin
     when 'canary' then 'promote'
     else null
   end;
-
-  if terminal_transition and not lifecycle_unchanged then
-    raise exception 'Evolution run lifecycle state is immutable after terminal status.';
-  end if;
 
   sequential_transition_allowed := (
     old.status = 'running'

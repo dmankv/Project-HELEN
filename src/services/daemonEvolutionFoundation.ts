@@ -906,6 +906,18 @@ function deriveRollbackStatus(run: EvolutionRunRecord | null): RollbackStatus {
   return 'not_needed'
 }
 
+function deriveRecentAuditEvents(run: EvolutionRunRecord | null): AuditEvent[] {
+  if (!run) return []
+  return run.auditEventIds.map(id => ({
+    id,
+    runId: run.runId,
+    type: 'stage_transition',
+    createdAt: run.updatedAt,
+    message: 'Audit event recorded for this run.',
+    metadata: {},
+  }))
+}
+
 export function buildAdminEvolutionStatusModel(input: {
   currentVersion: string
   run?: EvolutionRunRecord | null
@@ -932,6 +944,6 @@ export function buildAdminEvolutionStatusModel(input: {
       apiCalls: 0,
       spendUsd: 0,
     },
-    recentAuditEvents: input.recentAuditEvents ?? [],
+    recentAuditEvents: input.recentAuditEvents ?? deriveRecentAuditEvents(run),
   }
 }

@@ -318,8 +318,6 @@ function parseEvolutionMode(value: string | undefined): EvolutionMode {
 
 function isEvolutionStatusRequest(body: unknown): body is { request_type: 'evolution_status' } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return false
-  const keys = Object.keys(body as Record<string, unknown>)
-  if (keys.length !== 1 || keys[0] !== 'request_type') return false
   const requestType = (body as Record<string, unknown>).request_type
   return requestType === 'evolution_status'
 }

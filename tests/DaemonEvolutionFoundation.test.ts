@@ -647,6 +647,21 @@ describe('admin observability model', () => {
     expect(rolledBack.canaryStatus).toBe('failed')
     expect(rolledBack.rollbackStatus).toBe('completed')
   })
+
+  it('falls back to audit events projected from the active run', () => {
+    const run = {
+      ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+      auditEventIds: ['audit-1', 'audit-2'],
+    }
+    const status = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run,
+    })
+
+    expect(status.recentAuditEvents).toHaveLength(2)
+    expect(status.recentAuditEvents.map(event => event.id)).toEqual(['audit-1', 'audit-2'])
+    expect(status.recentAuditEvents.every(event => event.runId === run.runId)).toBe(true)
+  })
 })
 
 describe('evolution infrastructure adapter creation', () => {
