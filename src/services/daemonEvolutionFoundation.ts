@@ -673,7 +673,7 @@ export interface CanaryAdapter {
 export class DeniedCanaryAdapter implements CanaryAdapter {
   readonly name = 'denied-canary' as const
 
-  deployCanary(): CanaryDecision {
+  deployCanary(_run: EvolutionRunRecord): CanaryDecision {
     return {
       allowed: false,
       status: 'denied',
@@ -681,7 +681,7 @@ export class DeniedCanaryAdapter implements CanaryAdapter {
     }
   }
 
-  promote(): CanaryDecision {
+  promote(_run: EvolutionRunRecord): CanaryDecision {
     return {
       allowed: false,
       status: 'denied',
@@ -689,7 +689,7 @@ export class DeniedCanaryAdapter implements CanaryAdapter {
     }
   }
 
-  rollback(): RollbackStatus {
+  rollback(_run: EvolutionRunRecord): RollbackStatus {
     return 'requested'
   }
 }
@@ -795,7 +795,16 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
     }
   }
 
-  rollback(): RollbackStatus {
+  rollback(run: EvolutionRunRecord): RollbackStatus {
+    const rollbackEligible = (
+      run.status === 'running'
+      && (run.stage === 'canary' || run.stage === 'promote')
+    ) || (
+        run.status === 'succeeded'
+        && run.stage === 'promote'
+        && run.deployedVersion === run.candidateVersion
+      )
+    if (!rollbackEligible) return 'not_needed'
     if (!this.options.enabled) return 'requested'
     return 'completed'
   }

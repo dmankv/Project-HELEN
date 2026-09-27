@@ -424,7 +424,34 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
       allowAutoPromote: true,
     })
 
-    expect(adapter.rollback(createEvolutionRun('candidate-v2', 'v1'))).toBe('requested')
+    const canaryRun = transitionEvolutionStage(
+      transitionEvolutionStage(
+        transitionEvolutionStage(
+          transitionEvolutionStage(
+            transitionEvolutionStage(
+              transitionEvolutionStage(createEvolutionRun('candidate-v2', 'v1'), 'learn'),
+              'propose',
+            ),
+            'write',
+          ),
+          'test',
+        ),
+        'evaluate',
+      ),
+      'canary',
+    )
+
+    expect(adapter.rollback(canaryRun)).toBe('requested')
+  })
+
+  it('configured canary reports rollback as not needed for ineligible runs', () => {
+    const adapter = new ConfiguredCanaryAdapter({
+      enabled: true,
+      backendId: 'immutable-controller',
+      allowAutoPromote: true,
+    })
+
+    expect(adapter.rollback(createEvolutionRun('candidate-v2', 'v1'))).toBe('not_needed')
   })
 
   it('configured canary still denies promotion when immutable gate requires manual approval', () => {
