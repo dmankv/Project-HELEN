@@ -463,7 +463,7 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
     }, 'promote')
     const promoteDecision = adapter.promote(promoteRun)
     expect(promoteDecision.allowed).toBe(true)
-    expect(adapter.rollback(promoteRun)).toBe('completed')
+    expect(adapter.rollback(promoteRun)).toBe('requested')
   })
 
   it('configured canary requests rollback when the backend is disabled', () => {

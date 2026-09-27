@@ -874,8 +874,7 @@ export class ConfiguredCanaryAdapter implements CanaryAdapter {
         && run.deployedVersion === run.candidateVersion
       )
     if (!rollbackEligible) return 'not_needed'
-    if (!this.options.enabled) return 'requested'
-    return 'completed'
+    return 'requested'
   }
 }
 
