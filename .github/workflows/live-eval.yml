@@ -53,6 +53,7 @@ jobs:
 
       - name: Validate live-eval configuration
         id: config
+        continue-on-error: true
         env:
           VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
           DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
@@ -92,6 +93,17 @@ jobs:
             echo "candidate_sha=$DEFAULT_CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
           else
             echo "Promotion-bound attestations require candidate_version, candidate_snapshot_id, run_id, and candidate_sha together."
+            exit 1
+          fi
+
+      - name: Enforce live-eval configuration
+        if: always()
+        env:
+          CONFIG_OUTCOME: ${{ steps.config.outcome }}
+          LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured || 'false' }}
+        run: |
+          if [ "$CONFIG_OUTCOME" != "success" ] || [ "$LIVE_EVAL_CONFIGURED" != "true" ]; then
+            echo "::error::Live evaluation cannot run: required secrets are not configured."
             exit 1
           fi
 
