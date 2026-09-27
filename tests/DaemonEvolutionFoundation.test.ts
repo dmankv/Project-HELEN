@@ -691,6 +691,17 @@ describe('admin observability model', () => {
     })
     const promoteReady = buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
+      run: recordCanaryDecision({
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        stage: 'promote',
+      }, {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }),
+    })
+    const promoteWithoutCanary = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
       run: {
         ...createEvolutionRun('candidate-v2', 'baseline-safe'),
         stage: 'promote',
@@ -707,6 +718,7 @@ describe('admin observability model', () => {
     expect(runningCanary.canaryStatus).toBe('running')
     expect(runningCanary.rollbackStatus).toBe('not_needed')
     expect(promoteReady.canaryStatus).toBe('healthy')
+    expect(promoteWithoutCanary.canaryStatus).toBe('failed')
     expect(rolledBack.canaryStatus).toBe('failed')
     expect(rolledBack.rollbackStatus).toBe('completed')
     expect(buildAdminEvolutionStatusModel({

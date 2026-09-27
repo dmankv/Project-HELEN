@@ -438,6 +438,7 @@ jobs:
               return { status: 'unavailable', detail: 'Live evaluation secrets are not configured.' }
             }
             if (outcome === 'success') return { status: 'passed', detail }
+            if (outcome === 'skipped') return { status: 'unavailable', detail: `${detail} was skipped.` }
             return { status: 'failed', detail: `${detail} failed.` }
           }
 
