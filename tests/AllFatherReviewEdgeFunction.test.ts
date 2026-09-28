@@ -31,6 +31,10 @@ describe('ALL-FATHER review edge function source', () => {
   it('writes append-only audit rows and fails closed when persistence fails', () => {
     expect(src).toContain("from('all_father_reviews')")
     expect(src).toContain('.insert({')
+    expect(src).toContain('const SENSITIVE_FINDING_CODES = new Set')
+    expect(src).toContain("redactProposalDiffForAudit(payload.diff, result.findings)")
+    expect(src).toContain("proposal_diff: proposalDiffForAudit")
+    expect(src).toContain("'[REDACTED_SENSITIVE_PROPOSAL_DIFF]'")
     expect(src).toContain('auditFailureFinding()')
     expect(src).toContain("'AUDIT_WRITE_FAILED'")
     expect(src).toContain("decision: ALL_FATHER_DECISIONS.REQUIRES_HUMAN_REVIEW")

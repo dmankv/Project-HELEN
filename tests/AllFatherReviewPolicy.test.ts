@@ -91,6 +91,28 @@ diff --git a/src/config.ts b/src/config.ts
     expect(removedOnly.decision).toBe(ALL_FATHER_DECISIONS.APPROVED)
   })
 
+  it('scans all-father policy diffs and redacts assignment secrets in excerpts', () => {
+    const result = evaluateAllFatherReview({
+      targetBranch: 'main',
+      changedFiles: ['supabase/functions/_shared/allFatherReviewPolicy.ts'],
+      diff: `
+diff --git a/supabase/functions/_shared/allFatherReviewPolicy.ts b/supabase/functions/_shared/allFatherReviewPolicy.ts
+--- a/supabase/functions/_shared/allFatherReviewPolicy.ts
++++ b/supabase/functions/_shared/allFatherReviewPolicy.ts
+@@ -1 +1,2 @@
++const API_KEY = "abcdefgh"
+`,
+      assurances: assured,
+    })
+
+    const finding = result.findings.find(item => item.code === 'secret_literal_added')
+    expect(result.decision).toBe(ALL_FATHER_DECISIONS.REJECTED)
+    expect(finding).toEqual(expect.objectContaining({
+      path: 'supabase/functions/_shared/allFatherReviewPolicy.ts',
+      excerpt: 'const API_KEY = "[REDACTED_SECRET]"',
+    }))
+  })
+
   it('rejects added auth bypass markers', () => {
     const bypassMarker = ['allow', 'unauthenticated'].join('_')
     const result = evaluateAllFatherReview({

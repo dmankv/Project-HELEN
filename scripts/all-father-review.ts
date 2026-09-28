@@ -67,7 +67,7 @@ function rollbackControlsRemainPresent(): boolean {
 }
 
 function autoHasTests(changedFiles: string[]): boolean {
-  return changedFiles.length > 0 && changedFiles.every(filePath => TEST_FILE_PATTERN.test(filePath))
+  return changedFiles.some(filePath => TEST_FILE_PATTERN.test(filePath))
 }
 
 function main(): number {

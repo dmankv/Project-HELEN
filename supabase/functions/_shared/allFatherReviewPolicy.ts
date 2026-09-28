@@ -69,14 +69,6 @@ export const ALL_FATHER_PROTECTED_PATH_PREFIXES = Object.freeze([
   '.env',
 ] as const)
 
-const POLICY_PATTERN_DEFINITION_MARKERS = new Set([
-  'const SECRET_LITERAL_PATTERNS = [',
-  'const SENSITIVE_DATA_LITERAL_PATTERNS = [',
-  'const AUTH_BYPASS_PATTERNS = [',
-  'const DISABLE_GUARD_PATTERNS = [',
-  'const PRIVILEGED_CONTROL_PLANE_PATTERNS = [',
-])
-
 interface AddedDiffLine {
   path: string | null
   lineNumber: number | null
@@ -181,16 +173,6 @@ export function isAllFatherProtectedPath(filePath: string): boolean {
 
 function shouldSkipDangerousScan(path: string | null, content: string): boolean {
   if (path === 'tests/AllFatherReviewPolicy.test.ts') return true
-  if (path === 'supabase/functions/_shared/allFatherReviewPolicy.ts') {
-    const trimmed = content.trim()
-    return POLICY_PATTERN_DEFINITION_MARKERS.has(trimmed)
-      || trimmed.startsWith('/')
-      || trimmed.startsWith("code: '")
-      || trimmed.startsWith("message: '")
-      || trimmed.startsWith('patterns: ')
-      || trimmed.startsWith('redact: ')
-      || trimmed === '] as const'
-  }
   return false
 }
 
@@ -201,6 +183,7 @@ function redactExcerpt(line: string): string {
     .replace(/\b(?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{16,}\b/gi, '[REDACTED_API_KEY]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, '******')
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_JWT]')
+    .replace(/\b((?:SUPABASE_SERVICE_ROLE_KEY|SERVICE_ROLE_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|PASSWORD|SECRET(?:_KEY)?)\s*[:=]\s*['"])[^'"\n]{8,}(['"])/gi, '$1[REDACTED_SECRET]$2')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/\b(?:postgres(?:ql)?|mysql|amqps?):\/\/[^:\s]+:[^@\s]+@/gi, '[REDACTED_CONNECTION]@')
 }

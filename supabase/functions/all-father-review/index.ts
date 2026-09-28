@@ -153,6 +153,17 @@ function auditFailureFinding(): AllFatherReviewFinding {
   }
 }
 
+const SENSITIVE_FINDING_CODES = new Set<AllFatherReviewFinding['code']>([
+  'secret_literal_added',
+  'sensitive_data_literal_added',
+])
+
+function redactProposalDiffForAudit(diff: string, findings: readonly AllFatherReviewFinding[]): string {
+  return findings.some(finding => SENSITIVE_FINDING_CODES.has(finding.code))
+    ? '[REDACTED_SENSITIVE_PROPOSAL_DIFF]'
+    : diff
+}
+
 Deno.serve(async (req: Request) => {
   const allowedOrigin = getAllowedOrigin(req.headers.get('origin'))
   if (req.method === 'OPTIONS') {
@@ -210,6 +221,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const result = evaluateAllFatherReview(payload)
+  const proposalDiffForAudit = redactProposalDiffForAudit(payload.diff, result.findings)
 
   const { error: insertError } = await serviceClient
     .from('all_father_reviews')
@@ -218,7 +230,7 @@ Deno.serve(async (req: Request) => {
       target_branch: payload.targetBranch,
       decision: result.decision,
       changed_files: payload.changedFiles,
-      proposal_diff: payload.diff,
+      proposal_diff: proposalDiffForAudit,
       findings: result.findings,
       has_tests: result.assurances.hasTests,
       security_assured: result.assurances.securityAssured,

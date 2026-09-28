@@ -6,6 +6,13 @@
 /.github/workflows/supabase-functions.yml @dmankv
 /scripts/all-father-review.ts @dmankv
 /src/services/allFatherReviewPolicy.ts @dmankv
+/src/services/adminDaemon* @dmankv
+/src/services/daemonAuth* @dmankv
+/src/services/daemonEvolutionFoundation.ts @dmankv
+/src/services/daemonStorageMigration.ts @dmankv
+/src/services/supabaseAuth* @dmankv
+/src/services/supabasePersistence.ts @dmankv
+/src/services/supabaseProjectAccess.ts @dmankv
 /supabase/functions/_shared/allFatherReviewPolicy.ts @dmankv
 /supabase/functions/admin-daemon/ @dmankv
 /supabase/functions/all-father-review/ @dmankv
