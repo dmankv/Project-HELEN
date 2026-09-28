@@ -112,6 +112,38 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain('BAD_REQUEST')
   })
 
+  it('supports admin-only evolution_status diagnostics without exposing secrets', () => {
+    expect(src).toContain("request_type")
+    expect(src).toContain("evolution_status")
+    expect(src).toContain("buildEvolutionInfrastructureStatus")
+    expect(src).toContain("from('evolution_runs')")
+    expect(src).toContain("from('evolution_gate_results')")
+    expect(src).toContain("from('evolution_audit_events')")
+    expect(src).toContain("await buildEvolutionStatusResponse(serviceClient, user.id, supabaseUrl)")
+    expect(src).toContain("sandbox_mode")
+    expect(src).toContain("canary_mode")
+    expect(src).not.toContain("DAEMON_EVOLUTION_BACKEND_TOKEN")
+
+    const verifyAdminIndex = src.indexOf('const isAdmin = await verifyAdmin(')
+    const evolutionStatusIndex = src.indexOf('if (isEvolutionStatusRequest(body))')
+    const validateMessagesIndex = src.indexOf('const validation = validateMessages(body)')
+    expect(verifyAdminIndex).toBeGreaterThan(-1)
+    expect(evolutionStatusIndex).toBeGreaterThan(-1)
+    expect(validateMessagesIndex).toBeGreaterThan(-1)
+    expect(verifyAdminIndex).toBeLessThan(evolutionStatusIndex)
+    expect(evolutionStatusIndex).toBeLessThan(validateMessagesIndex)
+    expect(src).toContain("logAudit('admin_evolution_status'")
+  })
+
+  it('surfaces explicit diagnostics availability states instead of masking query failures', () => {
+    expect(src).toContain("evolutionStatus: 'available'")
+    expect(src).toContain("evolutionStatus: 'unavailable'")
+    expect(src).toContain("evolutionStatus: 'error'")
+    expect(src).toContain('const { data: run, error: runError } = await serviceClient')
+    expect(src).toContain('if (runError) {')
+    expect(src).toContain('gateResultsError || recentAuditEventsError || latestCanaryDecisionError || latestBudgetCheckError')
+  })
+
   it('validates strategy against explicit allowlist', () => {
     expect(src).toContain('ALLOWED_STRATEGIES')
     expect(src).toContain('validateStrategyMetadata(')

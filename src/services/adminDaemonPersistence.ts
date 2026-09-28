@@ -17,6 +17,9 @@
 
 import { createClient } from '@supabase/supabase-js'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import {
+  type AdminEvolutionStatusModel,
+} from './daemonEvolutionFoundation'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -282,6 +285,8 @@ export interface AdminDiagnosticsStatus {
   persistenceConfigured: boolean
   sessionActive: boolean
   supabaseUrl: string
+  evolution: AdminEvolutionStatusModel | null
+  evolutionStatus: 'available' | 'unavailable' | 'error'
 }
 
 export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatus> {
@@ -301,5 +306,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
     persistenceConfigured: configured,
     sessionActive,
     supabaseUrl: urlHost,
+    evolution: null,
+    evolutionStatus: 'unavailable',
   }
 }

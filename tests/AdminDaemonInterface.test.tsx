@@ -18,6 +18,25 @@ const {
       persistenceConfigured: true,
       sessionActive: true,
       supabaseUrl: 'example.supabase.co',
+      evolution: {
+        currentVersion: 'baseline-safe',
+        runState: 'idle',
+        stage: 'idle',
+        candidateVersion: null,
+        candidateSnapshotId: null,
+        gateResults: [],
+        canaryStatus: 'not_started',
+        rollbackStatus: 'not_needed',
+        budgetUsage: {
+          runtimeMs: 0,
+          cpuMs: 0,
+          memoryMb: 0,
+          apiCalls: 0,
+          spendUsd: 0,
+        },
+        recentAuditEvents: [],
+      },
+      evolutionStatus: 'unavailable' as const,
     })),
     insertAdminMessage: vi.fn(async () => true),
     listAdminConversations: vi.fn(async () => []),
@@ -81,6 +100,25 @@ describe('AdminDaemonInterface', () => {
       persistenceConfigured: true,
       sessionActive: true,
       supabaseUrl: 'example.supabase.co',
+      evolution: {
+        currentVersion: 'baseline-safe',
+        runState: 'idle',
+        stage: 'idle',
+        candidateVersion: null,
+        candidateSnapshotId: null,
+        gateResults: [],
+        canaryStatus: 'not_started',
+        rollbackStatus: 'not_needed',
+        budgetUsage: {
+          runtimeMs: 0,
+          cpuMs: 0,
+          memoryMb: 0,
+          apiCalls: 0,
+          spendUsd: 0,
+        },
+        recentAuditEvents: [],
+      },
+      evolutionStatus: 'unavailable' as const,
     })
     persistenceMocks.insertAdminMessage.mockResolvedValue(true)
     persistenceMocks.listAdminConversations.mockResolvedValue([])
@@ -184,6 +222,9 @@ describe('AdminDaemonInterface', () => {
     const diagnostics = await screen.findByRole('region', { name: 'Admin diagnostics' })
     expect(diagnostics).toHaveClass('admin-daemon-diagnostics-panel')
     expect(diagnostics).not.toHaveAttribute('style')
+    expect(diagnostics.querySelector('.admin-diagnostics-list')).not.toHaveAttribute('aria-live')
+    expect(screen.getByText(/Evolution update: run idle, stage idle, canary not_started, rollback not_needed\./i))
+      .not.toHaveAttribute('aria-live')
   })
 
   it('keeps admin identity labeling visible and accessible across sidebar and header', async () => {

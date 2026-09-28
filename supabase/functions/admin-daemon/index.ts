@@ -44,6 +44,11 @@ interface ChatMessage {
   content: string
 }
 
+type EvolutionMode = 'denied' | 'configured'
+type GateStatus = 'passed' | 'failed' | 'unavailable' | 'skipped'
+type CanaryStatus = 'not_started' | 'denied' | 'running' | 'healthy' | 'failed'
+type RollbackStatus = 'not_needed' | 'requested' | 'completed'
+
 const ALLOWED_STRATEGIES = [
   'direct-answer',
   'clarify-first',
@@ -310,6 +315,307 @@ function validateStrategyMetadata(body: unknown): {
   return { valid: true, strategy: parsedStrategy, contextKey: parsedContextKey, interactionId: parsedInteractionId }
 }
 
+function parseEvolutionMode(value: string | undefined): EvolutionMode {
+  return value?.toLowerCase() === 'configured' ? 'configured' : 'denied'
+}
+
+function isEvolutionStatusRequest(body: unknown): body is Record<string, unknown> & { request_type: 'evolution_status' } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  const requestType = (body as Record<string, unknown>).request_type
+  return requestType === 'evolution_status'
+}
+
+function buildEvolutionInfrastructureStatus(): {
+  sandbox_mode: EvolutionMode
+  canary_mode: EvolutionMode
+  backend_id_configured: boolean
+  auto_promote_enabled: boolean
+  max_file_bytes: number
+} {
+  const sandboxMode = parseEvolutionMode(Deno.env.get('DAEMON_EVOLUTION_SANDBOX_MODE') ?? undefined)
+  const canaryMode = parseEvolutionMode(Deno.env.get('DAEMON_EVOLUTION_CANARY_MODE') ?? undefined)
+  const backendId = (Deno.env.get('DAEMON_EVOLUTION_BACKEND_ID') ?? '').trim()
+  const parsedMaxFileBytes = Number(Deno.env.get('DAEMON_EVOLUTION_MAX_FILE_BYTES') ?? '16384')
+  const maxFileBytes = Number.isFinite(parsedMaxFileBytes) && parsedMaxFileBytes > 0
+    ? Math.floor(parsedMaxFileBytes)
+    : 16_384
+  const autoPromoteEnabled = (Deno.env.get('DAEMON_EVOLUTION_ALLOW_AUTO_PROMOTE') ?? '').toLowerCase() === 'true'
+
+  return {
+    sandbox_mode: sandboxMode,
+    canary_mode: canaryMode,
+    backend_id_configured: backendId.length > 0,
+    auto_promote_enabled: autoPromoteEnabled,
+    max_file_bytes: maxFileBytes,
+  }
+}
+
+interface EvolutionStatusResponse {
+  request_type: 'evolution_status'
+  persistenceConfigured: boolean
+  sessionActive: boolean
+  supabaseUrl: string
+  evolutionStatus: 'available' | 'unavailable' | 'error'
+  evolution: {
+    currentVersion: string
+    runState: string
+    stage: string
+    candidateVersion: string | null
+    candidateSnapshotId: string | null
+    gateResults: Array<{
+      gate: string
+      status: GateStatus
+      detail: string
+      durationMs: number
+      required: boolean
+    }>
+    canaryStatus: CanaryStatus
+    rollbackStatus: RollbackStatus
+    budgetUsage: {
+      runtimeMs: number
+      cpuMs: number
+      memoryMb: number
+      apiCalls: number
+      spendUsd: number
+    }
+    recentAuditEvents: Array<{
+      id: string
+      runId: string | null
+      type: string
+      createdAt: string
+      message: string
+      metadata: Record<string, string | number | boolean | null>
+    }>
+  } | null
+  infrastructure: ReturnType<typeof buildEvolutionInfrastructureStatus>
+}
+
+function getSupabaseHost(url: string): string {
+  try {
+    return url ? new URL(url).hostname : ''
+  } catch {
+    return ''
+  }
+}
+
+function getMetadataString(
+  metadata: Record<string, string | number | boolean | null> | null | undefined,
+  camelKey: string,
+  snakeKey: string,
+): string | null {
+  const value = metadata?.[camelKey] ?? metadata?.[snakeKey]
+  return typeof value === 'string' ? value : null
+}
+
+function getMetadataBoolean(
+  metadata: Record<string, string | number | boolean | null> | null | undefined,
+  camelKey: string,
+  snakeKey: string,
+): boolean | null {
+  const value = metadata?.[camelKey] ?? metadata?.[snakeKey]
+  if (typeof value === 'boolean') return value
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return null
+}
+
+function getMetadataNumber(
+  metadata: Record<string, string | number | boolean | null> | null | undefined,
+  camelKey: string,
+  snakeKey: string,
+): number {
+  const value = metadata?.[camelKey] ?? metadata?.[snakeKey]
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+function derivePersistedCanaryStatus(
+  run: { stage: string; status: string },
+  latestCanaryDecision: {
+    status: string | null
+    allowed: boolean | null
+    runId: string | null
+    candidateSnapshotId: string | null
+    candidateVersion: string | null
+  } | null,
+  expectedBinding: {
+    runId: string
+    candidateSnapshotId: string
+    candidateVersion: string
+  },
+): CanaryStatus {
+  const hasHealthyBoundDecision = latestCanaryDecision?.allowed === true
+    && latestCanaryDecision.status === 'healthy'
+    && latestCanaryDecision.runId === expectedBinding.runId
+    && latestCanaryDecision.candidateSnapshotId === expectedBinding.candidateSnapshotId
+    && latestCanaryDecision.candidateVersion === expectedBinding.candidateVersion
+
+  if (run.status === 'failed' || run.status === 'denied' || run.status === 'timed_out') return 'failed'
+  if (hasHealthyBoundDecision) return 'healthy'
+  if (run.stage === 'rollback' || run.status === 'rolled_back') {
+    if (latestCanaryDecision?.status === 'healthy') return 'failed'
+    if (latestCanaryDecision?.status === 'failed') return 'failed'
+    if (latestCanaryDecision?.status === 'denied') return 'denied'
+    return 'not_started'
+  }
+  if (run.stage === 'promote') return 'failed'
+  if (run.stage === 'canary') {
+    if (latestCanaryDecision?.status === 'failed') return 'failed'
+    if (latestCanaryDecision?.status === 'denied') return 'denied'
+    return run.status === 'running' ? 'running' : 'failed'
+  }
+  return 'not_started'
+}
+
+async function buildEvolutionStatusResponse(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+  supabaseUrl: string,
+): Promise<EvolutionStatusResponse> {
+  const infrastructure = buildEvolutionInfrastructureStatus()
+  const supabaseHost = getSupabaseHost(supabaseUrl)
+  const { data: run, error: runError } = await serviceClient
+    .from('evolution_runs')
+    .select('run_id, candidate_version, candidate_snapshot_id, deployed_version, stage, status')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (runError) {
+    return {
+      request_type: 'evolution_status',
+      persistenceConfigured: true,
+      sessionActive: true,
+      supabaseUrl: supabaseHost,
+      evolutionStatus: 'error',
+      evolution: null,
+      infrastructure,
+    }
+  }
+
+  if (!run) {
+    return {
+      request_type: 'evolution_status',
+      persistenceConfigured: true,
+      sessionActive: true,
+      supabaseUrl: supabaseHost,
+      evolutionStatus: 'unavailable',
+      evolution: null,
+      infrastructure,
+    }
+  }
+
+  const [
+    { data: gateResults, error: gateResultsError },
+    { data: recentAuditEvents, error: recentAuditEventsError },
+    { data: latestCanaryDecision, error: latestCanaryDecisionError },
+    { data: latestBudgetCheck, error: latestBudgetCheckError },
+  ] = await Promise.all([
+    serviceClient
+      .from('evolution_gate_results')
+      .select('gate, status, detail, duration_ms, required')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true }),
+    serviceClient
+      .from('evolution_audit_events')
+      .select('event_id, run_id, event_type, message, created_at, metadata')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(20),
+    serviceClient
+      .from('evolution_audit_events')
+      .select('metadata')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .eq('event_type', 'canary_decision')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    serviceClient
+      .from('evolution_audit_events')
+      .select('metadata')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .eq('event_type', 'budget_check')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  if (gateResultsError || recentAuditEventsError || latestCanaryDecisionError || latestBudgetCheckError) {
+    return {
+      request_type: 'evolution_status',
+      persistenceConfigured: true,
+      sessionActive: true,
+      supabaseUrl: supabaseHost,
+      evolutionStatus: 'error',
+      evolution: null,
+      infrastructure,
+    }
+  }
+
+  return {
+    request_type: 'evolution_status',
+    persistenceConfigured: true,
+    sessionActive: true,
+    supabaseUrl: supabaseHost,
+    evolutionStatus: 'available',
+    evolution: {
+      currentVersion: run.deployed_version,
+      runState: run.status,
+      stage: run.stage,
+      candidateVersion: run.candidate_version,
+      candidateSnapshotId: run.candidate_snapshot_id,
+      gateResults: (gateResults ?? []).map(result => ({
+        gate: result.gate,
+        status: result.status as GateStatus,
+        detail: result.detail,
+        durationMs: result.duration_ms,
+        required: result.required,
+      })),
+      canaryStatus: derivePersistedCanaryStatus(run, {
+        status: getMetadataString(latestCanaryDecision?.metadata, 'status', 'status'),
+        allowed: getMetadataBoolean(latestCanaryDecision?.metadata, 'allowed', 'allowed'),
+        runId: getMetadataString(latestCanaryDecision?.metadata, 'runId', 'run_id'),
+        candidateSnapshotId: getMetadataString(latestCanaryDecision?.metadata, 'candidateSnapshotId', 'candidate_snapshot_id'),
+        candidateVersion: getMetadataString(latestCanaryDecision?.metadata, 'candidateVersion', 'candidate_version'),
+      }, {
+        runId: run.run_id,
+        candidateSnapshotId: run.candidate_snapshot_id,
+        candidateVersion: run.candidate_version,
+      }),
+      rollbackStatus: run.status === 'rolled_back'
+        ? 'completed'
+        : run.stage === 'rollback'
+          ? 'requested'
+          : 'not_needed',
+      budgetUsage: {
+        runtimeMs: getMetadataNumber(latestBudgetCheck?.metadata, 'runtimeMs', 'runtime_ms'),
+        cpuMs: getMetadataNumber(latestBudgetCheck?.metadata, 'cpuMs', 'cpu_ms'),
+        memoryMb: getMetadataNumber(latestBudgetCheck?.metadata, 'memoryMb', 'memory_mb'),
+        apiCalls: getMetadataNumber(latestBudgetCheck?.metadata, 'apiCalls', 'api_calls'),
+        spendUsd: getMetadataNumber(latestBudgetCheck?.metadata, 'spendUsd', 'spend_usd'),
+      },
+      recentAuditEvents: (recentAuditEvents ?? []).slice().reverse().map(event => ({
+        id: event.event_id,
+        runId: event.run_id,
+        type: event.event_type,
+        createdAt: event.created_at,
+        message: event.message,
+        metadata: event.metadata ?? {},
+      })),
+    },
+    infrastructure,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AI provider call
 // ---------------------------------------------------------------------------
@@ -469,6 +775,17 @@ Deno.serve(async (req: Request) => {
     body = await req.json()
   } catch {
     return jsonErrorResponse('BAD_REQUEST', 400, headers)
+  }
+
+  if (isEvolutionStatusRequest(body)) {
+    logAudit('admin_evolution_status', { user_id: user.id })
+    return new Response(
+      JSON.stringify(await buildEvolutionStatusResponse(serviceClient, user.id, supabaseUrl)),
+      {
+        status: 200,
+        headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },
+      },
+    )
   }
 
   const validation = validateMessages(body)

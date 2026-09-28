@@ -167,3 +167,62 @@ describe('Supabase adaptive profiles migration', () => {
     expect(normalizedSql.match(/set search_path = public/g)?.length).toBe(2)
   })
 })
+
+const evolutionInfrastructureMigrationPath = path.resolve(
+  process.cwd(),
+  'supabase/migrations/20260926221000_evolution_infrastructure.sql',
+)
+
+describe('Evolution infrastructure migration', () => {
+  const rawSql = fs.readFileSync(evolutionInfrastructureMigrationPath, 'utf8')
+  const normalizedSql = rawSql.toLowerCase()
+
+  it('keeps promotion and rollback finalization on provider-side privileged paths', () => {
+    expect(rawSql).toMatch(/auth\.role\(\)\s*(?:=\s*'service_role'|in\s*\(\s*'service_role'\s*(?:,\s*'supabase_admin'\s*)?\))/i)
+    expect(rawSql).toMatch(/session_user\s+in\s+\('postgres',\s*'supabase_admin'\)/i)
+    expect(rawSql).toMatch(/Only provider-side privileged context can finalize promotion or rollback evolution runs\./i)
+  })
+
+  it('reserves control-plane audit events for service_role and blocks browser clients from forging them', () => {
+    expect(normalizedSql).toContain("event_type not in ('canary_decision', 'rollback_triggered', 'rollback_completed', 'run_finished')")
+    expect(normalizedSql).toContain("event_type in ('canary_decision', 'rollback_triggered', 'rollback_completed', 'run_finished')")
+    expect(normalizedSql).toContain('to service_role')
+  })
+
+  it('requires backend rollback and run-finished attestations bound to the run identity', () => {
+    expect(normalizedSql).toContain("event.event_type = 'run_finished'")
+    expect(normalizedSql).toContain("event.event_type = 'rollback_completed'")
+    expect(normalizedSql).toContain("old.status is distinct from new.status")
+    expect(normalizedSql).toContain("metadata ->> 'candidateversion' = old.candidate_version")
+    expect(normalizedSql).toContain("metadata ->> 'targetdeployedversion' = old.last_known_good")
+    expect(normalizedSql).toContain("if promotion_finalization_requested")
+    expect(normalizedSql).toContain("if rollback_finalization_requested")
+    expect(normalizedSql).toContain(") and privileged_control_plane_actor")
+    expect(normalizedSql).toContain("and rollback_attestation_present")
+  })
+})
+
+const liveEvalWorkflowPath = path.resolve(
+  process.cwd(),
+  '.github/workflows/live-eval.yml',
+)
+
+describe('Live eval workflow', () => {
+  const workflow = fs.readFileSync(liveEvalWorkflowPath, 'utf8')
+
+  it('checks out promotion-bound candidate code before restoring trusted unit gate files', () => {
+    expect(workflow).toContain('Promotion-bound unit gate requires candidate_version, candidate_snapshot_id, run_id, and candidate_sha together.')
+    expect(workflow).toContain('git fetch --no-tags origin "$CANDIDATE_SHA"')
+    expect(workflow).toContain('git checkout --detach "$CANDIDATE_SHA"')
+    expect(workflow).toContain('Promotion-bound unit gate must run from the protected default branch workflow ref.')
+    expect(workflow).toContain('TRUSTED_WORKFLOW_SHA: ${{ github.sha }}')
+    expect(workflow).toContain('TRUSTED_WORKFLOW_SHA: ${{ steps.binding.outputs.workflow_sha }}')
+    expect(workflow).toContain('git fetch --no-tags origin "$TRUSTED_WORKFLOW_SHA"')
+    expect(workflow).toContain('TRUSTED_REF="$TRUSTED_WORKFLOW_SHA"')
+    expect(workflow).toContain('Validate promotion-bound candidate scope')
+    expect(workflow).toContain("const changedPaths = execGit(['diff', '--name-only', '--no-renames', trustedWorkflowSha, candidateSha])")
+    expect(workflow).toContain("const violations = changedPaths.filter((path) => classifyPath(path) !== 'write_sandbox')")
+    expect(workflow).toContain('Promotion-bound candidate diff violates immutable sandbox policy:')
+    expect(workflow).toContain("if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'")
+  })
+})

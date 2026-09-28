@@ -1,21 +1,188 @@
 name: Live Evaluation
+run-name: >-
+  ${{
+    inputs.run_id != ''
+      && format(
+        'Live Evaluation {0} {1} {2}',
+        inputs.candidate_version,
+        inputs.candidate_snapshot_id,
+        inputs.run_id
+      )
+      || format('Live Evaluation {0}', github.sha)
+  }}
 
 on:
   schedule:
     - cron: '0 7 * * *'
   workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Candidate version identifier for promotion-bound attestations
+        required: false
+        type: string
+      candidate_snapshot_id:
+        description: Candidate snapshot UUID for promotion-bound attestations
+        required: false
+        type: string
+      run_id:
+        description: Evolution run UUID for promotion-bound attestations
+        required: false
+        type: string
+      candidate_sha:
+        description: Candidate commit SHA for promotion-bound attestations
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  unit-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Restore trusted gate control-plane files and baseline unit tests
+        env:
+          CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
+          CANDIDATE_SNAPSHOT_ID: ${{ github.event.inputs.candidate_snapshot_id || '' }}
+          EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CURRENT_REF_NAME: ${{ github.ref_name }}
+          TRUSTED_WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          UUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          if [ -n "$CANDIDATE_VERSION" ] && [ -n "$CANDIDATE_SNAPSHOT_ID" ] && [ -n "$EVOLUTION_RUN_ID" ] && [ -n "$CANDIDATE_SHA" ]; then
+            printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq "$UUID_PATTERN"
+            printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq "$UUID_PATTERN"
+            printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'
+            if [ "$CURRENT_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+              echo "Promotion-bound unit gate must run from the protected default branch workflow ref."
+              exit 1
+            fi
+            git fetch --no-tags origin "$TRUSTED_WORKFLOW_SHA"
+            git fetch --no-tags origin "$CANDIDATE_SHA"
+            CANDIDATE_SHA="$CANDIDATE_SHA" TRUSTED_WORKFLOW_SHA="$TRUSTED_WORKFLOW_SHA" node <<'NODE'
+            const { execFileSync } = require('node:child_process')
+
+            const candidateSha = process.env.CANDIDATE_SHA
+            const trustedWorkflowSha = process.env.TRUSTED_WORKFLOW_SHA
+            const protectedPaths = [
+              '.github/workflows/',
+              'supabase/migrations/',
+              'supabase/functions/',
+              'src/App.tsx',
+              'src/components/AdminDaemonInterface.tsx',
+              'src/components/LoginView.tsx',
+              'src/components/SupabaseProjectAccessPanel.tsx',
+              'src/services/adminDaemon',
+              'src/services/adminDaemonPersistence.ts',
+              'src/services/daemonAuth',
+              'src/services/daemonAuthAPI.ts',
+              'src/services/daemonEvolutionFoundation.ts',
+              'src/services/daemonStorageMigration.ts',
+              'src/main.tsx',
+              'src/services/supabaseAuth',
+              'src/services/supabaseAuthAPI.ts',
+              'src/services/supabasePersistence.ts',
+              'src/services/supabaseProjectAccess.ts',
+              '.env',
+            ]
+            const writableAllowlist = [/^(?!.*(?:^|\/)\.\.(?:\/|$))(?:src\/experimental|tests?|docs?)\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/]
+
+            function execGit(args) {
+              return execFileSync('git', args, { encoding: 'utf8' })
+            }
+
+            function isProtectedPath(normalizedPath) {
+              return protectedPaths.some((prefix) => (
+                prefix === '.env'
+                  ? normalizedPath === prefix || normalizedPath.startsWith(`${prefix}.`)
+                  : prefix.endsWith('/')
+                    ? normalizedPath.startsWith(prefix)
+                    : normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+              ))
+            }
+
+            function isWritableSandboxPath(normalizedPath) {
+              return writableAllowlist.some((pattern) => pattern.test(normalizedPath))
+            }
+
+            function classifyPath(rawPath) {
+              const normalizedPath = rawPath.trim().replace(/\\/g, '/').replace(/^\.\//, '')
+              const isUnsafePath = normalizedPath.length === 0
+                || /^\s|\s$/.test(normalizedPath)
+                || /\s/.test(normalizedPath)
+                || /(?:^|\/)\.\.(?:\/|$)/.test(normalizedPath)
+                || normalizedPath.startsWith('/')
+                || /^[a-zA-Z]:\//.test(normalizedPath)
+                || normalizedPath.split('/').some((segment) => (
+                  segment.length === 0 || segment === '.' || segment === '..'
+                ))
+
+              if (isUnsafePath) {
+                return 'change_control_plane_policy'
+              }
+              if (isProtectedPath(normalizedPath)) {
+                return 'protected'
+              }
+              if (isWritableSandboxPath(normalizedPath)) {
+                return 'write_sandbox'
+              }
+              return 'change_control_plane_policy'
+            }
+
+            const changedPaths = execGit(['diff', '--name-only', '--no-renames', trustedWorkflowSha, candidateSha])
+              .split('\n')
+              .map((path) => path.trim())
+              .filter(Boolean)
+
+            const violations = changedPaths.filter((path) => classifyPath(path) !== 'write_sandbox')
+            if (violations.length > 0) {
+              console.error('Promotion-bound candidate diff violates immutable sandbox policy:')
+              for (const path of violations) {
+                console.error(` - ${path}`)
+              }
+              process.exit(1)
+            }
+            NODE
+            git checkout --detach "$CANDIDATE_SHA"
+          elif [ -n "$CANDIDATE_VERSION" ] || [ -n "$CANDIDATE_SNAPSHOT_ID" ] || [ -n "$EVOLUTION_RUN_ID" ] || [ -n "$CANDIDATE_SHA" ]; then
+            echo "Promotion-bound unit gate requires candidate_version, candidate_snapshot_id, run_id, and candidate_sha together."
+            exit 1
+          fi
+          git fetch --no-tags origin "$TRUSTED_WORKFLOW_SHA"
+          TRUSTED_REF="$TRUSTED_WORKFLOW_SHA"
+          git checkout "$TRUSTED_REF" -- \
+            package.json \
+            package-lock.json \
+            tsconfig.json \
+            tsconfig.test.json \
+            vite.config.ts \
+            tests
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run trusted baseline unit gate
+        run: node_modules/.bin/vitest run
+
   live-eval:
+    needs: unit-gate
+    if: needs.unit-gate.result == 'success'
     runs-on: ubuntu-latest
     env:
       DAEMON_EVAL_LIVE: 'true'
-      VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
-      DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
-      DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,18 +195,721 @@ jobs:
 
       - name: Validate live-eval configuration
         id: config
+        env:
+          VITE_DAEMON_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
+          DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
         run: |
           if [ -z "${VITE_DAEMON_API_URL}" ] || [ -z "${DAEMON_EVAL_API_TOKEN}" ] || [ -z "${DAEMON_EVAL_ORIGIN}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping live evaluation: required secrets are not configured."
+            echo "::error::Live evaluation cannot run: required secrets are not configured."
+            exit 1
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve promotion binding identifiers
+        id: binding
+        if: always()
+        env:
+          CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
+          CANDIDATE_SNAPSHOT_ID: ${{ github.event.inputs.candidate_snapshot_id || '' }}
+          EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
+          CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CURRENT_REF_NAME: ${{ github.ref_name }}
+          TRUSTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          DEFAULT_CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          UUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          echo "workflow_ref=$TRUSTED_WORKFLOW_REF" >> "$GITHUB_OUTPUT"
+          echo "workflow_sha=$DEFAULT_CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          if [ -n "$CANDIDATE_VERSION" ] && [ -n "$CANDIDATE_SNAPSHOT_ID" ] && [ -n "$EVOLUTION_RUN_ID" ] && [ -n "$CANDIDATE_SHA" ]; then
+            printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq "$UUID_PATTERN"
+            printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq "$UUID_PATTERN"
+            printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'
+            if [ "$CURRENT_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+              echo "Promotion-bound evaluation must run from the protected default branch workflow ref."
+              exit 1
+            fi
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          elif [ -z "$CANDIDATE_VERSION" ] && [ -z "$CANDIDATE_SNAPSHOT_ID" ] && [ -z "$EVOLUTION_RUN_ID" ] && [ -z "$CANDIDATE_SHA" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "candidate_sha=$DEFAULT_CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "Promotion-bound attestations require candidate_version, candidate_snapshot_id, run_id, and candidate_sha together."
+            exit 1
+          fi
+
+      - name: Validate promotion-bound candidate scope
+        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
+        env:
+          CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
+          TRUSTED_WORKFLOW_SHA: ${{ steps.binding.outputs.workflow_sha }}
+        run: |
+          git fetch --no-tags origin "$CANDIDATE_SHA"
+          CANDIDATE_SHA="$CANDIDATE_SHA" TRUSTED_WORKFLOW_SHA="$TRUSTED_WORKFLOW_SHA" node <<'NODE'
+          const { execFileSync } = require('node:child_process')
+
+          const candidateSha = process.env.CANDIDATE_SHA
+          const trustedWorkflowSha = process.env.TRUSTED_WORKFLOW_SHA
+          const protectedPaths = [
+            '.github/workflows/',
+            'supabase/migrations/',
+            'supabase/functions/',
+            'src/App.tsx',
+            'src/components/AdminDaemonInterface.tsx',
+            'src/components/LoginView.tsx',
+            'src/components/SupabaseProjectAccessPanel.tsx',
+            'src/services/adminDaemon',
+            'src/services/adminDaemonPersistence.ts',
+            'src/services/daemonAuth',
+            'src/services/daemonAuthAPI.ts',
+            'src/services/daemonEvolutionFoundation.ts',
+            'src/services/daemonStorageMigration.ts',
+            'src/main.tsx',
+            'src/services/supabaseAuth',
+            'src/services/supabaseAuthAPI.ts',
+            'src/services/supabasePersistence.ts',
+            'src/services/supabaseProjectAccess.ts',
+            '.env',
+          ]
+          const writableAllowlist = [/^(?!.*(?:^|\/)\.\.(?:\/|$))(?:src\/experimental|tests?|docs?)\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/]
+
+          function execGit(args) {
+            return execFileSync('git', args, { encoding: 'utf8' })
+          }
+
+          function isProtectedPath(normalizedPath) {
+            return protectedPaths.some((prefix) => (
+              prefix === '.env'
+                ? normalizedPath === prefix || normalizedPath.startsWith(`${prefix}.`)
+                : prefix.endsWith('/')
+                  ? normalizedPath.startsWith(prefix)
+                  : normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+            ))
+          }
+
+          function isWritableSandboxPath(normalizedPath) {
+            return writableAllowlist.some((pattern) => pattern.test(normalizedPath))
+          }
+
+          function classifyPath(rawPath) {
+            const normalizedPath = rawPath.trim().replace(/\\/g, '/').replace(/^\.\//, '')
+            const isUnsafePath = normalizedPath.length === 0
+              || /^\s|\s$/.test(normalizedPath)
+              || /\s/.test(normalizedPath)
+              || /(?:^|\/)\.\.(?:\/|$)/.test(normalizedPath)
+              || normalizedPath.startsWith('/')
+              || /^[a-zA-Z]:\//.test(normalizedPath)
+              || normalizedPath.split('/').some((segment) => (
+                segment.length === 0 || segment === '.' || segment === '..'
+              ))
+
+            if (isUnsafePath) {
+              return 'change_control_plane_policy'
+            }
+            if (isProtectedPath(normalizedPath)) {
+              return 'protected'
+            }
+            if (isWritableSandboxPath(normalizedPath)) {
+              return 'write_sandbox'
+            }
+            return 'change_control_plane_policy'
+          }
+
+          const changedPaths = execGit(['diff', '--name-only', '--no-renames', trustedWorkflowSha, candidateSha])
+            .split('\n')
+            .map((path) => path.trim())
+            .filter(Boolean)
+
+          const violations = changedPaths.filter((path) => classifyPath(path) !== 'write_sandbox')
+          if (violations.length > 0) {
+            console.error('Promotion-bound candidate diff violates immutable sandbox policy:')
+            for (const path of violations) {
+              console.error(` - ${path}`)
+            }
+            process.exit(1)
+          }
+          NODE
+
+      - name: Restore trusted gate control-plane files
+        env:
+          BINDING_READY: ${{ steps.binding.outputs.ready }}
+          CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
+          TRUSTED_WORKFLOW_SHA: ${{ steps.binding.outputs.workflow_sha }}
+        run: |
+          if [ "$BINDING_READY" = "true" ]; then
+            git fetch --no-tags origin "$CANDIDATE_SHA"
+            git checkout --detach "$CANDIDATE_SHA"
+          fi
+          git fetch --no-tags origin "$TRUSTED_WORKFLOW_SHA"
+          TRUSTED_REF="$TRUSTED_WORKFLOW_SHA"
+          git checkout "$TRUSTED_REF" -- \
+            package.json \
+            package-lock.json \
+            eslint.config.js \
+            tsconfig.json \
+            tsconfig.cli.json \
+            tsconfig.node.json \
+            tsconfig.test.json \
+            vite.config.ts \
+            server/package.json \
+            server/tsconfig.json \
+            tests/daemon-eval.mjs
+
       - name: Install dependencies
-        if: steps.config.outputs.configured == 'true'
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      - name: Capture trusted gate workspace snapshot
+        id: workspace_snapshot
+        run: |
+          SNAPSHOT_PATH="$(mktemp /tmp/live-eval-workspace.XXXXXX.tar)"
+          tar --exclude='./.git' -cf "$SNAPSHOT_PATH" .
+          echo "path=$SNAPSHOT_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Run typecheck gate
+        id: typecheck_gate
+        continue-on-error: true
+        run: |
+          node_modules/.bin/tsc --project server/tsconfig.json --noEmit
+          node_modules/.bin/tsc --project tsconfig.cli.json --noEmit
+
+      - name: Run lint gate
+        id: lint_gate
+        continue-on-error: true
+        run: node_modules/.bin/eslint src server
+
+      - name: Restore trusted gate workspace before build gate
+        env:
+          WORKSPACE_SNAPSHOT_PATH: ${{ steps.workspace_snapshot.outputs.path }}
+        run: |
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          tar -xf "$WORKSPACE_SNAPSHOT_PATH"
+          tar -df "$WORKSPACE_SNAPSHOT_PATH"
+
+      - name: Run build gate
+        id: build_gate
+        continue-on-error: true
+        run: |
+          node_modules/.bin/tsc
+          node_modules/.bin/vite build
+          node_modules/.bin/tsc --project server/tsconfig.json
+
+      - name: Run security scan gate
+        id: security_scan_gate
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Run secret scan gate
+        id: secret_scan_gate
+        continue-on-error: true
+        run: |
+          export GITLEAKS_CONFIG_TOML="$(cat <<'EOF'
+          title = "Project HELEN gitleaks config"
+          [extend]
+          useDefault = true
+
+          [allowlist]
+          description = "Allow documented placeholder secrets used in tests"
+          regexes = [
+            '''ghp_12345678901234567890''',
+            '''sk-secret-token''',
+            '''sk-ABCDEFGHIJKLMNOPQRSTUV''',
+          ]
+          EOF
+          )"
+          docker run --rm -e GITLEAKS_CONFIG_TOML -v "$PWD:/repo" -w /repo zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            dir . --redact --no-banner
+
+      - name: Start live evaluation proxy
+        id: start_live_eval_proxy
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          DAEMON_EVAL_API_URL: ${{ secrets.DAEMON_EVAL_API_URL }}
+          DAEMON_EVAL_API_TOKEN: ${{ secrets.DAEMON_EVAL_API_TOKEN }}
+          DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
+          DAEMON_EVAL_MAX_RUNTIME_MS: ${{ vars.DAEMON_EVAL_MAX_RUNTIME_MS }}
+        run: |
+          PROXY_PORT=3301
+          MAX_RUNTIME_MS="${DAEMON_EVAL_MAX_RUNTIME_MS:-600000}"
+          case "$MAX_RUNTIME_MS" in
+            ''|*[!0-9]*)
+              echo "Invalid DAEMON_EVAL_MAX_RUNTIME_MS: $MAX_RUNTIME_MS"
+              exit 1
+              ;;
+          esac
+          EVAL_TIMEOUT_SECONDS=$(( (MAX_RUNTIME_MS + 30000 + 999) / 1000 ))
+          PROXY_METRICS_PATH="$(mktemp /tmp/live-eval-proxy-metrics.XXXXXX.json)"
+          PROXY_SCRIPT_PATH="$(mktemp /tmp/live-eval-proxy.XXXXXX.cjs)"
+          PROXY_PID_PATH="$(mktemp /tmp/live-eval-proxy-pid.XXXXXX)"
+          echo "proxy_port=$PROXY_PORT" >> "$GITHUB_OUTPUT"
+          echo "eval_timeout_seconds=$EVAL_TIMEOUT_SECONDS" >> "$GITHUB_OUTPUT"
+          echo "proxy_metrics_path=$PROXY_METRICS_PATH" >> "$GITHUB_OUTPUT"
+          echo "proxy_script_path=$PROXY_SCRIPT_PATH" >> "$GITHUB_OUTPUT"
+          echo "proxy_pid_path=$PROXY_PID_PATH" >> "$GITHUB_OUTPUT"
+          cat > "$PROXY_SCRIPT_PATH" <<'NODE'
+          const fs = require('fs')
+          const http = require('http')
+
+          const targetUrl = new URL(process.env.DAEMON_EVAL_TARGET_URL)
+          const proxyToken = process.env.DAEMON_EVAL_PROXY_TOKEN
+          const proxyOrigin = process.env.DAEMON_EVAL_PROXY_ORIGIN
+          const proxyPort = Number(process.env.DAEMON_EVAL_PROXY_PORT || '3301')
+          const metricsPath = process.env.DAEMON_EVAL_PROXY_METRICS_PATH
+          const maxRuntimeMs = Number(process.env.DAEMON_EVAL_MAX_RUNTIME_MS || '600000')
+          if (!Number.isFinite(maxRuntimeMs) || maxRuntimeMs <= 0) {
+            throw new Error(`Invalid runtime budget: ${process.env.DAEMON_EVAL_MAX_RUNTIME_MS}`)
+          }
+          const startedAt = Date.now()
+          let apiCalls = 0
+          let deploymentSha = ''
+          let deploymentShaMissing = false
+          let deploymentShaMismatch = false
+          let remoteCpuMs = null
+          let remoteMemoryMb = null
+          let remoteSpendUsd = null
+          let metricAttestationIncomplete = false
+          let metricsWritten = false
+
+          const parseRemoteMetricHeader = (headers, headerName) => {
+            const rawValue = headers.get(headerName)?.trim() ?? ''
+            if (!rawValue) return null
+            const parsed = Number(rawValue)
+            if (!Number.isFinite(parsed) || parsed < 0) {
+              throw new Error(`Invalid live evaluation attestation header: ${headerName}`)
+            }
+            return parsed
+          }
+
+          const observeLiveEvalAttestation = headers => {
+            const responseDeploymentSha = headers.get('x-helen-deployment-sha')?.trim() ?? ''
+            if (!responseDeploymentSha) {
+              deploymentShaMissing = true
+            } else if (deploymentSha && deploymentSha !== responseDeploymentSha) {
+              deploymentShaMismatch = true
+            } else {
+              deploymentSha = responseDeploymentSha
+            }
+
+            const cpuMs = parseRemoteMetricHeader(headers, 'x-helen-live-eval-total-cpu-ms')
+            const memoryMb = parseRemoteMetricHeader(headers, 'x-helen-live-eval-peak-memory-mb')
+            const spendUsd = parseRemoteMetricHeader(headers, 'x-helen-live-eval-total-spend-usd')
+
+            if (cpuMs === null || memoryMb === null || spendUsd === null) {
+              metricAttestationIncomplete = true
+              return
+            }
+
+            remoteCpuMs = Math.max(remoteCpuMs ?? 0, Math.ceil(cpuMs))
+            remoteMemoryMb = Math.max(remoteMemoryMb ?? 0, Math.ceil(memoryMb))
+            remoteSpendUsd = Math.max(remoteSpendUsd ?? 0, spendUsd)
+          }
+
+          const writeMetrics = () => {
+            if (metricsWritten || !metricsPath) return
+            metricsWritten = true
+            fs.writeFileSync(metricsPath, JSON.stringify({
+              runtimeMs: Date.now() - startedAt,
+              cpuMs: remoteCpuMs,
+              memoryMb: remoteMemoryMb,
+              apiCalls,
+              spendUsd: remoteSpendUsd === null ? null : Number(remoteSpendUsd.toFixed(6)),
+              deploymentSha,
+              deploymentIdentityVerified: Boolean(deploymentSha)
+                && !deploymentShaMissing
+                && !deploymentShaMismatch,
+              resourceAttestationVerified: !metricAttestationIncomplete
+                && remoteCpuMs !== null
+                && remoteMemoryMb !== null
+                && remoteSpendUsd !== null,
+            }, null, 2))
+          }
+
+          const forwardHeaders = [
+            'content-type',
+            'x-helen-deployment-sha',
+            'x-helen-live-eval-total-cpu-ms',
+            'x-helen-live-eval-peak-memory-mb',
+            'x-helen-live-eval-total-spend-usd',
+          ]
+
+          const server = http.createServer(async (request, response) => {
+            if (request.method !== 'POST' || request.url !== '/api/chat') {
+              response.writeHead(404)
+              response.end('Not found')
+              return
+            }
+
+            try {
+              apiCalls += 1
+              const chunks = []
+              for await (const chunk of request) chunks.push(chunk)
+
+              const upstream = await fetch(new URL('/api/chat', targetUrl), {
+                method: 'POST',
+                signal: AbortSignal.timeout(maxRuntimeMs),
+                headers: {
+                  'Content-Type': request.headers['content-type'] || 'application/json',
+                  'Origin': proxyOrigin,
+                  ...(proxyToken ? { 'X-DAEMON-API-TOKEN': proxyToken } : {}),
+                },
+                body: Buffer.concat(chunks),
+              })
+              observeLiveEvalAttestation(upstream.headers)
+
+              const headers = {}
+              for (const name of forwardHeaders) {
+                const value = upstream.headers.get(name)
+                if (value) headers[name] = value
+              }
+              response.writeHead(upstream.status, headers)
+              const body = Buffer.from(await upstream.arrayBuffer())
+              response.end(body)
+            } catch (error) {
+              const timeoutExceeded = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+              response.writeHead(timeoutExceeded ? 504 : 502, { 'content-type': 'application/json' })
+              response.end(JSON.stringify({
+                error: timeoutExceeded
+                  ? 'live_eval_proxy_timeout'
+                  : 'live_eval_proxy_unavailable',
+              }))
+            }
+          })
+
+          const shutdown = () => {
+            writeMetrics()
+            server.close(() => process.exit(0))
+            setTimeout(() => process.exit(0), 1_000).unref()
+          }
+
+          process.on('SIGINT', shutdown)
+          process.on('SIGTERM', shutdown)
+          process.on('exit', writeMetrics)
+          server.listen(proxyPort, '127.0.0.1')
+          NODE
+          DAEMON_EVAL_TARGET_URL="$DAEMON_EVAL_API_URL" \
+            DAEMON_EVAL_PROXY_TOKEN="$DAEMON_EVAL_API_TOKEN" \
+            DAEMON_EVAL_PROXY_ORIGIN="$DAEMON_EVAL_ORIGIN" \
+            DAEMON_EVAL_PROXY_PORT="$PROXY_PORT" \
+            DAEMON_EVAL_MAX_RUNTIME_MS="$MAX_RUNTIME_MS" \
+            DAEMON_EVAL_PROXY_METRICS_PATH="$PROXY_METRICS_PATH" \
+            LIVE_EVAL_PROXY_SCRIPT="$PROXY_SCRIPT_PATH" \
+            nohup python3 - <<'PY' >/dev/null 2>&1 &
+          import ctypes
+          import os
+
+          libc = ctypes.CDLL(None, use_errno=True)
+          if libc.prctl(4, 0, 0, 0, 0) != 0:
+            errno = ctypes.get_errno()
+            raise OSError(errno, os.strerror(errno))
+          os.execvp('node', ['node', os.environ['LIVE_EVAL_PROXY_SCRIPT']])
+          PY
+          PROXY_PID=$!
+          echo "$PROXY_PID" > "$PROXY_PID_PATH"
+          sleep 1
+          if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+            echo 'Live evaluation proxy failed to start.'
+            exit 1
+          fi
 
       - name: Run live evaluation
-        if: steps.config.outputs.configured == 'true'
-        run: npx tsx tests/daemon-eval.mjs
+        id: live_eval
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true' && steps.start_live_eval_proxy.outcome == 'success'
+        continue-on-error: true
+        env:
+          DAEMON_EVAL_ORIGIN: ${{ secrets.DAEMON_EVAL_ORIGIN }}
+          LIVE_EVAL_PROXY_PORT: ${{ steps.start_live_eval_proxy.outputs.proxy_port }}
+          LIVE_EVAL_TIMEOUT_SECONDS: ${{ steps.start_live_eval_proxy.outputs.eval_timeout_seconds }}
+        run: |
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          tar -xf "${{ steps.workspace_snapshot.outputs.path }}"
+          tar -df "${{ steps.workspace_snapshot.outputs.path }}"
+          VITE_DAEMON_API_URL="http://127.0.0.1:${LIVE_EVAL_PROXY_PORT}" \
+            DAEMON_EVAL_ORIGIN="$DAEMON_EVAL_ORIGIN" \
+            timeout --signal=TERM "${LIVE_EVAL_TIMEOUT_SECONDS}s" npx tsx tests/daemon-eval.mjs
+
+      - name: Stop live evaluation proxy
+        if: always() && steps.config.outcome == 'success' && steps.config.outputs.configured == 'true' && steps.start_live_eval_proxy.outcome == 'success'
+        env:
+          LIVE_EVAL_PROXY_PID_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_pid_path }}
+          LIVE_EVAL_PROXY_SCRIPT_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_script_path }}
+        run: |
+          if [ -f "$LIVE_EVAL_PROXY_PID_PATH" ]; then
+            PROXY_PID="$(cat "$LIVE_EVAL_PROXY_PID_PATH")"
+            kill "$PROXY_PID" 2>/dev/null || true
+            for _ in 1 2 3 4 5; do
+              if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            kill -9 "$PROXY_PID" 2>/dev/null || true
+          fi
+          rm -f "$LIVE_EVAL_PROXY_PID_PATH" "$LIVE_EVAL_PROXY_SCRIPT_PATH"
+
+      - name: Verify live evaluation deployment identity
+        id: regression_gate
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
+          LIVE_EVAL_PROXY_METRICS_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_metrics_path }}
+          EXPECTED_CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+
+          const metricsPath = process.env.LIVE_EVAL_PROXY_METRICS_PATH?.trim()
+          if (process.env.LIVE_EVAL_STATUS !== 'success') {
+            console.error('Regression gate requires a successful live evaluation workload.')
+            process.exit(1)
+          }
+          if (!metricsPath || !fs.existsSync(metricsPath)) {
+            console.error('Regression gate requires live evaluation metrics.')
+            process.exit(1)
+          }
+
+          const metrics = JSON.parse(fs.readFileSync(metricsPath, 'utf8'))
+          const deploymentSha = String(metrics.deploymentSha ?? '').trim()
+          const expectedSha = String(process.env.EXPECTED_CANDIDATE_SHA ?? '').trim()
+          if (!metrics.deploymentIdentityVerified) {
+            console.error('Regression gate requires a trusted deployment identity attestation from the evaluated endpoint.')
+            process.exit(1)
+          }
+          if (!/^[0-9a-f]{40}$/i.test(deploymentSha)) {
+            console.error('Regression gate requires a full 40-character deployment SHA attestation.')
+            process.exit(1)
+          }
+          if (!expectedSha || deploymentSha.toLowerCase() !== expectedSha.toLowerCase()) {
+            console.error(`Regression gate deployment SHA mismatch: ${deploymentSha || '(missing)'} !== ${expectedSha || '(missing)'}`)
+            process.exit(1)
+          }
+          NODE
+
+      - name: Run resource budget gate
+        id: resource_budget_gate
+        if: steps.config.outcome == 'success' && steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          DAEMON_EVAL_MAX_RUNTIME_MS: ${{ vars.DAEMON_EVAL_MAX_RUNTIME_MS }}
+          DAEMON_EVAL_MAX_CPU_MS: ${{ vars.DAEMON_EVAL_MAX_CPU_MS }}
+          DAEMON_EVAL_MAX_MEMORY_MB: ${{ vars.DAEMON_EVAL_MAX_MEMORY_MB }}
+          DAEMON_EVAL_MAX_API_CALLS: ${{ vars.DAEMON_EVAL_MAX_API_CALLS }}
+          DAEMON_EVAL_MAX_SPEND_USD: ${{ vars.DAEMON_EVAL_MAX_SPEND_USD }}
+          LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
+          LIVE_EVAL_PROXY_METRICS_PATH: ${{ steps.start_live_eval_proxy.outputs.proxy_metrics_path }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+
+          if (process.env.LIVE_EVAL_STATUS !== 'success') {
+            console.error('Resource budget gate requires a successful live evaluation workload.')
+            process.exit(1)
+          }
+
+          const metricsPath = process.env.LIVE_EVAL_PROXY_METRICS_PATH?.trim()
+          if (!metricsPath || !fs.existsSync(metricsPath)) {
+            console.error('Resource budget gate requires live evaluation metrics.')
+            process.exit(1)
+          }
+
+          const metrics = JSON.parse(fs.readFileSync(metricsPath, 'utf8'))
+          const parseLimit = (value, fallback) => {
+            const normalized = value?.trim?.() ?? ''
+            if (!normalized) return fallback
+            const parsed = Number(normalized)
+            if (!Number.isFinite(parsed) || parsed < 0) {
+              throw new Error(`Invalid budget value: ${value}`)
+            }
+            return parsed
+          }
+          const parseRequiredLimit = (value, name) => {
+            const normalized = value?.trim?.() ?? ''
+            if (!normalized) {
+              throw new Error(`Missing required budget value: ${name}`)
+            }
+            return parseLimit(normalized, Number.NaN)
+          }
+
+          const runtimeMs = parseLimit(String(metrics.runtimeMs ?? ''), Number.NaN)
+          const cpuMs = parseLimit(String(metrics.cpuMs ?? ''), Number.NaN)
+          const memoryMb = parseLimit(String(metrics.memoryMb ?? ''), Number.NaN)
+          const apiCalls = parseLimit(String(metrics.apiCalls ?? ''), Number.NaN)
+          const spendUsd = parseLimit(String(metrics.spendUsd ?? ''), Number.NaN)
+          if (metrics.resourceAttestationVerified !== true) {
+            console.error('Resource budget gate requires complete CPU, memory, and spend attestations on every live evaluation response.')
+            process.exit(1)
+          }
+          const maxRuntimeMs = parseLimit(process.env.DAEMON_EVAL_MAX_RUNTIME_MS, 600000)
+          const maxCpuMs = parseRequiredLimit(process.env.DAEMON_EVAL_MAX_CPU_MS, 'DAEMON_EVAL_MAX_CPU_MS')
+          const maxMemoryMb = parseLimit(process.env.DAEMON_EVAL_MAX_MEMORY_MB, 512)
+          const maxApiCalls = parseLimit(process.env.DAEMON_EVAL_MAX_API_CALLS, 2)
+          const maxSpendUsd = parseRequiredLimit(process.env.DAEMON_EVAL_MAX_SPEND_USD, 'DAEMON_EVAL_MAX_SPEND_USD')
+
+          if (![runtimeMs, cpuMs, memoryMb, apiCalls, spendUsd].every(Number.isFinite)) {
+            console.error('Resource budget gate requires finite remote live evaluation metrics, including spend.')
+            process.exit(1)
+          }
+          if (runtimeMs > maxRuntimeMs) {
+            console.error(`Runtime budget exceeded: ${runtimeMs}ms > ${maxRuntimeMs}ms`)
+            process.exit(1)
+          }
+          if (cpuMs > maxCpuMs) {
+            console.error(`CPU budget exceeded: ${cpuMs}ms > ${maxCpuMs}ms`)
+            process.exit(1)
+          }
+          if (memoryMb > maxMemoryMb) {
+            console.error(`Memory budget exceeded: ${memoryMb}MB > ${maxMemoryMb}MB`)
+            process.exit(1)
+          }
+          if (apiCalls > maxApiCalls) {
+            console.error(`API call budget exceeded: ${apiCalls} > ${maxApiCalls}`)
+            process.exit(1)
+          }
+          if (spendUsd > maxSpendUsd) {
+            console.error(`Spend budget exceeded: ${spendUsd} > ${maxSpendUsd}`)
+            process.exit(1)
+          }
+          NODE
+
+      - name: Build evolution gate artifact
+        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
+        env:
+          CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
+          CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
+          CANDIDATE_SNAPSHOT_ID: ${{ github.event.inputs.candidate_snapshot_id || '' }}
+          EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
+          TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
+          LINT_STATUS: ${{ steps.lint_gate.outcome }}
+          UNIT_STATUS: ${{ needs.unit-gate.result }}
+          BUILD_STATUS: ${{ steps.build_gate.outcome }}
+          SECURITY_SCAN_STATUS: ${{ steps.security_scan_gate.outcome }}
+          SECRET_SCAN_STATUS: ${{ steps.secret_scan_gate.outcome }}
+          RESOURCE_BUDGET_STATUS: ${{ steps.resource_budget_gate.outcome }}
+          REGRESSION_STATUS: ${{ steps.regression_gate.outcome }}
+          LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
+          LIVE_EVAL_WORKFLOW_REF: ${{ steps.binding.outputs.workflow_ref }}
+          LIVE_EVAL_WORKFLOW_SHA: ${{ steps.binding.outputs.workflow_sha }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+
+          const gateStatus = (outcome, configured, detail, requiresRemoteConfig) => {
+            if (requiresRemoteConfig && configured !== 'true') {
+              return { status: 'unavailable', detail: 'Live evaluation secrets are not configured.' }
+            }
+            if (requiresRemoteConfig && !outcome) {
+              return { status: 'unavailable', detail: `${detail} was not executed.` }
+            }
+            if (outcome === 'success') return { status: 'passed', detail }
+            if (outcome === 'skipped') return { status: 'unavailable', detail: `${detail} was skipped.` }
+            return { status: 'failed', detail: `${detail} failed.` }
+          }
+
+          const gateDefinitions = [
+            ['typecheck', process.env.TYPECHECK_STATUS, 'Typecheck completed.', false],
+            ['lint', process.env.LINT_STATUS, 'Lint completed.', false],
+            ['unit', process.env.UNIT_STATUS, 'Trusted baseline unit tests completed.', false],
+            ['build', process.env.BUILD_STATUS, 'Build completed.', false],
+            ['security_scan', process.env.SECURITY_SCAN_STATUS, 'Security scan completed.', false],
+            ['secret_scan', process.env.SECRET_SCAN_STATUS, 'Secret scan completed.', false],
+            ['resource_budget', process.env.RESOURCE_BUDGET_STATUS, 'Resource budget check completed.', true],
+            ['regression', process.env.REGRESSION_STATUS, 'Live evaluation completed.', true],
+          ]
+
+          const gates = gateDefinitions.map(([gate, outcome, detail, requiresRemoteConfig]) => ({
+            gate,
+            required: true,
+            ...gateStatus(outcome, process.env.LIVE_EVAL_CONFIGURED, detail, requiresRemoteConfig),
+          }))
+
+          const doc = {
+            generated_at: new Date().toISOString(),
+            workflow: 'live-eval',
+            workflow_ref: process.env.LIVE_EVAL_WORKFLOW_REF ?? '',
+            workflow_sha: process.env.LIVE_EVAL_WORKFLOW_SHA ?? '',
+            candidate_sha: process.env.CANDIDATE_SHA,
+            candidate_version: process.env.CANDIDATE_VERSION ?? '',
+            candidate_snapshot_id: process.env.CANDIDATE_SNAPSHOT_ID ?? '',
+            run_id: process.env.EVOLUTION_RUN_ID ?? '',
+            gates,
+          }
+
+          fs.writeFileSync('evolution-gate-results.json', JSON.stringify(doc, null, 2))
+          NODE
+
+      - name: Upload evolution gate artifact
+        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: >-
+            ${{
+              format(
+                'evolution-gate-results-{0}-{1}-{2}',
+                github.event.inputs.candidate_version,
+                github.event.inputs.candidate_snapshot_id,
+                github.event.inputs.run_id
+              )
+            }}
+          path: evolution-gate-results.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce required gates passed
+        if: always() && steps.config.outcome == 'success' && steps.binding.outcome == 'success'
+        env:
+          BINDING_READY: ${{ steps.binding.outputs.ready }}
+          LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
+          TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
+          LINT_STATUS: ${{ steps.lint_gate.outcome }}
+          UNIT_STATUS: ${{ needs.unit-gate.result }}
+          BUILD_STATUS: ${{ steps.build_gate.outcome }}
+          SECURITY_SCAN_STATUS: ${{ steps.security_scan_gate.outcome }}
+          SECRET_SCAN_STATUS: ${{ steps.secret_scan_gate.outcome }}
+          LIVE_EVAL_STATUS: ${{ steps.live_eval.outcome }}
+          RESOURCE_BUDGET_STATUS: ${{ steps.resource_budget_gate.outcome }}
+          REGRESSION_STATUS: ${{ steps.regression_gate.outcome }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const bindingReady = process.env.BINDING_READY === 'true'
+          const liveEvalConfigured = process.env.LIVE_EVAL_CONFIGURED === 'true'
+          if (!liveEvalConfigured && !bindingReady) {
+            process.exit(0)
+          }
+          if (!liveEvalConfigured) {
+            console.error('Required gate did not pass: live evaluation configuration is missing.')
+            process.exit(1)
+          }
+          const requiredGateOutcomes = [
+            ['typecheck', process.env.TYPECHECK_STATUS],
+            ['lint', process.env.LINT_STATUS],
+            ['unit', process.env.UNIT_STATUS],
+            ['build', process.env.BUILD_STATUS],
+            ['security_scan', process.env.SECURITY_SCAN_STATUS],
+            ['secret_scan', process.env.SECRET_SCAN_STATUS],
+            ['live_eval', process.env.LIVE_EVAL_STATUS],
+            ['resource_budget', process.env.RESOURCE_BUDGET_STATUS],
+            ['regression', process.env.REGRESSION_STATUS],
+          ]
+          const failed = requiredGateOutcomes.find(([, outcome]) => outcome !== 'success')
+          if (failed) {
+            console.error(`Required gate did not pass: ${failed[0]}`)
+            process.exit(1)
+          }
+          if (bindingReady) {
+            if (!fs.existsSync('evolution-gate-results.json')) {
+              console.error('Required gate artifact is missing.')
+              process.exit(1)
+            }
+            const doc = JSON.parse(fs.readFileSync('evolution-gate-results.json', 'utf8'))
+            const failedGateResult = (doc.gates || []).find(gate => gate?.required && gate?.status !== 'passed')
+            if (failedGateResult) {
+              console.error(`Required gate did not pass: ${failedGateResult.gate}`)
+              process.exit(1)
+            }
+          }
+          NODE
