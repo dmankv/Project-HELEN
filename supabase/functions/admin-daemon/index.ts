@@ -688,12 +688,12 @@ async function buildResearchStatusResponse(
 
   const blockedReasons = Array.isArray(aggregates.data?.blocked_reasons)
     ? (aggregates.data.blocked_reasons as Array<{ reason?: unknown; count?: unknown }>)
-      .map(entry => {
+      .flatMap(entry => {
         const reason = typeof entry.reason === 'string' ? entry.reason : ''
-        const count = Number(entry.count)
-        return { reason, count }
+        const count = entry.count
+        if (reason.length === 0 || typeof count !== 'number' || !Number.isInteger(count) || count < 0) return []
+        return [{ reason, count }]
       })
-      .filter(entry => entry.reason.length > 0 && Number.isInteger(entry.count) && entry.count >= 0)
     : []
 
   return {

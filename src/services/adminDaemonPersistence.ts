@@ -374,7 +374,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
             quarantined_insights?: number
             expired_insights?: number
           }
-          blocked_reasons?: Array<{ reason?: string; count?: number }>
+          blocked_reasons?: Array<{ reason?: unknown; count?: unknown }>
         }
         researchStatus = researchData.diagnostics_status ?? 'unavailable'
         if (researchStatus === 'available') {
@@ -386,8 +386,12 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
             fetchedSources: Number(researchData.counters?.fetched_sources ?? 0),
             blockedEvents: Number(researchData.counters?.blocked_events ?? 0),
             blockedReasons: (researchData.blocked_reasons ?? [])
-              .map(entry => ({ reason: String(entry.reason ?? ''), count: Number(entry.count ?? 0) }))
-              .filter(entry => entry.reason.length > 0 && Number.isInteger(entry.count) && entry.count >= 0),
+              .flatMap(entry => {
+                const reason = typeof entry.reason === 'string' ? entry.reason : ''
+                const count = entry.count
+                if (reason.length === 0 || typeof count !== 'number' || !Number.isInteger(count) || count < 0) return []
+                return [{ reason, count }]
+              }),
             quarantinedInsights: Number(researchData.counters?.quarantined_insights ?? 0),
             expiredInsights: Number(researchData.counters?.expired_insights ?? 0),
           }
