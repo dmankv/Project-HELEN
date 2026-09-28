@@ -31,8 +31,9 @@ describe('ALL-FATHER review edge function source', () => {
     expect(src).toContain("from('all_father_reviews')")
     expect(src).toContain('.insert({')
     expect(src).toContain('auditFailureFinding()')
+    expect(src).toContain("'AUDIT_WRITE_FAILED'")
     expect(src).toContain("decision: ALL_FATHER_DECISIONS.REQUIRES_HUMAN_REVIEW")
-    expect(src).toContain('const status = persistedResult.decision === ALL_FATHER_DECISIONS.APPROVED ? 200 : 409')
+    expect(src).toContain('const status = result.decision === ALL_FATHER_DECISIONS.APPROVED ? 200 : 409')
   })
 
   it('allows only approved browser origins and POST requests', () => {

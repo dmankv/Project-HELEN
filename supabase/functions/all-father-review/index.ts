@@ -22,6 +22,7 @@ type SafeErrorCode =
   | 'BAD_REQUEST'
   | 'ORIGIN_NOT_ALLOWED'
   | 'METHOD_NOT_ALLOWED'
+  | 'AUDIT_WRITE_FAILED'
   | 'INTERNAL_ERROR'
 
 function getAllowedOrigin(requestOrigin: string | null): string | null {
@@ -58,6 +59,8 @@ function safeErrorMessage(code: SafeErrorCode): string {
       return 'Origin not allowed.'
     case 'METHOD_NOT_ALLOWED':
       return 'Method not allowed.'
+    case 'AUDIT_WRITE_FAILED':
+      return 'Review audit could not be persisted.'
     case 'INTERNAL_ERROR':
     default:
       return 'An internal error occurred.'
@@ -222,14 +225,15 @@ Deno.serve(async (req: Request) => {
       rollback_assured: result.assurances.rollbackAssured,
     })
 
-  const persistedResult = insertError
-    ? {
-        ...result,
-        decision: ALL_FATHER_DECISIONS.REQUIRES_HUMAN_REVIEW,
-        findings: [...result.findings, auditFailureFinding()],
-      }
-    : result
+  if (insertError) {
+    return jsonResponse({
+      code: 'AUDIT_WRITE_FAILED',
+      error: safeErrorMessage('AUDIT_WRITE_FAILED'),
+      decision: ALL_FATHER_DECISIONS.REQUIRES_HUMAN_REVIEW,
+      findings: [...result.findings, auditFailureFinding()],
+    }, 409, headers)
+  }
 
-  const status = persistedResult.decision === ALL_FATHER_DECISIONS.APPROVED ? 200 : 409
-  return jsonResponse(persistedResult, status, headers)
+  const status = result.decision === ALL_FATHER_DECISIONS.APPROVED ? 200 : 409
+  return jsonResponse(result, status, headers)
 })
