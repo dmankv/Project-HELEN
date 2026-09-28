@@ -21,7 +21,6 @@ const edgeFnPath = path.resolve(
 
 describe('Admin Daemon Edge Function source', () => {
   const src = fs.readFileSync(edgeFnPath, 'utf8')
-  const normalizedSrc = src.toLowerCase()
 
   // ---------------------------------------------------------------------------
   // Server-side role check

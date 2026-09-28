@@ -329,8 +329,6 @@ class SelfLearningAgent:
         """Create a plan for handling the user's request."""
         steps = []
         reasoning = ""
-        complexity = "simple"
-        
         if intent == 'request_creation':
             steps = [
                 "Understand requirements",

@@ -204,7 +204,7 @@ function buildTokenLink(route: string, token: string): string {
 }
 
 function parseCookies(header: string | undefined): ParsedCookies {
-  const out: ParsedCookies = {}
+  const out = Object.create(null) as ParsedCookies
   if (!header) return out
   const pairs = header.split(';')
   for (const pair of pairs) {
@@ -374,23 +374,143 @@ class AuthStore {
   }
 
   private load(): AuthStoreFile {
+    const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
+    const initialJson = JSON.stringify(initial, null, 2)
     try {
-      if (!fs.existsSync(this.filePath)) {
-        fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
-        const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
-        fs.writeFileSync(this.filePath, JSON.stringify(initial, null, 2), { mode: 0o600 })
-        return initial
-      }
-      const raw = fs.readFileSync(this.filePath, 'utf8')
-      const parsed = JSON.parse(raw) as Partial<AuthStoreFile>
-      return {
-        users: Array.isArray(parsed.users) ? parsed.users : [],
-        sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-        tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
-      }
-    } catch {
-      return { users: [], sessions: [], tokens: [] }
+      if (this.publishInitialFile(initialJson)) return initial
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
+    return this.readExistingFile()
+  }
+
+  private publishInitialFile(initialJson: string): boolean {
+    const tmp = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`
+    try {
+      fs.writeFileSync(tmp, initialJson, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+      try {
+        fs.linkSync(tmp, this.filePath)
+        return true
+      } catch (error) {
+        if (!this.isUnsupportedLinkError(error)) throw error
+      }
+
+      const lockDir = `${this.filePath}.lock`
+      try {
+        fs.mkdirSync(lockDir)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+        throw error
+      }
+      try {
+        try {
+          fs.statSync(this.filePath)
+          return false
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        fs.renameSync(tmp, this.filePath)
+        return true
+      } finally {
+        this.removeLockDir(lockDir)
+      }
+    } finally {
+      try {
+        fs.unlinkSync(tmp)
+      } catch {}
+    }
+  }
+
+  private readExistingFile(): AuthStoreFile {
+    const waitState = new Int32Array(new SharedArrayBuffer(4))
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const raw = fs.readFileSync(this.filePath, 'utf8')
+        let parsed: Partial<AuthStoreFile>
+        try {
+          parsed = JSON.parse(raw) as Partial<AuthStoreFile>
+        } catch (error) {
+          if (this.isTransientJsonReadRace(error, raw) && attempt < 24) {
+            Atomics.wait(waitState, 0, 0, 10)
+            continue
+          }
+          throw error
+        }
+        return {
+          users: Array.isArray(parsed.users) ? parsed.users : [],
+          sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+          tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'ENOENT' || attempt >= 24) throw error
+        Atomics.wait(waitState, 0, 0, 10)
+      }
+    }
+  }
+
+  private isTransientJsonReadRace(error: unknown, raw: string): boolean {
+    if (!(error instanceof SyntaxError)) return false
+    const text = raw.trim()
+    if (text.length === 0) return true
+    if (!text.endsWith('}') && !text.endsWith(']')) return true
+
+    let objectDepth = 0
+    let arrayDepth = 0
+    let inString = false
+    let escaping = false
+    for (let i = 0; i < text.length; i += 1) {
+      const char = text[i]
+      if (inString) {
+        if (escaping) {
+          escaping = false
+          continue
+        }
+        if (char === '\\') {
+          escaping = true
+          continue
+        }
+        if (char === '"') inString = false
+        continue
+      }
+      if (char === '"') {
+        inString = true
+        continue
+      }
+      if (char === '{') objectDepth += 1
+      if (char === '}') {
+        objectDepth -= 1
+        if (objectDepth < 0) return false
+      }
+      if (char === '[') arrayDepth += 1
+      if (char === ']') {
+        arrayDepth -= 1
+        if (arrayDepth < 0) return false
+      }
+    }
+
+    return inString || objectDepth > 0 || arrayDepth > 0
+  }
+
+  private removeLockDir(lockDir: string): void {
+    const waitState = new Int32Array(new SharedArrayBuffer(4))
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        fs.rmdirSync(lockDir)
+        return
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'ENOENT') return
+        if (code !== 'ENOTEMPTY' || attempt >= 2) throw error
+        Atomics.wait(waitState, 0, 0, 10)
+      }
+    }
+  }
+
+  private isUnsupportedLinkError(error: unknown): boolean {
+    const code = (error as NodeJS.ErrnoException).code
+    return code === 'EMLINK' || code === 'ENOSYS' || code === 'ENOTSUP' || code === 'EXDEV'
   }
 
   private persist(): void {
