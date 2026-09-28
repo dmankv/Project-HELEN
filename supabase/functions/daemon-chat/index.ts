@@ -181,6 +181,8 @@ const MAX_DIAGNOSTIC_CONTEXT_BYTES = 64_000
 const REQUEST_TIMEOUT_MS = 30_000
 const RESEARCH_REQUEST_TIMEOUT_MS = IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRuntimeMs
 const RESEARCH_USER_AGENT = 'DaemonResearchBot/1.0 (+https://dmankv.github.io/Project-HELEN)'
+const SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON = 'Research request could not be recorded; request blocked safely.'
+const SAFE_RESEARCH_RUNTIME_FAILURE_REASON = 'Research request failed safely due to internal policy/runtime handling.'
 
 const DAEMON_SYSTEM_PROMPT = `You are Daemon, an AI assistant. You are not human, not conscious, not sentient, and not the user.
 
@@ -942,8 +944,8 @@ Deno.serve(async (req: Request) => {
             ? 'blocked_persistence_failure'
             : 'blocked_invalid_config',
           reason: error instanceof ResearchPersistenceError
-            ? error.message
-            : 'Research request failed safely due to internal policy/runtime handling.',
+            ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
+            : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
         },
         provenance: null,
         excerpt: null,
@@ -951,8 +953,8 @@ Deno.serve(async (req: Request) => {
         blocked_count: 1,
         blocked_reasons: [
           error instanceof ResearchPersistenceError
-            ? error.message
-            : 'Research request failed safely due to internal policy/runtime handling.',
+            ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
+            : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
         ],
       }
     }
