@@ -45,6 +45,9 @@ interface ChatMessage {
 }
 
 type EvolutionMode = 'denied' | 'configured'
+type GateStatus = 'passed' | 'failed' | 'unavailable' | 'skipped'
+type CanaryStatus = 'not_started' | 'denied' | 'running' | 'healthy' | 'failed'
+type RollbackStatus = 'not_needed' | 'requested' | 'completed'
 
 const ALLOWED_STRATEGIES = [
   'direct-answer',
@@ -349,13 +352,214 @@ function buildEvolutionInfrastructureStatus(): {
 
 interface EvolutionStatusResponse {
   request_type: 'evolution_status'
-  evolution: ReturnType<typeof buildEvolutionInfrastructureStatus>
+  persistenceConfigured: boolean
+  sessionActive: boolean
+  supabaseUrl: string
+  evolutionStatus: 'unavailable'
+  evolution: {
+    currentVersion: string
+    runState: string
+    stage: string
+    candidateVersion: string | null
+    candidateSnapshotId: string | null
+    gateResults: Array<{
+      gate: string
+      status: GateStatus
+      detail: string
+      durationMs: number
+      required: boolean
+    }>
+    canaryStatus: CanaryStatus
+    rollbackStatus: RollbackStatus
+    budgetUsage: {
+      runtimeMs: number
+      cpuMs: number
+      memoryMb: number
+      apiCalls: number
+      spendUsd: number
+    }
+    recentAuditEvents: Array<{
+      id: string
+      runId: string | null
+      type: string
+      createdAt: string
+      message: string
+      metadata: Record<string, string | number | boolean | null>
+    }>
+  } | null
+  infrastructure: ReturnType<typeof buildEvolutionInfrastructureStatus>
 }
 
-function buildEvolutionStatusResponse(): EvolutionStatusResponse {
+function getSupabaseHost(url: string): string {
+  try {
+    return url ? new URL(url).hostname : ''
+  } catch {
+    return ''
+  }
+}
+
+function getMetadataString(
+  metadata: Record<string, string | number | boolean | null> | null | undefined,
+  camelKey: string,
+  snakeKey: string,
+): string | null {
+  const value = metadata?.[camelKey] ?? metadata?.[snakeKey]
+  return typeof value === 'string' ? value : null
+}
+
+function getMetadataBoolean(
+  metadata: Record<string, string | number | boolean | null> | null | undefined,
+  camelKey: string,
+  snakeKey: string,
+): boolean | null {
+  const value = metadata?.[camelKey] ?? metadata?.[snakeKey]
+  if (typeof value === 'boolean') return value
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return null
+}
+
+function getMetadataNumber(
+  metadata: Record<string, string | number | boolean | null> | null | undefined,
+  camelKey: string,
+  snakeKey: string,
+): number {
+  const value = metadata?.[camelKey] ?? metadata?.[snakeKey]
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+function derivePersistedCanaryStatus(
+  run: { stage: string; status: string },
+  latestCanaryDecision: { status: string | null; allowed: boolean | null } | null,
+): CanaryStatus {
+  if (run.status === 'failed' || run.status === 'denied' || run.status === 'timed_out') return 'failed'
+  if (latestCanaryDecision?.allowed === true && latestCanaryDecision.status === 'healthy') return 'healthy'
+  if (run.stage === 'rollback' || run.status === 'rolled_back') {
+    if (latestCanaryDecision?.status === 'healthy') return 'healthy'
+    if (latestCanaryDecision?.status === 'failed') return 'failed'
+    if (latestCanaryDecision?.status === 'denied') return 'denied'
+    return 'not_started'
+  }
+  if (run.stage === 'promote') return 'failed'
+  if (run.stage === 'canary') {
+    if (latestCanaryDecision?.status === 'failed') return 'failed'
+    if (latestCanaryDecision?.status === 'denied') return 'denied'
+    return run.status === 'running' ? 'running' : 'failed'
+  }
+  return 'not_started'
+}
+
+async function buildEvolutionStatusResponse(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+  supabaseUrl: string,
+): Promise<EvolutionStatusResponse> {
+  const infrastructure = buildEvolutionInfrastructureStatus()
+  const supabaseHost = getSupabaseHost(supabaseUrl)
+  const { data: run } = await serviceClient
+    .from('evolution_runs')
+    .select('run_id, candidate_version, candidate_snapshot_id, deployed_version, stage, status')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!run) {
+    return {
+      request_type: 'evolution_status',
+      persistenceConfigured: true,
+      sessionActive: true,
+      supabaseUrl: supabaseHost,
+      evolutionStatus: 'unavailable',
+      evolution: null,
+      infrastructure,
+    }
+  }
+
+  const [{ data: gateResults }, { data: recentAuditEvents }, { data: latestCanaryDecision }, { data: latestBudgetCheck }] = await Promise.all([
+    serviceClient
+      .from('evolution_gate_results')
+      .select('gate, status, detail, duration_ms, required')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true }),
+    serviceClient
+      .from('evolution_audit_events')
+      .select('event_id, run_id, event_type, message, created_at, metadata')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(20),
+    serviceClient
+      .from('evolution_audit_events')
+      .select('metadata')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .eq('event_type', 'canary_decision')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    serviceClient
+      .from('evolution_audit_events')
+      .select('metadata')
+      .eq('run_id', run.run_id)
+      .eq('user_id', userId)
+      .eq('event_type', 'budget_check')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
   return {
     request_type: 'evolution_status',
-    evolution: buildEvolutionInfrastructureStatus(),
+    persistenceConfigured: true,
+    sessionActive: true,
+    supabaseUrl: supabaseHost,
+    evolutionStatus: 'unavailable',
+    evolution: {
+      currentVersion: run.deployed_version,
+      runState: run.status,
+      stage: run.stage,
+      candidateVersion: run.candidate_version,
+      candidateSnapshotId: run.candidate_snapshot_id,
+      gateResults: (gateResults ?? []).map(result => ({
+        gate: result.gate,
+        status: result.status as GateStatus,
+        detail: result.detail,
+        durationMs: result.duration_ms,
+        required: result.required,
+      })),
+      canaryStatus: derivePersistedCanaryStatus(run, {
+        status: getMetadataString(latestCanaryDecision?.metadata, 'status', 'status'),
+        allowed: getMetadataBoolean(latestCanaryDecision?.metadata, 'allowed', 'allowed'),
+      }),
+      rollbackStatus: run.status === 'rolled_back'
+        ? 'completed'
+        : run.stage === 'rollback'
+          ? 'requested'
+          : 'not_needed',
+      budgetUsage: {
+        runtimeMs: getMetadataNumber(latestBudgetCheck?.metadata, 'runtimeMs', 'runtime_ms'),
+        cpuMs: getMetadataNumber(latestBudgetCheck?.metadata, 'cpuMs', 'cpu_ms'),
+        memoryMb: getMetadataNumber(latestBudgetCheck?.metadata, 'memoryMb', 'memory_mb'),
+        apiCalls: getMetadataNumber(latestBudgetCheck?.metadata, 'apiCalls', 'api_calls'),
+        spendUsd: getMetadataNumber(latestBudgetCheck?.metadata, 'spendUsd', 'spend_usd'),
+      },
+      recentAuditEvents: (recentAuditEvents ?? []).slice().reverse().map(event => ({
+        id: event.event_id,
+        runId: event.run_id,
+        type: event.event_type,
+        createdAt: event.created_at,
+        message: event.message,
+        metadata: event.metadata ?? {},
+      })),
+    },
+    infrastructure,
   }
 }
 
@@ -523,7 +727,7 @@ Deno.serve(async (req: Request) => {
   if (isEvolutionStatusRequest(body)) {
     logAudit('admin_evolution_status', { user_id: user.id })
     return new Response(
-      JSON.stringify(buildEvolutionStatusResponse()),
+      JSON.stringify(await buildEvolutionStatusResponse(serviceClient, user.id, supabaseUrl)),
       {
         status: 200,
         headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },
