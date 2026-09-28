@@ -380,7 +380,8 @@ class AuthStore {
       try {
         const fd = fs.openSync(this.filePath, 'wx', 0o600)
         try {
-          fs.writeFileSync(fd, JSON.stringify(initial, null, 2), 'utf8')
+          const initialJson = JSON.stringify(initial, null, 2)
+          fs.writeFileSync(fd, initialJson, 'utf8')
         } finally {
           fs.closeSync(fd)
         }
