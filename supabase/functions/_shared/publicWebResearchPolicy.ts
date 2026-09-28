@@ -50,6 +50,49 @@ export const IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS: Readonly<PublicWebResearchBu
 export const DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE = 0.35
 export const DEFAULT_EXTERNAL_INSIGHT_TTL_MS = 1000 * 60 * 60 * 24 * 7
 
+export interface PublicWebResearchProvenanceRecord {
+  normalizedUrl: string
+  host: string
+  fetchedAt: string
+  httpStatus: number
+  contentType: string
+  byteSize: number
+  contentHash: string
+  policyDecision: ResearchPolicyDecisionCode
+  sanitizedExcerpt: string
+}
+
+export interface PublicWebResearchResponse {
+  request_type: 'public_web_research'
+  status: 'success' | 'unavailable' | 'policy_blocked' | 'error'
+  decision: ResearchPolicyDecision
+  provenance: PublicWebResearchProvenanceRecord | null
+  excerpt: string | null
+  source_count: number
+  blocked_count: number
+  blocked_reasons: string[]
+}
+
+export function buildResearchUnavailableResponse(
+  reason: string,
+  blockedReason = reason,
+): PublicWebResearchResponse {
+  return {
+    request_type: 'public_web_research',
+    status: 'unavailable',
+    decision: {
+      allowed: false,
+      code: 'blocked_invalid_config',
+      reason,
+    },
+    provenance: null,
+    excerpt: null,
+    source_count: 0,
+    blocked_count: 1,
+    blocked_reasons: [blockedReason],
+  }
+}
+
 const INTERNAL_HOST_SUFFIXES = ['.internal', '.local', '.localhost', '.corp', '.lan', '.home.arpa']
 const BLOCKED_LITERAL_HOSTS = new Set([
   'localhost',

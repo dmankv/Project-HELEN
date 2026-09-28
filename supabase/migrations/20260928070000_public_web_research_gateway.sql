@@ -225,10 +225,16 @@ returns table (
   expired_insights bigint,
   blocked_reasons jsonb
 )
-language sql
+language plpgsql
 security definer
 set search_path = public
 as $$
+begin
+  if auth.role() <> 'service_role' and auth.uid() <> target_user_id then
+    raise exception 'Access denied.';
+  end if;
+
+  return query
   with blocked_reason_counts as (
     select
       coalesce(metadata->>'policy_decision', metadata->>'policyDecision') as reason,
@@ -267,6 +273,7 @@ as $$
       ),
       '[]'::jsonb
     ) as blocked_reasons;
+end;
 $$;
 
 revoke all on function public.get_research_status_aggregates(uuid) from public;

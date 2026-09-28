@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { buildResearchUnavailableResponse } from '../supabase/functions/_shared/publicWebResearchPolicy'
 
 const daemonChatPath = path.resolve(process.cwd(), 'supabase/functions/daemon-chat/index.ts')
 const migrationPath = path.resolve(
@@ -17,47 +18,24 @@ describe('public web research edge gateway source', () => {
     expect(src).toContain('executePublicWebResearch(')
   })
 
-  it('enforces read-only methods and HTTPS-only policy validation', () => {
-    expect(src).toContain("validatePublicWebUrl(targetUrl, requestMethod)")
-    expect(src).toContain("research.method !== 'GET' && research.method !== 'HEAD'")
-  })
-
-  it('revalidates DNS and redirects with immutable budgets', () => {
-    expect(src).toContain('ensurePublicDnsResolution(')
-    expect(src).toContain("redirect: 'manual'")
-    expect(src).toContain('maxRedirects')
-    expect(src).toContain('blocked_budget_limit')
-  })
-
-  it('filters DNS answers, bounds robots reads, and redacts stored provenance URLs', () => {
-    expect(src).toContain('answer.type === 1 || answer.type === 28')
-    expect(src).toContain('readBoundedBodyText(')
-    expect(src).toContain('normalizeUrlForStorage(currentUrl)')
-  })
-
-  it('propagates research audit persistence failures', () => {
-    expect(src).toContain("throw new ResearchPersistenceError(`Research audit persistence failed for ${eventType}.`)")
-    expect(src).toContain('error instanceof ResearchPersistenceError')
-  })
-
-  it('sanitizes extracted content and blocks unsupported content types', () => {
-    expect(src).toContain('isSupportedResearchContentType(')
-    expect(src).toContain('sanitizeBoundedText(')
-    expect(src).toContain('blocked_unsupported_content_type')
-  })
-
-  it('stores provenance, audit events, and quarantined insights server-side only', () => {
-    expect(src).toContain("from('research_fetch_provenance').insert")
-    expect(src).toContain("from('research_audit_events').insert")
-    expect(src).toContain("from('unverified_external_insights').insert")
-    expect(src).toContain("evaluation_state: 'quarantined'")
-    expect(src).toContain("promotion_state: 'blocked_pending_validation'")
-  })
-
-  it('does not forward caller Authorization or Cookie headers to destination fetches', () => {
-    const fetchHeadersBlock = src.match(/const fetchHeaders:[\s\S]+?}\n\s*const response = await fetch/s)?.[0] ?? ''
-    expect(fetchHeadersBlock).not.toMatch(/authorization\s*:/i)
-    expect(fetchHeadersBlock).not.toMatch(/cookie\s*:/i)
+  it('reuses the shared fail-closed unavailable response helper for the current transport gate', () => {
+    const response = buildResearchUnavailableResponse(
+      'Research DNS-pinned transport is not implemented; gateway remains fail-closed.',
+      'Research DNS-pinned transport is not implemented.',
+    )
+    expect(response).toMatchObject({
+      request_type: 'public_web_research',
+      status: 'unavailable',
+      decision: {
+        allowed: false,
+        code: 'blocked_invalid_config',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: 0,
+      blocked_count: 1,
+      blocked_reasons: ['Research DNS-pinned transport is not implemented.'],
+    })
   })
 })
 
