@@ -86,6 +86,20 @@ function parseIPv4(hostname: string): number[] | null {
   return octets
 }
 
+function isBlockedIPv4Octets(octets: number[]): boolean {
+  const [a, b] = octets
+  return (
+    a === 0
+    || a === 10
+    || a === 127
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || a >= 224
+  )
+}
+
 function isHexLike(value: string): boolean {
   return /^[0-9a-f]+$/i.test(value)
 }
@@ -105,17 +119,7 @@ export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
   const lowerHost = hostname.toLowerCase()
   const ipv4 = parseIPv4(lowerHost)
   if (ipv4) {
-    const [a, b] = ipv4
-    const blocked = (
-      a === 0
-      || a === 10
-      || a === 127
-      || (a === 100 && b >= 64 && b <= 127)
-      || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 168)
-      || a >= 224
-    )
+    const blocked = isBlockedIPv4Octets(ipv4)
     if (blocked || BLOCKED_LITERAL_HOSTS.has(lowerHost)) {
       return {
         allowed: false,
@@ -132,6 +136,22 @@ export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
 
   if (isIPv6Literal(lowerHost)) {
     const normalized = lowerHost.replace(/^\[|\]$/g, '')
+    const mappedIpv4Match = /::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(normalized)
+    if (mappedIpv4Match) {
+      const mappedIpv4 = parseIPv4(mappedIpv4Match[1])
+      if (!mappedIpv4 || isBlockedIPv4Octets(mappedIpv4)) {
+        return {
+          allowed: false,
+          code: 'blocked_network',
+          reason: 'Blocked IPv4-mapped loopback/private destination.',
+        }
+      }
+      return {
+        allowed: true,
+        code: 'allowed_public_source',
+        reason: 'Allowed public IPv4-mapped IPv6 destination.',
+      }
+    }
     if (
       normalized === '::1'
       || normalized === '::'
@@ -265,8 +285,8 @@ export function classifyHighRiskResearch(text: string): ResearchPolicyDecision {
 
 export function sanitizeBoundedText(input: string, maxChars: number): string {
   const withoutScripts = input
-    .replace(/<script(?:\s[^>]*)?>[\s\S]*?<\/script\s*>/gi, ' ')
-    .replace(/<style(?:\s[^>]*)?>[\s\S]*?<\/style\s*>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\s*\/\s*script\b[^>]*>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\s*\/\s*style\b[^>]*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

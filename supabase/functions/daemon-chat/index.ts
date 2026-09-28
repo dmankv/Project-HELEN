@@ -537,6 +537,42 @@ async function hashString(value: string): Promise<string> {
   return toHexDigest(digest)
 }
 
+function normalizeUrlForAudit(url: URL): string {
+  const normalized = new URL(url.toString())
+  normalized.search = ''
+  normalized.hash = ''
+  return normalized.toString()
+}
+
+async function readBoundedBodyText(response: Response, maxBytes: number): Promise<{ text: string; bytes: number } | null> {
+  const contentLength = Number(response.headers.get('content-length') ?? '')
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) return null
+
+  if (!response.body) {
+    const fallback = await response.text()
+    const bytes = new TextEncoder().encode(fallback).byteLength
+    return bytes > maxBytes ? null : { text: fallback, bytes }
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let bytes = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+    bytes += value.byteLength
+    if (bytes > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    text += decoder.decode(value, { stream: true })
+  }
+  text += decoder.decode()
+  return { text, bytes }
+}
+
 async function fetchRobotsDecision(url: URL): Promise<ResearchPolicyDecision> {
   const robotsUrl = new URL('/robots.txt', url)
   try {
@@ -727,7 +763,7 @@ async function executePublicWebResearch(
     }
 
     await appendResearchAuditEvent(serviceClient, userId, 'research_request', {
-      url: currentUrl.toString(),
+      url: normalizeUrlForAudit(currentUrl),
       method: requestMethod,
       redirected: runBudget.redirects > 0,
       search_provider_used: request.search_query ? 'true' : 'false',
@@ -844,12 +880,30 @@ async function executePublicWebResearch(
     }
   }
 
-  const bodyText = requestMethod === 'HEAD' ? '' : await finalResponse.text()
-  const bodyBytes = new TextEncoder().encode(bodyText).byteLength
+  const boundedBody = requestMethod === 'HEAD'
+    ? { text: '', bytes: 0 }
+    : await readBoundedBodyText(finalResponse, IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxResponseBytes)
+  if (!boundedBody) {
+    return {
+      request_type: 'public_web_research',
+      status: 'policy_blocked',
+      decision: {
+        allowed: false,
+        code: 'blocked_oversized_response',
+        reason: 'Response exceeded immutable research size budget.',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: sourceCount,
+      blocked_count: blockedReasons.length + 1,
+      blocked_reasons: [...blockedReasons, 'Response exceeded immutable size budget.'],
+    }
+  }
+  const bodyText = boundedBody.text
+  const bodyBytes = boundedBody.bytes
   runBudget.bytes += bodyBytes
   if (
-    bodyBytes > IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxResponseBytes
-    || runBudget.bytes > IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxBytesPerRun
+    runBudget.bytes > IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxBytesPerRun
   ) {
     return {
       request_type: 'public_web_research',
@@ -897,7 +951,7 @@ async function executePublicWebResearch(
   }
   sourceCount += 1
 
-  await serviceClient.from('research_fetch_provenance').insert({
+  const { error: provenanceError } = await serviceClient.from('research_fetch_provenance').insert({
     user_id: userId,
     normalized_url: provenance.normalizedUrl,
     host: provenance.host,
@@ -909,6 +963,22 @@ async function executePublicWebResearch(
     policy_decision: provenance.policyDecision,
     sanitized_excerpt: provenance.sanitizedExcerpt,
   })
+  if (provenanceError) {
+    return {
+      request_type: 'public_web_research',
+      status: 'error',
+      decision: {
+        allowed: false,
+        code: 'blocked_budget_limit',
+        reason: 'Research provenance persistence failed.',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: 0,
+      blocked_count: blockedReasons.length + 1,
+      blocked_reasons: [...blockedReasons, 'Research provenance persistence failed.'],
+    }
+  }
   await appendResearchAuditEvent(serviceClient, userId, 'research_result', {
     url: provenance.normalizedUrl,
     host: provenance.host,
@@ -920,7 +990,7 @@ async function executePublicWebResearch(
 
   if (request.store_insight) {
     const expiresAt = new Date(Date.now() + DEFAULT_EXTERNAL_INSIGHT_TTL_MS).toISOString()
-    await serviceClient.from('unverified_external_insights').insert({
+    const { error: insightError } = await serviceClient.from('unverified_external_insights').insert({
       user_id: userId,
       normalized_url: provenance.normalizedUrl,
       host: provenance.host,
@@ -933,6 +1003,25 @@ async function executePublicWebResearch(
       evaluation_state: 'quarantined',
       promotion_state: 'blocked_pending_validation',
     })
+    if (insightError) {
+      return {
+        request_type: 'public_web_research',
+        status: 'error',
+        decision: {
+          allowed: false,
+          code: 'blocked_budget_limit',
+          reason: 'Quarantined insight persistence failed.',
+        },
+        provenance: {
+          ...provenance,
+          sanitizedExcerpt: provenance.sanitizedExcerpt,
+        },
+        excerpt: sanitizedExcerpt,
+        source_count: sourceCount,
+        blocked_count: blockedReasons.length + 1,
+        blocked_reasons: [...blockedReasons, 'Quarantined insight persistence failed.'],
+      }
+    }
     await appendResearchAuditEvent(serviceClient, userId, 'research_insight', {
       url: provenance.normalizedUrl,
       host: provenance.host,

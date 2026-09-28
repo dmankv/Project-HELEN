@@ -324,7 +324,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
   if (configured && sessionActive && accessToken) {
     const endpoint = `${SUPABASE_URL}/functions/v1/admin-daemon`
     try {
-      const [evolutionRes, researchRes] = await Promise.all([
+      const [evolutionRes, researchRes] = await Promise.allSettled([
         fetch(endpoint, {
           method: 'POST',
           headers: {
@@ -343,8 +343,8 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
         }),
       ])
 
-      if (evolutionRes.ok) {
-        const evolutionData = await evolutionRes.json() as {
+      if (evolutionRes.status === 'fulfilled' && evolutionRes.value.ok) {
+        const evolutionData = await evolutionRes.value.json() as {
           evolution?: AdminEvolutionStatusModel | null
           evolutionStatus?: 'available' | 'unavailable' | 'error'
         }
@@ -354,8 +354,8 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
         evolutionStatus = 'error'
       }
 
-      if (researchRes.ok) {
-        const researchData = await researchRes.json() as {
+      if (researchRes.status === 'fulfilled' && researchRes.value.ok) {
+        const researchData = await researchRes.value.json() as {
           diagnostics_status?: 'available' | 'unavailable' | 'error'
           configuration?: {
             mode?: 'denied' | 'configured'
@@ -387,8 +387,10 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
         researchStatus = 'error'
       }
     } catch {
-      evolutionStatus = 'error'
-      researchStatus = 'error'
+      // Preserve independent statuses where available; fail closed only for
+      // any still-unknown diagnostics channel.
+      if (evolutionStatus === 'unavailable' && !evolution) evolutionStatus = 'error'
+      if (researchStatus === 'unavailable' && !research) researchStatus = 'error'
     }
   }
 
