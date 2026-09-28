@@ -226,3 +226,40 @@ describe('Live eval workflow', () => {
     expect(workflow).toContain("if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'")
   })
 })
+
+const allFatherReviewMigrationPath = path.resolve(
+  process.cwd(),
+  'supabase/migrations/20260928100000_all_father_reviews.sql',
+)
+
+describe('ALL-FATHER review migration', () => {
+  const rawSql = fs.readFileSync(allFatherReviewMigrationPath, 'utf8')
+  const normalizedSql = rawSql.toLowerCase()
+
+  it('creates the append-only audit table with decision and assurance fields', () => {
+    expect(normalizedSql).toContain('create table if not exists public.all_father_reviews')
+    expect(normalizedSql).toContain("target_branch       text not null check (target_branch = 'main')")
+    expect(rawSql).toContain("decision            text not null check (decision in ('APPROVED', 'REJECTED', 'REQUIRES_HUMAN_REVIEW'))")
+    expect(normalizedSql).toContain('has_tests           boolean not null')
+    expect(normalizedSql).toContain('security_assured    boolean not null')
+    expect(normalizedSql).toContain('audit_assured       boolean not null')
+    expect(normalizedSql).toContain('rollback_assured    boolean not null')
+    expect(normalizedSql).toContain('create index if not exists all_father_reviews_created_at_idx')
+  })
+
+  it('limits reads to admins and inserts to service_role with reviewer constraints', () => {
+    expect(normalizedSql).toContain('alter table public.all_father_reviews enable row level security;')
+    expect(normalizedSql).toContain('create policy "all_father_reviews_select_admin"')
+    expect(normalizedSql).toContain("profiles.role = 'admin'")
+    expect(normalizedSql).toContain('create policy "all_father_reviews_insert_service"')
+    expect(normalizedSql).toContain('to service_role')
+    expect(normalizedSql).toContain('all_father_reviews.reviewer_user_id')
+  })
+
+  it('blocks mutation of existing review audit rows', () => {
+    expect(rawSql).toMatch(/create or replace function public\.prevent_all_father_review_mutation\(\)/i)
+    expect(rawSql).toMatch(/ALL-FATHER reviews are append-only/i)
+    expect(normalizedSql).toContain('before update on public.all_father_reviews')
+    expect(normalizedSql).toContain('before delete on public.all_father_reviews')
+  })
+})
