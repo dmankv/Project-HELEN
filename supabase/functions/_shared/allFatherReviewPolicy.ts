@@ -171,11 +171,6 @@ export function isAllFatherProtectedPath(filePath: string): boolean {
   return ALL_FATHER_PROTECTED_PATH_PREFIXES.some(prefix => prefixMatches(normalizedPath, prefix))
 }
 
-function shouldSkipDangerousScan(path: string | null, content: string): boolean {
-  if (path === 'tests/AllFatherReviewPolicy.test.ts') return true
-  return false
-}
-
 function redactExcerpt(line: string): string {
   return line
     .replace(/\bghp_[A-Za-z0-9]{20,}\b/g, '[REDACTED_GITHUB_TOKEN]')
@@ -293,7 +288,6 @@ export function evaluateAllFatherReview(input: AllFatherReviewInput): AllFatherR
   }
 
   for (const addedLine of extractAddedDiffLines(input.diff)) {
-    if (shouldSkipDangerousScan(addedLine.path, addedLine.content)) continue
     for (const pattern of DANGEROUS_PATTERNS) {
       if (!pattern.patterns.some(candidate => candidate.test(addedLine.content))) continue
       pushFinding({
