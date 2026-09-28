@@ -68,19 +68,22 @@ const PROTECTED_SANDBOX_PATHS = Object.freeze([
   { prefix: '.github/workflows/', capability: 'modify_deployment_credentials' },
   { prefix: 'supabase/migrations/', capability: 'modify_rls' },
   { prefix: 'supabase/functions/', capability: 'modify_production_access_controls' },
+  { prefix: 'src/App.tsx', capability: 'modify_production_access_controls' },
   { prefix: 'src/components/AdminDaemonInterface.tsx', capability: 'modify_production_access_controls' },
   { prefix: 'src/components/LoginView.tsx', capability: 'modify_auth' },
   { prefix: 'src/components/SupabaseProjectAccessPanel.tsx', capability: 'modify_production_access_controls' },
   { prefix: 'src/services/adminDaemon', capability: 'modify_audit_controls' },
   { prefix: 'src/services/daemonAuth', capability: 'modify_auth' },
   { prefix: 'src/services/daemonEvolutionFoundation.ts', capability: 'change_control_plane_policy' },
+  { prefix: 'src/services/daemonStorageMigration.ts', capability: 'change_control_plane_policy' },
+  { prefix: 'src/main.tsx', capability: 'modify_production_access_controls' },
   { prefix: 'src/services/supabaseAuth', capability: 'modify_auth' },
   { prefix: 'src/services/supabasePersistence.ts', capability: 'modify_audit_controls' },
   { prefix: 'src/services/supabaseProjectAccess.ts', capability: 'modify_production_access_controls' },
   { prefix: '.env', capability: 'modify_secrets' },
 ] as const satisfies ReadonlyArray<{ prefix: string, capability: DaemonCapability }>)
 const SANDBOX_WRITABLE_PATH_ALLOWLIST = Object.freeze([
-  /^(?!.*(?:^|\/)\.\.(?:\/|$))(src|tests?|docs?)\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
+  /^(?!.*(?:^|\/)\.\.(?:\/|$))(?:src\/experimental|tests?|docs?)\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/,
 ])
 
 export function decideDaemonCapability(capability: DaemonCapability): CapabilityDecision {
@@ -697,11 +700,31 @@ export function enforceEvolutionBudget(
   usage: EvolutionBudgetUsage,
   limits: EvolutionBudgetLimits,
 ): BudgetCheckResult {
-  if (
-    !Object.values(usage).every(value => Number.isFinite(value) && value >= 0)
-    || !Object.values(limits).every(value => Number.isFinite(value) && value >= 0)
-  ) {
-    return { ok: false, reason: 'Budget usage and limits must be finite and non-negative.' }
+  const requiredUsageFields: ReadonlyArray<keyof EvolutionBudgetUsage> = [
+    'runtimeMs',
+    'cpuMs',
+    'memoryMb',
+    'apiCalls',
+    'spendUsd',
+  ]
+  const requiredLimitFields: ReadonlyArray<keyof EvolutionBudgetLimits> = [
+    'maxRuntimeMs',
+    'maxCpuMs',
+    'maxMemoryMb',
+    'maxApiCalls',
+    'maxSpendUsd',
+  ]
+  const hasValidField = (source: Record<string, unknown>, field: string): boolean => (
+    Object.prototype.hasOwnProperty.call(source, field)
+    && typeof source[field] === 'number'
+    && Number.isFinite(source[field])
+    && (source[field] as number) >= 0
+  )
+  if (!requiredUsageFields.every(field => hasValidField(usage as Record<string, unknown>, field))) {
+    return { ok: false, reason: 'Budget usage must include finite, non-negative runtime/cpu/memory/api/spend fields.' }
+  }
+  if (!requiredLimitFields.every(field => hasValidField(limits as Record<string, unknown>, field))) {
+    return { ok: false, reason: 'Budget limits must include finite, non-negative maxRuntime/maxCpu/maxMemory/maxApi/maxSpend fields.' }
   }
   if (usage.runtimeMs > limits.maxRuntimeMs) return { ok: false, reason: 'Runtime budget exceeded.' }
   if (usage.cpuMs > limits.maxCpuMs) return { ok: false, reason: 'CPU budget exceeded.' }

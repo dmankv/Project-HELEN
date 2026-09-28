@@ -37,7 +37,41 @@ permissions:
   contents: read
 
 jobs:
+  unit-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Restore trusted gate control-plane files and baseline unit tests
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$DEFAULT_BRANCH"
+          TRUSTED_REF="origin/$DEFAULT_BRANCH"
+          git checkout "$TRUSTED_REF" -- \
+            package.json \
+            package-lock.json \
+            tsconfig.json \
+            tsconfig.test.json \
+            vite.config.ts \
+            tests
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run trusted baseline unit gate
+        run: node_modules/.bin/vitest run
+
   live-eval:
+    needs: unit-gate
+    if: always()
     runs-on: ubuntu-latest
     env:
       DAEMON_EVAL_LIVE: 'true'
@@ -135,11 +169,6 @@ jobs:
         id: lint_gate
         continue-on-error: true
         run: node_modules/.bin/eslint src server
-
-      - name: Run unit gate
-        id: unit_gate
-        continue-on-error: true
-        run: node_modules/.bin/vitest run
 
       - name: Restore trusted gate workspace before build gate
         env:
@@ -544,7 +573,7 @@ jobs:
           EVOLUTION_RUN_ID: ${{ github.event.inputs.run_id || '' }}
           TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
           LINT_STATUS: ${{ steps.lint_gate.outcome }}
-          UNIT_STATUS: ${{ steps.unit_gate.outcome }}
+          UNIT_STATUS: ${{ needs.unit-gate.result }}
           BUILD_STATUS: ${{ steps.build_gate.outcome }}
           SECURITY_SCAN_STATUS: ${{ steps.security_scan_gate.outcome }}
           SECRET_SCAN_STATUS: ${{ steps.secret_scan_gate.outcome }}
@@ -572,7 +601,7 @@ jobs:
           const gateDefinitions = [
             ['typecheck', process.env.TYPECHECK_STATUS, 'Typecheck completed.', false],
             ['lint', process.env.LINT_STATUS, 'Lint completed.', false],
-            ['unit', process.env.UNIT_STATUS, 'Unit tests completed.', false],
+            ['unit', process.env.UNIT_STATUS, 'Trusted baseline unit tests completed.', false],
             ['build', process.env.BUILD_STATUS, 'Build completed.', false],
             ['security_scan', process.env.SECURITY_SCAN_STATUS, 'Security scan completed.', false],
             ['secret_scan', process.env.SECRET_SCAN_STATUS, 'Secret scan completed.', false],
@@ -624,7 +653,7 @@ jobs:
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
           TYPECHECK_STATUS: ${{ steps.typecheck_gate.outcome }}
           LINT_STATUS: ${{ steps.lint_gate.outcome }}
-          UNIT_STATUS: ${{ steps.unit_gate.outcome }}
+          UNIT_STATUS: ${{ needs.unit-gate.result }}
           BUILD_STATUS: ${{ steps.build_gate.outcome }}
           SECURITY_SCAN_STATUS: ${{ steps.security_scan_gate.outcome }}
           SECRET_SCAN_STATUS: ${{ steps.secret_scan_gate.outcome }}

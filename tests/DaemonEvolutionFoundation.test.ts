@@ -108,11 +108,11 @@ describe('sandbox adapters', () => {
       maxFileBytes: 10,
     })
     const workspace = adapter.createWorkspace()
-    const write = adapter.writeFile(workspace.workspaceId, 'src/x.ts', 'export const value = 123')
+    const write = adapter.writeFile(workspace.workspaceId, 'src/experimental/x.ts', 'export const value = 123')
 
     expect(write.ok).toBe(false)
     expect(write.message).toContain('exceeds 10 bytes')
-    expect(() => adapter.createWorkspace({ 'src/seed.ts': 'export const value = 123' })).toThrow('exceeds 10 bytes')
+    expect(() => adapter.createWorkspace({ 'src/experimental/seed.ts': 'export const value = 123' })).toThrow('exceeds 10 bytes')
   })
 
   it('configured sandbox denies protected paths and revalidates snapshots', () => {
@@ -121,7 +121,7 @@ describe('sandbox adapters', () => {
       backendId: 'immutable-controller',
       maxFileBytes: 1024,
     })
-    const workspace = adapter.createWorkspace({ 'src/candidate.ts': 'export {}' })
+    const workspace = adapter.createWorkspace({ 'src/experimental/candidate.ts': 'export {}' })
 
     const blockedWrite = adapter.writeFile(
       workspace.workspaceId,
@@ -144,7 +144,22 @@ describe('sandbox adapters', () => {
         ok: false,
         denied: true,
       })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/App.tsx', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/main.tsx', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
     expect(adapter.writeFile(workspace.workspaceId, 'src/services/daemonAuthAPI.ts', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/services/daemonStorageMigration.ts', 'export {}'))
       .toMatchObject({
         ok: false,
         denied: true,
@@ -169,6 +184,11 @@ describe('sandbox adapters', () => {
         denied: true,
       })
     expect(adapter.writeFile(workspace.workspaceId, 'src/My Component.tsx', 'export {}'))
+      .toMatchObject({
+        ok: false,
+        denied: true,
+      })
+    expect(adapter.writeFile(workspace.workspaceId, 'src/candidate.ts', 'export {}'))
       .toMatchObject({
         ok: false,
         denied: true,
@@ -519,6 +539,15 @@ describe('budgets, audit redaction, and canary fail-closed behavior', () => {
 
     expect(enforceEvolutionBudget(
       { runtimeMs: Number.NaN, cpuMs: 0, memoryMb: 0, apiCalls: 0, spendUsd: 0 },
+      { maxRuntimeMs: 1, maxCpuMs: 1, maxMemoryMb: 1, maxApiCalls: 1, maxSpendUsd: 1 },
+    ).ok).toBe(false)
+    expect(enforceEvolutionBudget(
+      {
+        runtimeMs: 1,
+        cpuMs: 1,
+        memoryMb: 1,
+        apiCalls: 1,
+      } as unknown as Parameters<typeof enforceEvolutionBudget>[0],
       { maxRuntimeMs: 1, maxCpuMs: 1, maxMemoryMb: 1, maxApiCalls: 1, maxSpendUsd: 1 },
     ).ok).toBe(false)
   })
