@@ -422,7 +422,8 @@ class AuthStore {
         try {
           fs.rmSync(lockDir)
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          const code = (error as NodeJS.ErrnoException).code
+          if (code !== 'ENOENT' && code !== 'ENOTEMPTY') throw error
         }
       }
     } finally {
@@ -453,7 +454,7 @@ class AuthStore {
 
   private isUnsupportedLinkError(error: unknown): boolean {
     const code = (error as NodeJS.ErrnoException).code
-    return code === 'EMLINK' || code === 'ENOSYS' || code === 'ENOTSUP' || code === 'EPERM' || code === 'EXDEV'
+    return code === 'EMLINK' || code === 'ENOSYS' || code === 'ENOTSUP' || code === 'EXDEV'
   }
 
   private persist(): void {
