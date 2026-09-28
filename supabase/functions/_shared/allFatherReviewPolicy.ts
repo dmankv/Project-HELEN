@@ -211,6 +211,9 @@ export function extractAddedDiffLines(diff: string): AddedDiffLine[] {
       if (nextLineNumber !== null) nextLineNumber += 1
       continue
     }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      continue
+    }
     if (line.startsWith(' ') || line.length === 0) {
       if (nextLineNumber !== null) nextLineNumber += 1
     }
