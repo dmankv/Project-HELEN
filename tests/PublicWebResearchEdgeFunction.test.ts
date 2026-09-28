@@ -37,6 +37,20 @@ describe('public web research edge gateway source', () => {
       blocked_reasons: ['Research DNS-pinned transport is not implemented.'],
     })
   })
+
+  it('maps research failure catch paths to fixed safe reasons', () => {
+    expect(src).toContain("const SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON = 'Research request could not be recorded; request blocked safely.'")
+    expect(src).toContain("const SAFE_RESEARCH_RUNTIME_FAILURE_REASON = 'Research request failed safely due to internal policy/runtime handling.'")
+    expect(src).toMatch(
+      /code:\s*error instanceof ResearchPersistenceError\s*\?\s*'blocked_persistence_failure'\s*:\s*'blocked_invalid_config'/,
+    )
+    expect(src).toMatch(
+      /reason:\s*error instanceof ResearchPersistenceError\s*\?\s*SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON\s*:\s*SAFE_RESEARCH_RUNTIME_FAILURE_REASON/,
+    )
+    expect(src).toMatch(
+      /blocked_reasons:\s*\[\s*error instanceof ResearchPersistenceError\s*\?\s*SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON\s*:\s*SAFE_RESEARCH_RUNTIME_FAILURE_REASON,\s*\]/,
+    )
+  })
 })
 
 describe('public web research migration', () => {
