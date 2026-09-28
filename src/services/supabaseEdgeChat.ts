@@ -217,16 +217,21 @@ export async function callEdgeFunction(
 
   const controller = new AbortController()
   let timedOut = false
+  const forwardAbort = () => controller.abort()
   const timeoutId = setTimeout(() => {
     timedOut = true
     controller.abort()
   }, EDGE_TIMEOUT_MS)
+  const cleanup = () => {
+    clearTimeout(timeoutId)
+    if (signal) signal.removeEventListener('abort', forwardAbort)
+  }
 
   if (signal?.aborted) {
-    clearTimeout(timeoutId)
+    cleanup()
     return createEdgeChatFailure('aborted')
   }
-  if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true })
+  if (signal) signal.addEventListener('abort', forwardAbort, { once: true })
 
   const functionUrl = SUPABASE_URL + '/functions/v1/daemon-chat'
 
@@ -247,7 +252,7 @@ export async function callEdgeFunction(
       signal: controller.signal,
     })
 
-    clearTimeout(timeoutId)
+    cleanup()
 
     if (!res.ok) {
       const safeCode = await readSafeErrorCode(res)
@@ -262,7 +267,7 @@ export async function callEdgeFunction(
     }
     return data.message
   } catch (err) {
-    clearTimeout(timeoutId)
+    cleanup()
     const failure = classifyEdgeTransportFailure(err, { timedOut })
     console.warn(
       failure.category === 'network' ? '[edge-chat] request error' : '[edge-chat] request aborted',
@@ -284,15 +289,20 @@ export async function requestPublicWebResearch(
 
   const controller = new AbortController()
   let timedOut = false
+  const forwardAbort = () => controller.abort()
   const timeoutId = setTimeout(() => {
     timedOut = true
     controller.abort()
   }, EDGE_TIMEOUT_MS)
-  if (signal?.aborted) {
+  const cleanup = () => {
     clearTimeout(timeoutId)
+    if (signal) signal.removeEventListener('abort', forwardAbort)
+  }
+  if (signal?.aborted) {
+    cleanup()
     return createEdgeChatFailure('aborted')
   }
-  if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true })
+  if (signal) signal.addEventListener('abort', forwardAbort, { once: true })
 
   try {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/daemon-chat`, {
@@ -312,14 +322,14 @@ export async function requestPublicWebResearch(
       }),
       signal: controller.signal,
     })
-    clearTimeout(timeoutId)
+    cleanup()
     if (!response.ok) {
       const safeCode = await readSafeErrorCode(response)
       return classifyEdgeStatusFailure(response.status, safeCode)
     }
     return await response.json() as PublicWebResearchResult
   } catch (error) {
-    clearTimeout(timeoutId)
+    cleanup()
     return classifyEdgeTransportFailure(error, { timedOut })
   }
 }

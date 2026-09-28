@@ -318,6 +318,7 @@ export function robotsAllowsPath(robotsTxt: string, targetPath: string): boolean
     .map(line => line.trim())
     .filter(line => line.length > 0 && !line.startsWith('#'))
   let appliesToAllAgents = false
+  const rules: Array<{ type: 'allow' | 'disallow'; path: string }> = []
   for (const line of lines) {
     const lower = line.toLowerCase()
     if (lower.startsWith('user-agent:')) {
@@ -328,11 +329,20 @@ export function robotsAllowsPath(robotsTxt: string, targetPath: string): boolean
     if (!appliesToAllAgents) continue
     if (lower.startsWith('disallow:')) {
       const path = line.slice('disallow:'.length).trim()
-      if (path === '/') return false
-      if (path && targetPath.startsWith(path)) return false
+      if (path) rules.push({ type: 'disallow', path })
+      continue
+    }
+    if (lower.startsWith('allow:')) {
+      const path = line.slice('allow:'.length).trim()
+      if (path) rules.push({ type: 'allow', path })
     }
   }
-  return true
+  const matchingRules = rules.filter(rule => targetPath.startsWith(rule.path))
+  if (matchingRules.length === 0) return true
+  matchingRules.sort((a, b) => b.path.length - a.path.length)
+  const strongest = matchingRules[0]
+  if (strongest.path === '/' && strongest.type === 'disallow') return false
+  return strongest.type === 'allow'
 }
 
 export function redactResearchAuditMetadata(

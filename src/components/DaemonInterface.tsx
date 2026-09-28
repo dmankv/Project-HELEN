@@ -571,6 +571,7 @@ export default function DaemonInterface({
             timestamp: new Date().toISOString(),
           }
           persistConversationMessages(convId, [...nextMessages, aiMsg])
+          abortRef.current = null
           setIsThinking(false)
           return
         }
@@ -582,6 +583,7 @@ export default function DaemonInterface({
             timestamp: new Date().toISOString(),
           }
           persistConversationMessages(convId, [...nextMessages, aiMsg])
+          abortRef.current = null
           setIsThinking(false)
           return
         }

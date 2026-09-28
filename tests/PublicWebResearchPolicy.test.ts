@@ -75,6 +75,16 @@ describe('public web research policy', () => {
     expect(robotsAllowsPath(robots, '/public')).toBe(true)
   })
 
+  it('applies longest robots rule and allow-overrides for nested paths', () => {
+    const robots = `
+      User-agent: *
+      Disallow: /private
+      Allow: /private/public
+    `
+    expect(robotsAllowsPath(robots, '/private/secret')).toBe(false)
+    expect(robotsAllowsPath(robots, '/private/public/doc')).toBe(true)
+  })
+
   it('supports only bounded text-like content types', () => {
     expect(isSupportedResearchContentType('text/html; charset=utf-8')).toBe(true)
     expect(isSupportedResearchContentType('application/json')).toBe(true)

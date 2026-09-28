@@ -660,21 +660,21 @@ async function executePublicWebResearch(
       blocked_count: 1,
       blocked_reasons: ['Public-web research mode is not configured.'],
     }
-    if (!config.dnsPinningConfigured) {
-      return {
-        request_type: 'public_web_research',
-        status: 'unavailable',
-        decision: {
-          allowed: false,
-          code: 'blocked_invalid_config',
-          reason: 'Research DNS pinning backend is not configured; gateway remains fail-closed.',
-        },
-        provenance: null,
-        excerpt: null,
-        source_count: 0,
-        blocked_count: 1,
-        blocked_reasons: ['Research DNS pinning backend is not configured.'],
-      }
+  }
+  if (!config.dnsPinningConfigured) {
+    return {
+      request_type: 'public_web_research',
+      status: 'unavailable',
+      decision: {
+        allowed: false,
+        code: 'blocked_invalid_config',
+        reason: 'Research DNS pinning backend is not configured; gateway remains fail-closed.',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: 0,
+      blocked_count: 1,
+      blocked_reasons: ['Research DNS pinning backend is not configured.'],
     }
   }
 
