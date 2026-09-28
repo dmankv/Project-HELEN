@@ -58,7 +58,7 @@ $$;
 
 create table if not exists public.evolution_gate_results (
   id                   uuid primary key default gen_random_uuid(),
-  run_id               uuid not null references public.evolution_runs(run_id) on delete cascade,
+  run_id               uuid not null references public.evolution_runs(run_id) on delete restrict,
   user_id              uuid not null references auth.users(id) on delete cascade,
   gate                 text not null,
   status               text not null,
@@ -114,7 +114,7 @@ $$;
 
 create table if not exists public.evolution_audit_events (
   event_id             uuid primary key default gen_random_uuid(),
-  run_id               uuid references public.evolution_runs(run_id) on delete set null,
+  run_id               uuid references public.evolution_runs(run_id) on delete restrict,
   user_id              uuid not null references auth.users(id) on delete cascade,
   event_type           text not null,
   message              text not null default '',
