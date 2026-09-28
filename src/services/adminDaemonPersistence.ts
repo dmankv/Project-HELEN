@@ -286,7 +286,7 @@ export interface AdminDiagnosticsStatus {
   sessionActive: boolean
   supabaseUrl: string
   evolution: AdminEvolutionStatusModel | null
-  evolutionStatus: 'unavailable'
+  evolutionStatus: 'available' | 'unavailable' | 'error'
 }
 
 export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatus> {

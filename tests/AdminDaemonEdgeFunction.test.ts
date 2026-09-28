@@ -136,6 +136,15 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain("logAudit('admin_evolution_status'")
   })
 
+  it('surfaces explicit diagnostics availability states instead of masking query failures', () => {
+    expect(src).toContain("evolutionStatus: 'available'")
+    expect(src).toContain("evolutionStatus: 'unavailable'")
+    expect(src).toContain("evolutionStatus: 'error'")
+    expect(src).toContain('const { data: run, error: runError } = await serviceClient')
+    expect(src).toContain('if (runError) {')
+    expect(src).toContain('gateResultsError || recentAuditEventsError || latestCanaryDecisionError || latestBudgetCheckError')
+  })
+
   it('validates strategy against explicit allowlist', () => {
     expect(src).toContain('ALLOWED_STRATEGIES')
     expect(src).toContain('validateStrategyMetadata(')

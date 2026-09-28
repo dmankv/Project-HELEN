@@ -355,7 +355,7 @@ interface EvolutionStatusResponse {
   persistenceConfigured: boolean
   sessionActive: boolean
   supabaseUrl: string
-  evolutionStatus: 'unavailable'
+  evolutionStatus: 'available' | 'unavailable' | 'error'
   evolution: {
     currentVersion: string
     runState: string
@@ -461,13 +461,25 @@ async function buildEvolutionStatusResponse(
 ): Promise<EvolutionStatusResponse> {
   const infrastructure = buildEvolutionInfrastructureStatus()
   const supabaseHost = getSupabaseHost(supabaseUrl)
-  const { data: run } = await serviceClient
+  const { data: run, error: runError } = await serviceClient
     .from('evolution_runs')
     .select('run_id, candidate_version, candidate_snapshot_id, deployed_version, stage, status')
     .eq('user_id', userId)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle()
+
+  if (runError) {
+    return {
+      request_type: 'evolution_status',
+      persistenceConfigured: true,
+      sessionActive: true,
+      supabaseUrl: supabaseHost,
+      evolutionStatus: 'error',
+      evolution: null,
+      infrastructure,
+    }
+  }
 
   if (!run) {
     return {
@@ -481,7 +493,12 @@ async function buildEvolutionStatusResponse(
     }
   }
 
-  const [{ data: gateResults }, { data: recentAuditEvents }, { data: latestCanaryDecision }, { data: latestBudgetCheck }] = await Promise.all([
+  const [
+    { data: gateResults, error: gateResultsError },
+    { data: recentAuditEvents, error: recentAuditEventsError },
+    { data: latestCanaryDecision, error: latestCanaryDecisionError },
+    { data: latestBudgetCheck, error: latestBudgetCheckError },
+  ] = await Promise.all([
     serviceClient
       .from('evolution_gate_results')
       .select('gate, status, detail, duration_ms, required')
@@ -515,12 +532,24 @@ async function buildEvolutionStatusResponse(
       .maybeSingle(),
   ])
 
+  if (gateResultsError || recentAuditEventsError || latestCanaryDecisionError || latestBudgetCheckError) {
+    return {
+      request_type: 'evolution_status',
+      persistenceConfigured: true,
+      sessionActive: true,
+      supabaseUrl: supabaseHost,
+      evolutionStatus: 'error',
+      evolution: null,
+      infrastructure,
+    }
+  }
+
   return {
     request_type: 'evolution_status',
     persistenceConfigured: true,
     sessionActive: true,
     supabaseUrl: supabaseHost,
-    evolutionStatus: 'unavailable',
+    evolutionStatus: 'available',
     evolution: {
       currentVersion: run.deployed_version,
       runState: run.status,
