@@ -49,6 +49,7 @@ describe('public web research policy', () => {
     expect(classifyIpLiteral('::ffff:10.0.0.1').allowed).toBe(false)
     expect(classifyIpLiteral('2001:db8::1').allowed).toBe(false)
     expect(classifyIpLiteral('2001:4860:4860::8888').allowed).toBe(true)
+    expect(classifyIpLiteral('203.0.113.10').allowed).toBe(false)
   })
 
   it('blocks explicit and uncertain high-risk categories', () => {
@@ -87,6 +88,15 @@ describe('public web research policy', () => {
     `
     expect(robotsAllowsPath(robots, '/private/secret')).toBe(false)
     expect(robotsAllowsPath(robots, '/private/public/doc')).toBe(true)
+  })
+
+  it('prefers allow on equal-length robots path ties', () => {
+    const robots = `
+      User-agent: *
+      Disallow: /same
+      Allow: /same
+    `
+    expect(robotsAllowsPath(robots, '/same/path')).toBe(true)
   })
 
   it('does not treat later non-wildcard robots groups as wildcard rules', () => {

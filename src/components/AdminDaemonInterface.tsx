@@ -833,6 +833,16 @@ export default function AdminDaemonInterface({
                   <li>Search endpoint configured: {String(diagnostics.research.searchEndpointConfigured)}</li>
                   <li>Research sources fetched: {diagnostics.research.fetchedSources}</li>
                   <li>Research policy blocks: {diagnostics.research.blockedEvents}</li>
+                  <li>
+                    Research blocked reasons: {diagnostics.research.blockedReasons.length}
+                    {diagnostics.research.blockedReasons.length > 0 && (
+                      <ul>
+                        {diagnostics.research.blockedReasons.map(reason => (
+                          <li key={`${reason.reason}:${reason.count}`}>{reason.reason}: {reason.count}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
                   <li>Quarantined insights: {diagnostics.research.quarantinedInsights}</li>
                   <li>Expired insights: {diagnostics.research.expiredInsights}</li>
                 </>
