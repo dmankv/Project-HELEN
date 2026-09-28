@@ -110,9 +110,12 @@ jobs:
           CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '' }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           CURRENT_REF_NAME: ${{ github.ref_name }}
+          TRUSTED_WORKFLOW_REF: ${{ github.workflow_ref }}
           DEFAULT_CANDIDATE_SHA: ${{ github.sha }}
         run: |
           UUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          echo "workflow_ref=$TRUSTED_WORKFLOW_REF" >> "$GITHUB_OUTPUT"
+          echo "workflow_sha=$DEFAULT_CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
           if [ -n "$CANDIDATE_VERSION" ] && [ -n "$CANDIDATE_SNAPSHOT_ID" ] && [ -n "$EVOLUTION_RUN_ID" ] && [ -n "$CANDIDATE_SHA" ]; then
             printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq "$UUID_PATTERN"
             printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq "$UUID_PATTERN"
@@ -588,8 +591,8 @@ jobs:
           RESOURCE_BUDGET_STATUS: ${{ steps.resource_budget_gate.outcome }}
           REGRESSION_STATUS: ${{ steps.regression_gate.outcome }}
           LIVE_EVAL_CONFIGURED: ${{ steps.config.outputs.configured }}
-          LIVE_EVAL_WORKFLOW_REF: ${{ github.workflow_ref }}
-          LIVE_EVAL_WORKFLOW_SHA: ${{ github.sha }}
+          LIVE_EVAL_WORKFLOW_REF: ${{ steps.binding.outputs.workflow_ref }}
+          LIVE_EVAL_WORKFLOW_SHA: ${{ steps.binding.outputs.workflow_sha }}
         run: |
           node <<'NODE'
           const fs = require('fs')
