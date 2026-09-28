@@ -34,6 +34,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS } from '../_shared/publicWebResearchPolicy.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -616,6 +617,116 @@ async function buildEvolutionStatusResponse(
   }
 }
 
+function parseResearchMode(value: string | undefined): 'denied' | 'configured' {
+  return value?.toLowerCase() === 'configured' ? 'configured' : 'denied'
+}
+
+function parseNonNegativeIntegerCount(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 0 ? value : null
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) ? parsed : null
+  }
+  return null
+}
+
+function isResearchStatusRequest(body: unknown): body is Record<string, unknown> & { request_type: 'research_status' } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  return (body as Record<string, unknown>).request_type === 'research_status'
+}
+
+interface ResearchStatusResponse {
+  request_type: 'research_status'
+  diagnostics_status: 'available' | 'unavailable' | 'error'
+  configuration: {
+    mode: 'denied' | 'configured'
+    dns_pinning_configured: boolean
+    search_provider_configured: boolean
+    search_endpoint_configured: boolean
+    budgets: typeof IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS
+  }
+  counters: {
+    fetched_sources: number
+    blocked_events: number
+    quarantined_insights: number
+    expired_insights: number
+  }
+  blocked_reasons: Array<{ reason: string; count: number }>
+}
+
+async function buildResearchStatusResponse(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<ResearchStatusResponse> {
+  const mode = parseResearchMode(Deno.env.get('DAEMON_PUBLIC_WEB_RESEARCH_MODE') ?? undefined)
+  const dnsPinningConfigured = (Deno.env.get('DAEMON_RESEARCH_DNS_PINNING_MODE') ?? '').toLowerCase() === 'configured'
+  const searchEndpointConfigured = (Deno.env.get('DAEMON_RESEARCH_SEARCH_ENDPOINT') ?? '').trim().length > 0
+  const searchProviderConfigured = searchEndpointConfigured
+    && (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim().length > 0
+
+  const [provenanceCount, aggregates] = await Promise.all([
+    serviceClient
+      .from('research_fetch_provenance')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+    serviceClient
+      .rpc('get_research_status_aggregates', { target_user_id: userId })
+      .single(),
+  ])
+
+  if (provenanceCount.error || aggregates.error) {
+    return {
+      request_type: 'research_status',
+      diagnostics_status: 'error',
+      configuration: {
+        mode,
+        dns_pinning_configured: dnsPinningConfigured,
+        search_provider_configured: searchProviderConfigured,
+        search_endpoint_configured: searchEndpointConfigured,
+        budgets: IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+      },
+      counters: {
+        fetched_sources: 0,
+        blocked_events: 0,
+        quarantined_insights: 0,
+        expired_insights: 0,
+      },
+      blocked_reasons: [],
+    }
+  }
+
+  const blockedReasons = Array.isArray(aggregates.data?.blocked_reasons)
+    ? (aggregates.data.blocked_reasons as Array<{ reason?: unknown; count?: unknown }>)
+      .flatMap(entry => {
+        const reason = typeof entry.reason === 'string' ? entry.reason : ''
+        const count = parseNonNegativeIntegerCount(entry.count)
+        if (reason.length === 0 || count === null) return []
+        return [{ reason, count }]
+      })
+    : []
+
+  return {
+    request_type: 'research_status',
+    diagnostics_status: 'available',
+    configuration: {
+      mode,
+      dns_pinning_configured: dnsPinningConfigured,
+      search_provider_configured: searchProviderConfigured,
+      search_endpoint_configured: searchEndpointConfigured,
+      budgets: IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+    },
+    counters: {
+      fetched_sources: provenanceCount.count ?? 0,
+      blocked_events: parseNonNegativeIntegerCount(aggregates.data?.blocked_events) ?? 0,
+      quarantined_insights: parseNonNegativeIntegerCount(aggregates.data?.quarantined_insights) ?? 0,
+      expired_insights: parseNonNegativeIntegerCount(aggregates.data?.expired_insights) ?? 0,
+    },
+    blocked_reasons: blockedReasons,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AI provider call
 // ---------------------------------------------------------------------------
@@ -781,6 +892,17 @@ Deno.serve(async (req: Request) => {
     logAudit('admin_evolution_status', { user_id: user.id })
     return new Response(
       JSON.stringify(await buildEvolutionStatusResponse(serviceClient, user.id, supabaseUrl)),
+      {
+        status: 200,
+        headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },
+      },
+    )
+  }
+
+  if (isResearchStatusRequest(body)) {
+    logAudit('admin_research_status', { user_id: user.id })
+    return new Response(
+      JSON.stringify(await buildResearchStatusResponse(serviceClient, user.id)),
       {
         status: 200,
         headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },

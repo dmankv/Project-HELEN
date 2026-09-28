@@ -11,6 +11,8 @@ export type DaemonCapability =
   | 'run_tests'
   | 'evaluate_candidate'
   | 'deploy_canary'
+  | 'research_public_web'
+  | 'store_external_insight'
   | 'write_main'
   | 'modify_secrets'
   | 'modify_auth'
@@ -38,6 +40,7 @@ export const AUTONOMOUS_ALLOWED_CAPABILITIES = Object.freeze([
   'run_tests',
   'evaluate_candidate',
   'deploy_canary',
+  'research_public_web',
 ] as const)
 
 export const AUTONOMOUS_DENIED_CAPABILITIES = Object.freeze([

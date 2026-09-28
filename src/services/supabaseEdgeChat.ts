@@ -88,6 +88,31 @@ export interface EdgeChatMetadata {
   interactionId?: string
 }
 
+export interface PublicWebResearchRequest {
+  url?: string
+  searchQuery?: string
+  method?: 'GET' | 'HEAD'
+  storeInsight?: boolean
+}
+
+export interface PublicWebResearchResult {
+  status: 'success' | 'unavailable' | 'policy_blocked' | 'error'
+  decision: {
+    allowed: boolean
+    code: string
+    reason: string
+  }
+  excerpt: string | null
+  provenance: {
+    normalizedUrl: string
+    host: string
+    httpStatus: number
+    contentType: string
+    byteSize: number
+  } | null
+  blocked_reasons: string[]
+}
+
 function isSafeEdgeFunctionErrorCode(value: unknown): value is SafeEdgeFunctionErrorCode {
   return typeof value === 'string' && SAFE_EDGE_FUNCTION_ERROR_CODES.has(value as SafeEdgeFunctionErrorCode)
 }
@@ -113,7 +138,7 @@ export function createEdgeChatFailure(
   }
 }
 
-export function isEdgeChatFailure(result: string | APIFailure | null): result is EdgeChatFailure {
+export function isEdgeChatFailure(result: unknown): result is EdgeChatFailure {
   return result !== null && typeof result === 'object' && 'category' in result
 }
 
@@ -192,16 +217,21 @@ export async function callEdgeFunction(
 
   const controller = new AbortController()
   let timedOut = false
+  const forwardAbort = () => controller.abort()
   const timeoutId = setTimeout(() => {
     timedOut = true
     controller.abort()
   }, EDGE_TIMEOUT_MS)
+  const cleanup = () => {
+    clearTimeout(timeoutId)
+    if (signal) signal.removeEventListener('abort', forwardAbort)
+  }
 
   if (signal?.aborted) {
-    clearTimeout(timeoutId)
+    cleanup()
     return createEdgeChatFailure('aborted')
   }
-  if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true })
+  if (signal) signal.addEventListener('abort', forwardAbort, { once: true })
 
   const functionUrl = SUPABASE_URL + '/functions/v1/daemon-chat'
 
@@ -222,7 +252,7 @@ export async function callEdgeFunction(
       signal: controller.signal,
     })
 
-    clearTimeout(timeoutId)
+    cleanup()
 
     if (!res.ok) {
       const safeCode = await readSafeErrorCode(res)
@@ -237,12 +267,69 @@ export async function callEdgeFunction(
     }
     return data.message
   } catch (err) {
-    clearTimeout(timeoutId)
+    cleanup()
     const failure = classifyEdgeTransportFailure(err, { timedOut })
     console.warn(
       failure.category === 'network' ? '[edge-chat] request error' : '[edge-chat] request aborted',
       { category: failure.category },
     )
     return failure
+  }
+}
+
+export async function requestPublicWebResearch(
+  request: PublicWebResearchRequest,
+  signal?: AbortSignal,
+): Promise<PublicWebResearchResult | EdgeChatFailure> {
+  const client = getClient()
+  if (!client) return createEdgeChatFailure('not-configured')
+  const { data: sessionData } = await client.auth.getSession()
+  const session = sessionData?.session
+  if (!session) return createEdgeChatFailure('not-signed-in')
+
+  const controller = new AbortController()
+  let timedOut = false
+  const forwardAbort = () => controller.abort()
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, EDGE_TIMEOUT_MS)
+  const cleanup = () => {
+    clearTimeout(timeoutId)
+    if (signal) signal.removeEventListener('abort', forwardAbort)
+  }
+  if (signal?.aborted) {
+    cleanup()
+    return createEdgeChatFailure('aborted')
+  }
+  if (signal) signal.addEventListener('abort', forwardAbort, { once: true })
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/daemon-chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token,
+      },
+      body: JSON.stringify({
+        request_type: 'public_web_research',
+        research: {
+          ...(request.url ? { url: request.url } : {}),
+          ...(request.searchQuery ? { search_query: request.searchQuery } : {}),
+          ...(request.method ? { method: request.method } : {}),
+          ...(request.storeInsight ? { store_insight: true } : {}),
+        },
+      }),
+      signal: controller.signal,
+    })
+    cleanup()
+    if (!response.ok) {
+      const safeCode = await readSafeErrorCode(response)
+      return classifyEdgeStatusFailure(response.status, safeCode)
+    }
+    return await response.json() as PublicWebResearchResult
+  } catch (error) {
+    cleanup()
+    return classifyEdgeTransportFailure(error, { timedOut })
   }
 }

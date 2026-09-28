@@ -287,26 +287,146 @@ export interface AdminDiagnosticsStatus {
   supabaseUrl: string
   evolution: AdminEvolutionStatusModel | null
   evolutionStatus: 'available' | 'unavailable' | 'error'
+  researchStatus: 'available' | 'unavailable' | 'error'
+  research: {
+    mode: 'denied' | 'configured'
+    dnsPinningConfigured: boolean
+    searchProviderConfigured: boolean
+    searchEndpointConfigured: boolean
+    fetchedSources: number
+    blockedEvents: number
+    blockedReasons: Array<{ reason: string; count: number }>
+    quarantinedInsights: number
+    expiredInsights: number
+  } | null
+}
+
+function parseNonNegativeIntegerCount(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 0 ? value : null
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) ? parsed : null
+  }
+  return null
 }
 
 export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatus> {
   const configured = isAdminPersistenceConfigured()
   const client = configured ? getClient() : null
   let sessionActive = false
+  let accessToken: string | null = null
   if (client) {
     const { data } = await client.auth.getSession()
     sessionActive = Boolean(data.session)
+    accessToken = data.session?.access_token ?? null
   }
   // Show only the hostname, not the full URL, to avoid leaking project details.
   let urlHost = ''
   try {
     if (SUPABASE_URL) urlHost = new URL(SUPABASE_URL).hostname
   } catch { /* best-effort */ }
+
+  let evolution: AdminEvolutionStatusModel | null = null
+  let evolutionStatus: 'available' | 'unavailable' | 'error' = 'unavailable'
+  let research: AdminDiagnosticsStatus['research'] = null
+  let researchStatus: 'available' | 'unavailable' | 'error' = 'unavailable'
+  let evolutionResolved = false
+
+  if (configured && sessionActive && accessToken) {
+    const endpoint = `${SUPABASE_URL}/functions/v1/admin-daemon`
+    try {
+      const [evolutionRes, researchRes] = await Promise.allSettled([
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + accessToken,
+          },
+          body: JSON.stringify({ request_type: 'evolution_status' }),
+        }),
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + accessToken,
+          },
+          body: JSON.stringify({ request_type: 'research_status' }),
+        }),
+      ])
+
+      if (evolutionRes.status === 'fulfilled' && evolutionRes.value.ok) {
+        const evolutionData = await evolutionRes.value.json() as {
+          evolution?: AdminEvolutionStatusModel | null
+          evolutionStatus?: 'available' | 'unavailable' | 'error'
+        }
+        evolution = evolutionData.evolution ?? null
+        evolutionStatus = evolutionData.evolutionStatus ?? 'unavailable'
+        evolutionResolved = true
+      } else {
+        evolutionStatus = 'error'
+        evolutionResolved = true
+      }
+
+      if (researchRes.status === 'fulfilled' && researchRes.value.ok) {
+        const researchData = await researchRes.value.json() as {
+          diagnostics_status?: 'available' | 'unavailable' | 'error'
+          configuration?: {
+            mode?: 'denied' | 'configured'
+            dns_pinning_configured?: boolean
+            search_provider_configured?: boolean
+            search_endpoint_configured?: boolean
+          }
+          counters?: {
+            fetched_sources?: unknown
+            blocked_events?: unknown
+            quarantined_insights?: unknown
+            expired_insights?: unknown
+          }
+          blocked_reasons?: Array<{ reason?: unknown; count?: unknown }>
+        }
+        researchStatus = researchData.diagnostics_status ?? 'unavailable'
+        if (researchStatus === 'available') {
+          research = {
+            mode: researchData.configuration?.mode === 'configured' ? 'configured' : 'denied',
+            dnsPinningConfigured: Boolean(researchData.configuration?.dns_pinning_configured),
+            searchProviderConfigured: Boolean(researchData.configuration?.search_provider_configured),
+            searchEndpointConfigured: Boolean(researchData.configuration?.search_endpoint_configured),
+            fetchedSources: parseNonNegativeIntegerCount(researchData.counters?.fetched_sources) ?? 0,
+            blockedEvents: parseNonNegativeIntegerCount(researchData.counters?.blocked_events) ?? 0,
+            blockedReasons: (researchData.blocked_reasons ?? [])
+              .flatMap(entry => {
+                const reason = typeof entry.reason === 'string' ? entry.reason : ''
+                const count = parseNonNegativeIntegerCount(entry.count)
+                if (reason.length === 0 || count === null) return []
+                return [{ reason, count }]
+              }),
+            quarantinedInsights: parseNonNegativeIntegerCount(researchData.counters?.quarantined_insights) ?? 0,
+            expiredInsights: parseNonNegativeIntegerCount(researchData.counters?.expired_insights) ?? 0,
+          }
+        } else {
+          research = null
+        }
+      } else {
+        researchStatus = 'error'
+        research = null
+      }
+    } catch {
+      // Preserve independent statuses where available; fail closed only for
+      // any still-unknown diagnostics channel.
+      if (!evolutionResolved && evolutionStatus === 'unavailable' && !evolution) evolutionStatus = 'error'
+      if (researchStatus === 'unavailable') researchStatus = 'error'
+    }
+  }
+
   return {
     persistenceConfigured: configured,
     sessionActive,
     supabaseUrl: urlHost,
-    evolution: null,
-    evolutionStatus: 'unavailable',
+    evolution,
+    evolutionStatus,
+    researchStatus,
+    research,
   }
 }

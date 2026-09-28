@@ -824,6 +824,31 @@ export default function AdminDaemonInterface({
               ) : (
                 <li>Evolution status: {diagnostics.evolutionStatus}</li>
               )}
+              {diagnostics.research ? (
+                <>
+                  <li>Research status: {diagnostics.researchStatus}</li>
+                  <li>Research mode: {diagnostics.research.mode}</li>
+                  <li>DNS pinning configured: {String(diagnostics.research.dnsPinningConfigured)}</li>
+                  <li>Search provider configured: {String(diagnostics.research.searchProviderConfigured)}</li>
+                  <li>Search endpoint configured: {String(diagnostics.research.searchEndpointConfigured)}</li>
+                  <li>Research sources fetched: {diagnostics.research.fetchedSources}</li>
+                  <li>Research policy blocks: {diagnostics.research.blockedEvents}</li>
+                  <li>
+                    Research blocked reasons: {diagnostics.research.blockedReasons.length}
+                    {diagnostics.research.blockedReasons.length > 0 && (
+                      <ul>
+                        {diagnostics.research.blockedReasons.map(reason => (
+                          <li key={`${reason.reason}:${reason.count}`}>{reason.reason}: {reason.count}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                  <li>Quarantined insights: {diagnostics.research.quarantinedInsights}</li>
+                  <li>Expired insights: {diagnostics.research.expiredInsights}</li>
+                </>
+              ) : (
+                <li>Research status: {diagnostics.researchStatus}</li>
+              )}
             </ul>
             <p className="admin-daemon-diagnostics-note">
               No secret values are shown above. To access project secrets, use the Supabase dashboard.

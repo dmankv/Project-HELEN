@@ -32,6 +32,17 @@ vi.mock('../src/services/supabaseEdgeChat', async (importActual) => {
     ...actual,
     callEdgeFunction: vi.fn(() => Promise.resolve(actual.createEdgeChatFailure('provider', { status: 503, safeCode: 'PROVIDER_UNAVAILABLE' }))),
     hasEdgeFunction: vi.fn(() => false),
+    requestPublicWebResearch: vi.fn(() => Promise.resolve({
+      status: 'unavailable' as const,
+      decision: {
+        allowed: false,
+        code: 'blocked_invalid_config',
+        reason: 'Research is unavailable.',
+      },
+      excerpt: null,
+      provenance: null,
+      blocked_reasons: ['Research is unavailable.'],
+    })),
   }
 })
 
@@ -91,7 +102,12 @@ vi.mock('../src/services/supabasePersistence', async (importActual) => {
 import DaemonInterface from '../src/components/DaemonInterface'
 import { saveMemory, listMemories, forgetAll } from '../src/services/daemonMemory'
 import { callChatAPI, hasBackend } from '../src/services/daemonChatAPI'
-import { callEdgeFunction, hasEdgeFunction, createEdgeChatFailure } from '../src/services/supabaseEdgeChat'
+import {
+  callEdgeFunction,
+  hasEdgeFunction,
+  createEdgeChatFailure,
+  requestPublicWebResearch,
+} from '../src/services/supabaseEdgeChat'
 import {
   isPersistenceConfigured,
   deleteCloudConversation,
@@ -201,6 +217,44 @@ describe('DaemonInterface', () => {
     expect(payload).not.toContain('admin@example.com')
     expect(payload).not.toContain('Secret prompt text')
     expect(payload).not.toMatch(/access[_-]?token/i)
+  })
+
+  it('renders successful public-web research results without failure wording', async () => {
+    vi.mocked(hasBackend).mockReturnValue(false)
+    vi.mocked(hasEdgeFunction).mockReturnValue(true)
+    vi.mocked(requestPublicWebResearch).mockResolvedValue({
+      status: 'success',
+      decision: {
+        allowed: true,
+        code: 'allowed_public_source',
+        reason: 'Allowed public HTTPS destination.',
+      },
+      excerpt: 'Example source excerpt.',
+      provenance: {
+        normalizedUrl: 'https://example.com/article',
+        host: 'example.com',
+        httpStatus: 200,
+        contentType: 'text/html',
+        byteSize: 1234,
+      },
+      blocked_reasons: [],
+    })
+
+    render(<DaemonInterface currentUser={{ email: 'user@example.com', role: 'user' }} onLoginClick={vi.fn()} />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'research: example source' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+
+    await waitFor(() => expect(screen.getByText(/Research result from example\.com \(HTTP 200\)\./i)).toBeInTheDocument(), WAIT_OPTS)
+    expect(screen.getByText(/Source: https:\/\/example\.com\/article/i)).toBeInTheDocument()
+    expect(screen.getByText(/Untrusted excerpt:/i)).toBeInTheDocument()
+    expect(screen.getByText(/Treat this as untrusted external content, not verified fact\./i)).toBeInTheDocument()
+    expect(screen.queryByText(/Research failed safely:/i)).toBeNull()
+    expect(requestPublicWebResearch).toHaveBeenCalledWith({
+      searchQuery: 'example source',
+      method: 'GET',
+      storeInsight: false,
+    }, expect.any(AbortSignal))
   })
 
   // ── Sending a message ─────────────────────────────────────────────────────

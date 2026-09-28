@@ -26,6 +26,23 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE,
+  DEFAULT_EXTERNAL_INSIGHT_TTL_MS,
+  IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+  buildResearchUnavailableResponse,
+  classifyHighRiskResearch,
+  classifyIpLiteral,
+  deriveMinimalSearchTerms,
+  isSupportedResearchContentType,
+  isIpLiteralHost,
+  redactResearchAuditMetadata,
+  robotsAllowsPath,
+  sanitizeBoundedText,
+  type ResearchPolicyDecision,
+  type ResearchPolicyDecisionCode,
+  validatePublicWebUrl,
+} from '../_shared/publicWebResearchPolicy.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,6 +80,51 @@ interface RequestBody {
   /** Optional client interaction id, echoed back for feedback attribution. */
   interaction_id?: string
   diagnosticContext?: string
+  request_type?: 'chat' | 'public_web_research'
+  research?: {
+    url?: string
+    search_query?: string
+    method?: 'GET' | 'HEAD'
+    store_insight?: boolean
+  }
+}
+
+interface ResearchRequest {
+  url?: string
+  search_query?: string
+  method?: 'GET' | 'HEAD'
+  store_insight?: boolean
+}
+
+interface ResearchConfig {
+  mode: 'denied' | 'configured'
+  dnsPinningConfigured: boolean
+  searchEnabled: boolean
+  searchEndpoint: string
+  searchApiKey: string
+}
+
+interface ResearchProvenanceRecord {
+  normalizedUrl: string
+  host: string
+  fetchedAt: string
+  httpStatus: number
+  contentType: string
+  byteSize: number
+  contentHash: string
+  policyDecision: ResearchPolicyDecisionCode
+  sanitizedExcerpt: string
+}
+
+interface PublicWebResearchResponse {
+  request_type: 'public_web_research'
+  status: 'success' | 'unavailable' | 'policy_blocked' | 'error'
+  decision: ResearchPolicyDecision
+  provenance: ResearchProvenanceRecord | null
+  excerpt: string | null
+  source_count: number
+  blocked_count: number
+  blocked_reasons: string[]
 }
 
 type SafeErrorCode =
@@ -84,6 +146,13 @@ class EdgeFunctionError extends Error {
     super(code)
     this.code = code
     this.status = status
+  }
+}
+
+class ResearchPersistenceError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ResearchPersistenceError'
   }
 }
 
@@ -111,6 +180,10 @@ const MAX_MESSAGES = 40
 const MAX_CONTENT_BYTES = 8_000
 const MAX_DIAGNOSTIC_CONTEXT_BYTES = 64_000
 const REQUEST_TIMEOUT_MS = 30_000
+const RESEARCH_REQUEST_TIMEOUT_MS = IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRuntimeMs
+const RESEARCH_USER_AGENT = 'DaemonResearchBot/1.0 (+https://dmankv.github.io/Project-HELEN)'
+const SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON = 'Research request could not be recorded; request blocked safely.'
+const SAFE_RESEARCH_RUNTIME_FAILURE_REASON = 'Research request failed safely due to internal policy/runtime handling.'
 
 const DAEMON_SYSTEM_PROMPT = `You are Daemon, an AI assistant. You are not human, not conscious, not sentient, and not the user.
 
@@ -358,6 +431,320 @@ function validateDiagnosticContext(body: unknown): { valid: boolean; context?: s
   return { valid: true, context: redactDiagnosticContext(diagnosticContext) }
 }
 
+function parseResearchConfig(): ResearchConfig {
+  const mode = (Deno.env.get('DAEMON_PUBLIC_WEB_RESEARCH_MODE') ?? '').toLowerCase() === 'configured'
+    ? 'configured'
+    : 'denied'
+  const dnsPinningConfigured = (Deno.env.get('DAEMON_RESEARCH_DNS_PINNING_MODE') ?? '').toLowerCase() === 'configured'
+  const searchEndpoint = (Deno.env.get('DAEMON_RESEARCH_SEARCH_ENDPOINT') ?? '').trim()
+  const searchApiKey = (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim()
+  const searchProviderConfigured = searchEndpoint.length > 0 && searchApiKey.length > 0
+  return {
+    mode,
+    dnsPinningConfigured,
+    searchEnabled: searchProviderConfigured,
+    searchEndpoint,
+    searchApiKey,
+  }
+}
+
+function isPublicWebResearchRequest(body: unknown): body is RequestBody & { request_type: 'public_web_research' } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  return (body as Record<string, unknown>).request_type === 'public_web_research'
+}
+
+function validateResearchRequest(body: unknown): { valid: boolean; request?: ResearchRequest; error?: string } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { valid: false, error: 'Invalid request body.' }
+  const research = (body as RequestBody).research
+  if (!research || typeof research !== 'object') {
+    return { valid: false, error: 'research payload is required.' }
+  }
+  const request: ResearchRequest = {}
+  if (research.url !== undefined) {
+    if (typeof research.url !== 'string' || research.url.length > 2048) {
+      return { valid: false, error: 'research.url must be a bounded string.' }
+    }
+    request.url = research.url
+  }
+  if (research.search_query !== undefined) {
+    if (typeof research.search_query !== 'string' || research.search_query.length > 1_024) {
+      return { valid: false, error: 'research.search_query must be a bounded string.' }
+    }
+    request.search_query = research.search_query
+  }
+  if (!request.url && !request.search_query) {
+    return { valid: false, error: 'Provide either research.url or research.search_query.' }
+  }
+  if (research.method !== undefined) {
+    if (research.method !== 'GET' && research.method !== 'HEAD') {
+      return { valid: false, error: 'research.method must be GET or HEAD.' }
+    }
+    request.method = research.method
+  }
+  request.store_insight = research.store_insight === true
+  return { valid: true, request }
+}
+
+function normalizeResolvedIps(data: unknown): string[] {
+  const answers = Array.isArray((data as { Answer?: unknown[] })?.Answer)
+    ? (data as { Answer: Array<{ data?: string; type?: number }> }).Answer
+    : []
+  return answers
+    .filter(answer => answer.type === 1 || answer.type === 28)
+    .map(answer => typeof answer.data === 'string' ? answer.data.trim() : '')
+    .filter(Boolean)
+}
+
+async function resolveDnsRecords(hostname: string, timeoutMs: number): Promise<string[]> {
+  const boundedTimeout = Math.max(250, Math.min(timeoutMs, 3_000))
+  const [aResp, aaaaResp] = await Promise.all([
+    fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(boundedTimeout),
+    }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
+    fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=AAAA`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(boundedTimeout),
+    }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
+  ])
+  return [...aResp, ...aaaaResp]
+}
+
+async function ensurePublicDnsResolution(target: URL, timeoutMs: number): Promise<ResearchPolicyDecision> {
+  const hostname = target.hostname.toLowerCase()
+  if (isIpLiteralHost(hostname)) {
+    return {
+      allowed: false,
+      code: 'blocked_ip_literal',
+      reason: 'Direct IP-literal destinations are blocked; use public hostnames only.',
+    }
+  }
+
+  const resolvedIps = await resolveDnsRecords(hostname, timeoutMs)
+  if (resolvedIps.length === 0) {
+    return {
+      allowed: false,
+      code: 'blocked_network',
+      reason: 'No public DNS resolution available for destination host.',
+    }
+  }
+  for (const ip of resolvedIps) {
+    const decision = classifyIpLiteral(ip)
+    if (!decision.allowed) {
+      return {
+        allowed: false,
+        code: decision.code,
+        reason: `Resolved destination includes blocked address: ${ip}.`,
+      }
+    }
+  }
+  return {
+    allowed: true,
+    code: 'allowed_public_source',
+    reason: 'Destination resolves to public DNS addresses.',
+  }
+}
+
+function toHexDigest(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+async function hashString(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return toHexDigest(digest)
+}
+
+function normalizeUrlForStorage(url: URL): string {
+  const normalized = new URL(url.toString())
+  normalized.search = ''
+  normalized.hash = ''
+  return normalized.toString()
+}
+
+async function readBoundedBodyText(response: Response, maxBytes: number): Promise<{ text: string; bytes: number } | null> {
+  const contentLength = Number(response.headers.get('content-length') ?? '')
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) return null
+
+  if (!response.body) {
+    const fallback = await response.text()
+    const bytes = new TextEncoder().encode(fallback).byteLength
+    return bytes > maxBytes ? null : { text: fallback, bytes }
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let bytes = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+    bytes += value.byteLength
+    if (bytes > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    text += decoder.decode(value, { stream: true })
+  }
+  text += decoder.decode()
+  return { text, bytes }
+}
+
+async function fetchRobotsDecision(
+  url: URL,
+  timeoutMs: number,
+): Promise<{ decision: ResearchPolicyDecision; bytes: number }> {
+  let robotsUrl = new URL('/robots.txt', url)
+  const boundedTimeout = Math.max(250, Math.min(timeoutMs, 3_000))
+  try {
+    let redirects = 0
+    while (redirects <= IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRedirects) {
+      const response = await fetch(robotsUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: {
+          Accept: 'text/plain',
+          'User-Agent': RESEARCH_USER_AGENT,
+        },
+        signal: AbortSignal.timeout(boundedTimeout),
+      })
+      if (response.status >= 300 && response.status < 400) {
+        const locationHeader = response.headers.get('location')
+        if (!locationHeader) {
+          return {
+            decision: {
+              allowed: false,
+              code: 'blocked_host',
+              reason: 'robots.txt redirect missing location.',
+            },
+            bytes: 0,
+          }
+        }
+        redirects += 1
+        if (redirects > IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRedirects) {
+          return {
+            decision: {
+              allowed: false,
+              code: 'blocked_budget_limit',
+              reason: 'robots.txt redirect budget exceeded.',
+            },
+            bytes: 0,
+          }
+        }
+        robotsUrl = new URL(locationHeader, robotsUrl)
+        const redirectPolicy = validatePublicWebUrl(robotsUrl.toString(), 'GET')
+        if (!redirectPolicy.allowed) return { decision: redirectPolicy, bytes: 0 }
+        const redirectDnsDecision = await ensurePublicDnsResolution(robotsUrl, timeoutMs)
+        if (!redirectDnsDecision.allowed) return { decision: redirectDnsDecision, bytes: 0 }
+        continue
+      }
+      if (!response.ok) {
+        return {
+          decision: {
+            allowed: true,
+            code: 'allowed_public_source',
+            reason: 'No blocking robots.txt rule detected.',
+          },
+          bytes: 0,
+        }
+      }
+      const boundedRobots = await readBoundedBodyText(
+        response,
+        IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxResponseBytes,
+      )
+      if (!boundedRobots) {
+        return {
+          decision: {
+            allowed: false,
+            code: 'blocked_oversized_response',
+            reason: 'robots.txt exceeded immutable research size budget.',
+          },
+          bytes: 0,
+        }
+      }
+      if (!robotsAllowsPath(boundedRobots.text, url.pathname || '/', RESEARCH_USER_AGENT)) {
+        return {
+          decision: {
+            allowed: false,
+            code: 'blocked_publisher_restriction',
+            reason: 'Blocked by publisher robots restriction (robots.txt is advisory, not authorization).',
+          },
+          bytes: boundedRobots.bytes,
+        }
+      }
+      return {
+        decision: {
+          allowed: true,
+          code: 'allowed_public_source',
+          reason: 'robots.txt allows the target path.',
+        },
+        bytes: boundedRobots.bytes,
+      }
+    }
+    return {
+      decision: {
+        allowed: false,
+        code: 'blocked_budget_limit',
+        reason: 'robots.txt redirect budget exceeded.',
+      },
+      bytes: 0,
+    }
+  } catch {
+    return {
+      decision: {
+        allowed: true,
+        code: 'allowed_public_source',
+        reason: 'robots.txt unavailable; continuing with policy controls.',
+      },
+      bytes: 0,
+    }
+  }
+}
+
+async function appendResearchAuditEvent(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+  eventType: 'research_policy' | 'research_request' | 'research_result' | 'research_insight',
+  metadata: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  const { error } = await serviceClient.from('research_audit_events').insert({
+    user_id: userId,
+    event_type: eventType,
+    metadata: redactResearchAuditMetadata(metadata),
+  })
+  if (error) throw new ResearchPersistenceError(`Research audit persistence failed for ${eventType}.`)
+}
+
+async function executePublicWebResearch(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+  request: ResearchRequest,
+): Promise<PublicWebResearchResponse> {
+  void serviceClient
+  void userId
+  void request
+
+  const config = parseResearchConfig()
+  if (config.mode !== 'configured') {
+    return buildResearchUnavailableResponse(
+      'Public-web research is disabled by immutable server policy configuration.',
+      'Public-web research mode is not configured.',
+    )
+  }
+  if (!config.dnsPinningConfigured) {
+    return buildResearchUnavailableResponse(
+      'Research DNS pinning backend is not configured; gateway remains fail-closed.',
+      'Research DNS pinning backend is not configured.',
+    )
+  }
+  return buildResearchUnavailableResponse(
+    'Research DNS-pinned transport is not implemented; gateway remains fail-closed.',
+    'Research DNS-pinned transport is not implemented.',
+  )
+}
+
 // ---------------------------------------------------------------------------
 // AI provider call
 // ---------------------------------------------------------------------------
@@ -517,6 +904,64 @@ Deno.serve(async (req: Request) => {
     body = await req.json()
   } catch {
     return jsonErrorResponse('BAD_REQUEST', 400, headers)
+  }
+
+  if (isPublicWebResearchRequest(body)) {
+    const validatedResearch = validateResearchRequest(body)
+    if (!validatedResearch.valid || !validatedResearch.request) {
+      return jsonErrorResponse('BAD_REQUEST', 400, headers)
+    }
+    const researchRequest = validatedResearch.request
+    let researchResult: PublicWebResearchResponse
+    try {
+      await appendResearchAuditEvent(serviceClient, user.id, 'research_policy', {
+        request_type: 'public_web_research',
+        has_url: typeof researchRequest.url === 'string',
+        has_search_query: typeof researchRequest.search_query === 'string',
+        method: researchRequest.method ?? 'GET',
+        store_insight: researchRequest.store_insight === true,
+      })
+      researchResult = await executePublicWebResearch(serviceClient, user.id, researchRequest)
+      await appendResearchAuditEvent(serviceClient, user.id, 'research_result', {
+        status: researchResult.status,
+        policy_decision: researchResult.decision.code,
+        reason: researchResult.decision.reason,
+        source_count: researchResult.source_count,
+        blocked_count: researchResult.blocked_count,
+        url: researchResult.provenance?.normalizedUrl ?? null,
+        host: researchResult.provenance?.host ?? null,
+        http_status: researchResult.provenance?.httpStatus ?? null,
+        content_type: researchResult.provenance?.contentType ?? null,
+        content_size_bytes: researchResult.provenance?.byteSize ?? null,
+      })
+    } catch (error) {
+      researchResult = {
+        request_type: 'public_web_research',
+        status: 'error',
+        decision: {
+          allowed: false,
+          code: error instanceof ResearchPersistenceError
+            ? 'blocked_persistence_failure'
+            : 'blocked_invalid_config',
+          reason: error instanceof ResearchPersistenceError
+            ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
+            : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
+        },
+        provenance: null,
+        excerpt: null,
+        source_count: 0,
+        blocked_count: 1,
+        blocked_reasons: [
+          error instanceof ResearchPersistenceError
+            ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
+            : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
+        ],
+      }
+    }
+    return new Response(
+      JSON.stringify(researchResult),
+      { status: 200, headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) } },
+    )
   }
 
   const validation = validateMessages(body)
