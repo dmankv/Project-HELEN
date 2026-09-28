@@ -1062,6 +1062,10 @@ export interface AdminEvolutionStatusModel {
 
 function deriveCanaryStatus(run: EvolutionRunRecord | null): CanaryStatus {
   if (!run) return 'not_started'
+  if (run.status === 'rolled_back') {
+    if (run.canaryDecision?.status) return run.canaryDecision.status
+    return 'not_started'
+  }
   if (run.status === 'failed' || run.status === 'denied' || run.status === 'timed_out') return 'failed'
   if (hasHealthyCanaryDecision(run)) return 'healthy'
   if (run.stage === 'rollback' || run.status === 'rolled_back') return 'failed'

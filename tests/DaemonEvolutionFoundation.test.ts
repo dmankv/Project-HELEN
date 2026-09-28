@@ -926,18 +926,31 @@ describe('admin observability model', () => {
         stage: 'promote',
       }, 'rollback'),
     })
+    const rollbackAfterHealthyCanaryRun = transitionEvolutionStage(
+      transitionEvolutionStage(recordCanaryDecision({
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        stage: 'canary',
+      }, {
+        allowed: true,
+        status: 'healthy',
+        reason: 'Canary is healthy.',
+      }), 'promote'),
+      'rollback',
+    )
     const rollbackAfterHealthyCanary = buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
-      run: transitionEvolutionStage(
-        transitionEvolutionStage(recordCanaryDecision({
-          ...createEvolutionRun('candidate-v2', 'baseline-safe'),
-          stage: 'canary',
-        }, {
-          allowed: true,
-          status: 'healthy',
-          reason: 'Canary is healthy.',
-        }), 'promote'),
-        'rollback',
+      run: rollbackAfterHealthyCanaryRun,
+    })
+    const completedRollback = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: completeRollbackRun(
+        rollbackAfterHealthyCanaryRun,
+        {
+          runId: rollbackAfterHealthyCanaryRun.runId,
+          candidateSnapshotId: rollbackAfterHealthyCanaryRun.candidateSnapshotId,
+          candidateVersion: rollbackAfterHealthyCanaryRun.candidateVersion,
+          deployedVersion: 'baseline-safe',
+        },
       ),
     })
 
@@ -949,6 +962,8 @@ describe('admin observability model', () => {
     expect(rolledBack.rollbackStatus).toBe('requested')
     expect(rollbackAfterHealthyCanary.canaryStatus).toBe('healthy')
     expect(rollbackAfterHealthyCanary.rollbackStatus).toBe('requested')
+    expect(completedRollback.canaryStatus).toBe('healthy')
+    expect(completedRollback.rollbackStatus).toBe('completed')
     expect(buildAdminEvolutionStatusModel({
       currentVersion: 'baseline-safe',
       run: stopEvolutionRun(createEvolutionRun('candidate-v2', 'baseline-safe'), 'failed'),
