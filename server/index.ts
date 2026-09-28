@@ -419,12 +419,7 @@ class AuthStore {
         fs.renameSync(tmp, this.filePath)
         return true
       } finally {
-        try {
-          fs.rmSync(lockDir)
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code
-          if (code !== 'ENOENT' && code !== 'ENOTEMPTY') throw error
-        }
+        this.removeLockDir(lockDir)
       }
     } finally {
       try {
@@ -447,6 +442,21 @@ class AuthStore {
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code
         if ((code !== 'ENOENT' && !(error instanceof SyntaxError)) || attempt >= 24) throw error
+        Atomics.wait(waitState, 0, 0, 10)
+      }
+    }
+  }
+
+  private removeLockDir(lockDir: string): void {
+    const waitState = new Int32Array(new SharedArrayBuffer(4))
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        fs.rmSync(lockDir)
+        return
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'ENOENT') return
+        if (code !== 'ENOTEMPTY' || attempt >= 2) throw error
         Atomics.wait(waitState, 0, 0, 10)
       }
     }
