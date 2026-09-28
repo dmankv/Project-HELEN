@@ -71,7 +71,7 @@ jobs:
 
   live-eval:
     needs: unit-gate
-    if: always()
+    if: needs.unit-gate.result == 'success'
     runs-on: ubuntu-latest
     env:
       DAEMON_EVAL_LIVE: 'true'
