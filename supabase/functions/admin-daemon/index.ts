@@ -650,7 +650,8 @@ async function buildResearchStatusResponse(
 ): Promise<ResearchStatusResponse> {
   const mode = parseResearchMode(Deno.env.get('DAEMON_PUBLIC_WEB_RESEARCH_MODE') ?? undefined)
   const searchEndpointConfigured = (Deno.env.get('DAEMON_RESEARCH_SEARCH_ENDPOINT') ?? '').trim().length > 0
-  const searchProviderConfigured = (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim().length > 0
+  const searchProviderConfigured = searchEndpointConfigured
+    && (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim().length > 0
 
   const [provenanceCount, auditEvents, insightRows] = await Promise.all([
     serviceClient

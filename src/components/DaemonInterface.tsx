@@ -592,7 +592,7 @@ export default function DaemonInterface({
 
         if (isEdgeChatFailure(researchResult)) {
           const fallback = getSafeEdgeFallbackMessage(researchResult)
-            ?? 'Public-web research request was cancelled before browsing.'
+            ?? 'Public-web research is temporarily unavailable. No browsing result was returned.'
           const aiMsg: Message = {
             id: nextId(),
             role: 'assistant',

@@ -27,6 +27,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
+  DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE,
+  DEFAULT_EXTERNAL_INSIGHT_TTL_MS,
   IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
   classifyHighRiskResearch,
   classifyIpLiteral,
@@ -495,7 +497,7 @@ async function resolveDnsRecords(hostname: string): Promise<string[]> {
 async function ensurePublicDnsResolution(target: URL): Promise<ResearchPolicyDecision> {
   const hostname = target.hostname.toLowerCase()
   const ipLiteralDecision = classifyIpLiteral(hostname)
-  if (ipLiteralDecision.allowed || ipLiteralDecision.code !== 'blocked_ip_literal') {
+  if (ipLiteralDecision.code !== 'blocked_ip_literal') {
     return ipLiteralDecision
   }
 
@@ -917,7 +919,7 @@ async function executePublicWebResearch(
   })
 
   if (request.store_insight) {
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString()
+    const expiresAt = new Date(Date.now() + DEFAULT_EXTERNAL_INSIGHT_TTL_MS).toISOString()
     await serviceClient.from('unverified_external_insights').insert({
       user_id: userId,
       normalized_url: provenance.normalizedUrl,
@@ -925,7 +927,7 @@ async function executePublicWebResearch(
       source_timestamp: provenance.fetchedAt,
       source_hash: provenance.contentHash,
       excerpt: provenance.sanitizedExcerpt,
-      confidence: 0.35,
+      confidence: DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE,
       expires_at: expiresAt,
       policy_decision: provenance.policyDecision,
       evaluation_state: 'quarantined',
@@ -934,7 +936,7 @@ async function executePublicWebResearch(
     await appendResearchAuditEvent(serviceClient, userId, 'research_insight', {
       url: provenance.normalizedUrl,
       host: provenance.host,
-      confidence: 0.35,
+      confidence: DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE,
       expires_at: expiresAt,
       evaluation_state: 'quarantined',
     })
@@ -1131,6 +1133,13 @@ Deno.serve(async (req: Request) => {
       store_insight: researchRequest.store_insight === true,
     })
     const researchResult = await executePublicWebResearch(serviceClient, user.id, researchRequest)
+    await appendResearchAuditEvent(serviceClient, user.id, 'research_result', {
+      status: researchResult.status,
+      policy_decision: researchResult.decision.code,
+      reason: researchResult.decision.reason,
+      source_count: researchResult.source_count,
+      blocked_count: researchResult.blocked_count,
+    })
     return new Response(
       JSON.stringify(researchResult),
       { status: 200, headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) } },

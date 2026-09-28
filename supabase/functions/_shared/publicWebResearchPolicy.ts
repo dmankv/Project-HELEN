@@ -46,6 +46,9 @@ export const IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS: Readonly<PublicWebResearchBu
   maxSearchApiCalls: 2,
 })
 
+export const DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE = 0.35
+export const DEFAULT_EXTERNAL_INSIGHT_TTL_MS = 1000 * 60 * 60 * 24 * 7
+
 const INTERNAL_HOST_SUFFIXES = ['.internal', '.local', '.localhost', '.corp', '.lan', '.home.arpa']
 const BLOCKED_LITERAL_HOSTS = new Set([
   'localhost',
@@ -262,8 +265,8 @@ export function classifyHighRiskResearch(text: string): ResearchPolicyDecision {
 
 export function sanitizeBoundedText(input: string, maxChars: number): string {
   const withoutScripts = input
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script(?:\s[^>]*)?>[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style(?:\s[^>]*)?>[\s\S]*?<\/style\s*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
