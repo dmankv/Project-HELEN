@@ -1,0 +1,45 @@
+name: ALL-FATHER Review
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  all-father-review:
+    name: all-father-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Create proposal diff
+        run: |
+          git fetch --no-tags origin main
+          git diff --no-ext-diff --unified=0 --no-renames origin/main...HEAD > proposal.diff
+
+      - name: Execute ALL-FATHER review
+        run: npx tsx scripts/all-father-review.ts

@@ -1,0 +1,14 @@
+/CODEOWNERS @dmankv
+/.github/workflows/all-father-review.yml @dmankv
+/.github/workflows/supabase-functions.yml @dmankv
+/scripts/all-father-review.ts @dmankv
+/src/services/allFatherReviewPolicy.ts @dmankv
+/supabase/functions/_shared/allFatherReviewPolicy.ts @dmankv
+/supabase/functions/admin-daemon/ @dmankv
+/supabase/functions/all-father-review/ @dmankv
+/supabase/migrations/20260824143000_managed_auth_rbac.sql @dmankv
+/supabase/migrations/20260825083000_supabase_project_access.sql @dmankv
+/supabase/migrations/20260827190000_admin_daemon.sql @dmankv
+/supabase/migrations/20260926221000_evolution_infrastructure.sql @dmankv
+/supabase/migrations/20260928070000_public_web_research_gateway.sql @dmankv
+/supabase/migrations/20260928100000_all_father_reviews.sql @dmankv
