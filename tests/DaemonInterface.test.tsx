@@ -32,19 +32,33 @@ vi.mock('../src/services/supabaseEdgeChat', async (importActual) => {
     ...actual,
     callEdgeFunction: vi.fn(() => Promise.resolve(actual.createEdgeChatFailure('provider', { status: 503, safeCode: 'PROVIDER_UNAVAILABLE' }))),
     hasEdgeFunction: vi.fn(() => false),
-    requestPublicWebResearch: vi.fn(() => Promise.resolve({
-      status: 'unavailable' as const,
-      decision: {
-        allowed: false,
-        code: 'blocked_invalid_config',
-        reason: 'Research is unavailable.',
-      },
-      excerpt: null,
-      provenance: null,
-      blocked_reasons: ['Research is unavailable.'],
-    })),
   }
 })
+
+vi.mock('../src/services/publicWebResearchGateway', () => ({
+  runPublicWebResearchGateway: vi.fn(() => Promise.resolve({
+    status: 'unavailable' as const,
+    quarantined: true as const,
+    decision: {
+      allowed: false,
+      code: 'blocked_invalid_config',
+      reason: 'Research is unavailable.',
+    },
+    budgets: {
+      maxRequestsPerRun: 4,
+      maxBytesPerRun: 1_500_000,
+      maxResponseBytes: 350_000,
+      maxRuntimeMs: 12_000,
+      maxRedirects: 3,
+      maxConcurrency: 1,
+      maxExcerptChars: 2_000,
+      maxSearchApiCalls: 2,
+    },
+    excerpt: null,
+    sources: [],
+    blockedReasons: ['Research is unavailable.'],
+  })),
+}))
 
 vi.mock('../src/services/daemonMemory', () => ({
   saveMemory: vi.fn((text: string) => ({ id: 'mem-1', text, createdAt: new Date().toISOString() })),
@@ -106,8 +120,8 @@ import {
   callEdgeFunction,
   hasEdgeFunction,
   createEdgeChatFailure,
-  requestPublicWebResearch,
 } from '../src/services/supabaseEdgeChat'
+import { runPublicWebResearchGateway } from '../src/services/publicWebResearchGateway'
 import {
   isPersistenceConfigured,
   deleteCloudConversation,
@@ -222,22 +236,35 @@ describe('DaemonInterface', () => {
   it('renders successful public-web research results without failure wording', async () => {
     vi.mocked(hasBackend).mockReturnValue(false)
     vi.mocked(hasEdgeFunction).mockReturnValue(true)
-    vi.mocked(requestPublicWebResearch).mockResolvedValue({
+    vi.mocked(runPublicWebResearchGateway).mockResolvedValue({
       status: 'success',
+      quarantined: true,
       decision: {
         allowed: true,
         code: 'allowed_public_source',
         reason: 'Allowed public HTTPS destination.',
       },
       excerpt: 'Example source excerpt.',
-      provenance: {
+      sources: [{
+        sourceType: 'public-web',
+        quarantined: true,
         normalizedUrl: 'https://example.com/article',
         host: 'example.com',
         httpStatus: 200,
         contentType: 'text/html',
         byteSize: 1234,
+      }],
+      blockedReasons: [],
+      budgets: {
+        maxRequestsPerRun: 4,
+        maxBytesPerRun: 1_500_000,
+        maxResponseBytes: 350_000,
+        maxRuntimeMs: 12_000,
+        maxRedirects: 3,
+        maxConcurrency: 1,
+        maxExcerptChars: 2_000,
+        maxSearchApiCalls: 2,
       },
-      blocked_reasons: [],
     })
 
     render(<DaemonInterface currentUser={{ email: 'user@example.com', role: 'user' }} onLoginClick={vi.fn()} />)
@@ -250,11 +277,11 @@ describe('DaemonInterface', () => {
     expect(screen.getByText(/Untrusted excerpt:/i)).toBeInTheDocument()
     expect(screen.getByText(/Treat this as untrusted external content, not verified fact\./i)).toBeInTheDocument()
     expect(screen.queryByText(/Research failed safely:/i)).toBeNull()
-    expect(requestPublicWebResearch).toHaveBeenCalledWith({
+    expect(runPublicWebResearchGateway).toHaveBeenCalledWith({
       searchQuery: 'example source',
       method: 'GET',
-      storeInsight: false,
-    }, expect.any(AbortSignal))
+      signal: expect.any(AbortSignal),
+    })
   })
 
   // ── Sending a message ─────────────────────────────────────────────────────

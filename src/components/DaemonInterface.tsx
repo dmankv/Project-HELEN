@@ -28,7 +28,6 @@ import {
   getSafeEdgeFallbackMessage,
   hasEdgeFunction,
   isEdgeChatFailure,
-  requestPublicWebResearch,
 } from '../services/supabaseEdgeChat'
 import type {
   EdgeChatFailure,
@@ -59,6 +58,7 @@ import {
   toPersonalitySettings,
 } from '../services/daemonPersonalityPreferences'
 import type { PersonalityPreferences } from '../services/daemonPersonalityPreferences'
+import { runPublicWebResearchGateway } from '../services/publicWebResearchGateway'
 import PersonalityPreferencesEditor from './PersonalityPreferencesEditor'
 import SupabaseProjectAccessPanel from './SupabaseProjectAccessPanel'
 import '../styles/DaemonInterface.css'
@@ -558,60 +558,21 @@ export default function DaemonInterface({
 
       const researchCommand = parseResearchCommand(text)
       if (researchCommand) {
-        if (!hasEdgeFunction()) {
-          const aiMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: 'Public-web research is unavailable in this build, so no browsing was performed.',
-            timestamp: new Date().toISOString(),
-          }
-          persistConversationMessages(convId, [...nextMessages, aiMsg])
-          abortRef.current = null
-          setIsThinking(false)
-          return
-        }
-        if (!currentUser) {
-          const aiMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: 'Sign in is required for server-side public-web research. No browsing was performed.',
-            timestamp: new Date().toISOString(),
-          }
-          persistConversationMessages(convId, [...nextMessages, aiMsg])
-          abortRef.current = null
-          setIsThinking(false)
-          return
-        }
-
         const controller = new AbortController()
         abortRef.current = controller
-        const researchResult = await requestPublicWebResearch({
+        const researchResult = await runPublicWebResearchGateway({
           ...(researchCommand.url ? { url: researchCommand.url } : {}),
           ...(researchCommand.searchQuery ? { searchQuery: researchCommand.searchQuery } : {}),
           method: 'GET',
-          storeInsight: false,
-        }, controller.signal)
+          signal: controller.signal,
+        })
 
-        if (isEdgeChatFailure(researchResult)) {
-          const fallback = getSafeEdgeFallbackMessage(researchResult)
-            ?? 'Public-web research is temporarily unavailable. No browsing result was returned.'
-          const aiMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: fallback,
-            timestamp: new Date().toISOString(),
-          }
-          persistConversationMessages(convId, [...nextMessages, aiMsg])
-          setIsThinking(false)
-          abortRef.current = null
-          return
-        }
-
+        const primarySource = researchResult.sources[0]
         const researchText = researchResult.status === 'success'
           ? [
-            `Research result from ${researchResult.provenance?.host ?? 'an external source'}${researchResult.provenance?.httpStatus ? ` (HTTP ${researchResult.provenance.httpStatus})` : ''}.`,
-            researchResult.provenance?.normalizedUrl
-              ? `Source: ${researchResult.provenance.normalizedUrl}`
+            `Research result from ${primarySource?.host ?? 'an external source'}${primarySource?.httpStatus ? ` (HTTP ${primarySource.httpStatus})` : ''}.`,
+            primarySource?.normalizedUrl
+              ? `Source: ${primarySource.normalizedUrl}`
               : null,
             researchResult.excerpt
               ? `Untrusted excerpt:\n${researchResult.excerpt}`
