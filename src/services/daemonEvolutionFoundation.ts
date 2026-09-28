@@ -532,10 +532,16 @@ export function completeEvolutionRun(
   run: EvolutionRunRecord,
   promotionDecision: CanaryDecision,
 ): EvolutionRunRecord {
+  const budgetCheck = run.budgetUsage && run.budgetLimits
+    ? enforceEvolutionBudget(run.budgetUsage, run.budgetLimits)
+    : null
   if (
     run.status !== 'running'
     || run.stage !== 'promote'
+    || run.deployedVersion !== run.lastKnownGoodVersion
     || !hasHealthyCanaryDecision(run)
+    || !requiredGatesPassed(run.gateResults)
+    || !budgetCheck?.ok
     || !promotionDecision.allowed
     || promotionDecision.status !== 'healthy'
   ) return run
@@ -1063,6 +1069,7 @@ export interface AdminEvolutionStatusModel {
 function deriveCanaryStatus(run: EvolutionRunRecord | null): CanaryStatus {
   if (!run) return 'not_started'
   if (run.status === 'rolled_back') {
+    if (run.canaryDecision?.status === 'healthy' && !hasHealthyCanaryDecision(run)) return 'failed'
     if (run.canaryDecision?.status) return run.canaryDecision.status
     return 'not_started'
   }

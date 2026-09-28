@@ -42,6 +42,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -68,7 +70,92 @@ jobs:
               echo "Promotion-bound unit gate must run from the protected default branch workflow ref."
               exit 1
             fi
+            git fetch --no-tags origin "$TRUSTED_WORKFLOW_SHA"
             git fetch --no-tags origin "$CANDIDATE_SHA"
+            CANDIDATE_SHA="$CANDIDATE_SHA" TRUSTED_WORKFLOW_SHA="$TRUSTED_WORKFLOW_SHA" node <<'NODE'
+            const { execFileSync } = require('node:child_process')
+
+            const candidateSha = process.env.CANDIDATE_SHA
+            const trustedWorkflowSha = process.env.TRUSTED_WORKFLOW_SHA
+            const protectedPaths = [
+              '.github/workflows/',
+              'supabase/migrations/',
+              'supabase/functions/',
+              'src/App.tsx',
+              'src/components/AdminDaemonInterface.tsx',
+              'src/components/LoginView.tsx',
+              'src/components/SupabaseProjectAccessPanel.tsx',
+              'src/services/adminDaemon',
+              'src/services/adminDaemonPersistence.ts',
+              'src/services/daemonAuth',
+              'src/services/daemonAuthAPI.ts',
+              'src/services/daemonEvolutionFoundation.ts',
+              'src/services/daemonStorageMigration.ts',
+              'src/main.tsx',
+              'src/services/supabaseAuth',
+              'src/services/supabaseAuthAPI.ts',
+              'src/services/supabasePersistence.ts',
+              'src/services/supabaseProjectAccess.ts',
+              '.env',
+            ]
+            const writableAllowlist = [/^(?!.*(?:^|\/)\.\.(?:\/|$))(?:src\/experimental|tests?|docs?)\/[A-Za-z0-9._/-]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|scss|html)$/]
+
+            function execGit(args) {
+              return execFileSync('git', args, { encoding: 'utf8' })
+            }
+
+            function isProtectedPath(normalizedPath) {
+              return protectedPaths.some((prefix) => (
+                prefix === '.env'
+                  ? normalizedPath === prefix || normalizedPath.startsWith(`${prefix}.`)
+                  : prefix.endsWith('/')
+                    ? normalizedPath.startsWith(prefix)
+                    : normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+              ))
+            }
+
+            function isWritableSandboxPath(normalizedPath) {
+              return writableAllowlist.some((pattern) => pattern.test(normalizedPath))
+            }
+
+            function classifyPath(rawPath) {
+              const normalizedPath = rawPath.trim().replace(/\\/g, '/').replace(/^\.\//, '')
+              const isUnsafePath = normalizedPath.length === 0
+                || /^\s|\s$/.test(normalizedPath)
+                || /\s/.test(normalizedPath)
+                || /(?:^|\/)\.\.(?:\/|$)/.test(normalizedPath)
+                || normalizedPath.startsWith('/')
+                || /^[a-zA-Z]:\//.test(normalizedPath)
+                || normalizedPath.split('/').some((segment) => (
+                  segment.length === 0 || segment === '.' || segment === '..'
+                ))
+
+              if (isUnsafePath) {
+                return 'change_control_plane_policy'
+              }
+              if (isProtectedPath(normalizedPath)) {
+                return 'protected'
+              }
+              if (isWritableSandboxPath(normalizedPath)) {
+                return 'write_sandbox'
+              }
+              return 'change_control_plane_policy'
+            }
+
+            const changedPaths = execGit(['diff', '--name-only', '--no-renames', trustedWorkflowSha, candidateSha])
+              .split('\n')
+              .map((path) => path.trim())
+              .filter(Boolean)
+
+            const violations = changedPaths.filter((path) => classifyPath(path) !== 'write_sandbox')
+            if (violations.length > 0) {
+              console.error('Promotion-bound candidate diff violates immutable sandbox policy:')
+              for (const path of violations) {
+                console.error(` - ${path}`)
+              }
+              process.exit(1)
+            }
+            NODE
             git checkout --detach "$CANDIDATE_SHA"
           elif [ -n "$CANDIDATE_VERSION" ] || [ -n "$CANDIDATE_SNAPSHOT_ID" ] || [ -n "$EVOLUTION_RUN_ID" ] || [ -n "$CANDIDATE_SHA" ]; then
             echo "Promotion-bound unit gate requires candidate_version, candidate_snapshot_id, run_id, and candidate_sha together."

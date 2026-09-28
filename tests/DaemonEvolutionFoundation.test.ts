@@ -238,7 +238,13 @@ describe('evolution run state machine', () => {
     expect(progressed.stage).toBe('promote')
     expect(progressed.endedAt).toBeNull()
 
-    const completed = completeEvolutionRun(progressed, {
+    const promotableRun = {
+      ...progressed,
+      gateResults: passingRequiredGateResults(),
+      budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
+    }
+    const completed = completeEvolutionRun(promotableRun, {
       allowed: true,
       status: 'healthy',
       reason: 'Promotion accepted.',
@@ -247,7 +253,7 @@ describe('evolution run state machine', () => {
     expect(completed.endedAt).toBeTruthy()
     expect(completed.deployedVersion).toBe('candidate-v2')
 
-    expect(completeEvolutionRun(progressed, {
+    expect(completeEvolutionRun(promotableRun, {
       allowed: false,
       status: 'denied',
       reason: 'Promotion denied.',
@@ -284,6 +290,9 @@ describe('evolution run state machine', () => {
     const progressed = {
       ...createEvolutionRun('candidate-v2', 'stable-v1'),
       stage: 'promote' as const,
+      gateResults: passingRequiredGateResults(),
+      budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+      budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
     }
 
     expect(completeEvolutionRun(progressed, {
@@ -305,7 +314,8 @@ describe('evolution run state machine', () => {
     expect(deniedRun.deployedVersion).toBe('stable-v2')
 
     const promoted = completeEvolutionRun(
-      transitionEvolutionStage(
+      {
+        ...transitionEvolutionStage(
         recordCanaryDecision(transitionEvolutionStage(
           transitionEvolutionStage(
             transitionEvolutionStage(
@@ -328,6 +338,10 @@ describe('evolution run state machine', () => {
         }),
         'promote',
       ),
+        gateResults: passingRequiredGateResults(),
+        budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+        budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
+      },
       {
         allowed: true,
         status: 'healthy',
@@ -392,7 +406,8 @@ describe('evolution run state machine', () => {
 
   it('allows rollback after a successful promotion', () => {
     const promoted = completeEvolutionRun(
-      transitionEvolutionStage(
+      {
+        ...transitionEvolutionStage(
         recordCanaryDecision(transitionEvolutionStage(
           transitionEvolutionStage(
             transitionEvolutionStage(
@@ -415,6 +430,10 @@ describe('evolution run state machine', () => {
         }),
         'promote',
       ),
+        gateResults: passingRequiredGateResults(),
+        budgetUsage: { runtimeMs: 1, cpuMs: 1, memoryMb: 1, apiCalls: 1, spendUsd: 0.01 },
+        budgetLimits: { maxRuntimeMs: 10, maxCpuMs: 10, maxMemoryMb: 10, maxApiCalls: 10, maxSpendUsd: 1 },
+      },
       {
         allowed: true,
         status: 'healthy',
@@ -968,6 +987,27 @@ describe('admin observability model', () => {
       currentVersion: 'baseline-safe',
       run: stopEvolutionRun(createEvolutionRun('candidate-v2', 'baseline-safe'), 'failed'),
     }).canaryStatus).toBe('failed')
+  })
+
+  it('fails closed for rolled-back runs with contradictory healthy canary decisions', () => {
+    const status = buildAdminEvolutionStatusModel({
+      currentVersion: 'baseline-safe',
+      run: {
+        ...createEvolutionRun('candidate-v2', 'baseline-safe'),
+        status: 'rolled_back',
+        stage: 'rollback',
+        canaryDecision: {
+          allowed: false,
+          status: 'healthy',
+          reason: 'contradictory backend state',
+          runId: 'foreign-run',
+          candidateSnapshotId: 'foreign-snapshot',
+          candidateVersion: 'foreign-candidate',
+        },
+      },
+    })
+
+    expect(status.canaryStatus).toBe('failed')
   })
 
   it('falls back to audit events projected from the active run', () => {
