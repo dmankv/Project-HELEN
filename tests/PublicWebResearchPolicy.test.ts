@@ -25,8 +25,8 @@ describe('public web research policy', () => {
 
   it('blocks localhost/private networks and unusual ports', () => {
     expect(validatePublicWebUrl('https://localhost', 'GET').allowed).toBe(false)
-    expect(validatePublicWebUrl('https://127.0.0.1', 'GET').code).toBe('blocked_network')
-    expect(validatePublicWebUrl('https://192.168.1.2', 'GET').code).toBe('blocked_network')
+    expect(validatePublicWebUrl('https://127.0.0.1', 'GET').code).toBe('blocked_ip_literal')
+    expect(validatePublicWebUrl('https://192.168.1.2', 'GET').code).toBe('blocked_ip_literal')
     expect(validatePublicWebUrl('https://example.com:8443', 'GET').code).toBe('blocked_port')
   })
 

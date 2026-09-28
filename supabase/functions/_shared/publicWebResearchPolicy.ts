@@ -108,7 +108,7 @@ function isIPv6Literal(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, '')
   if (!normalized.includes(':')) return false
   const segments = normalized.split(':')
-  return segments.every(segment => segment === '' || isHexLike(segment))
+  return segments.every(segment => segment === '' || (segment.length >= 1 && segment.length <= 4 && isHexLike(segment)))
 }
 
 function isSingleLabelHost(hostname: string): boolean {
@@ -234,8 +234,12 @@ export function validatePublicWebUrl(
   }
 
   const ipLiteralDecision = classifyIpLiteral(hostname)
-  if (ipLiteralDecision.allowed || ipLiteralDecision.code !== 'blocked_ip_literal') {
-    return ipLiteralDecision
+  if (ipLiteralDecision.code !== 'blocked_ip_literal') {
+    return {
+      allowed: false,
+      code: 'blocked_ip_literal',
+      reason: 'Direct IP-literal destinations are blocked; use public hostnames only.',
+    }
   }
 
   if (INTERNAL_HOST_SUFFIXES.some(suffix => hostname.endsWith(suffix))) {

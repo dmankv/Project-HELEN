@@ -608,7 +608,10 @@ export default function DaemonInterface({
         const researchText = researchResult.status === 'success'
           ? [
               `Public-web research succeeded from ${researchResult.provenance?.host ?? 'a public source'}.`,
-              researchResult.excerpt ? `Excerpt: ${researchResult.excerpt}` : 'No textual excerpt was returned.',
+              `Source: ${researchResult.provenance?.normalizedUrl ?? '(unknown)'}`,
+              researchResult.excerpt
+                ? `Untrusted external excerpt (quoted):\n> ${researchResult.excerpt.replace(/\n/g, '\n> ')}`
+                : 'No textual excerpt was returned.',
             ].join('\n\n')
           : researchResult.status === 'policy_blocked'
             ? `Research request was policy-blocked: ${researchResult.decision.reason} No browsing was performed beyond policy checks.`

@@ -45,8 +45,8 @@ describe('public web research edge gateway source', () => {
 
   it('does not forward caller Authorization or Cookie headers to destination fetches', () => {
     const fetchHeadersBlock = src.match(/const fetchHeaders:[\s\S]+?}\n\s*const response = await fetch/s)?.[0] ?? ''
-    expect(fetchHeadersBlock).not.toContain("'Authorization'")
-    expect(fetchHeadersBlock).not.toContain("'Cookie'")
+    expect(fetchHeadersBlock).not.toMatch(/authorization\s*:/i)
+    expect(fetchHeadersBlock).not.toMatch(/cookie\s*:/i)
   })
 })
 

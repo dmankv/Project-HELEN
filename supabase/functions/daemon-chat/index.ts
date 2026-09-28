@@ -480,28 +480,33 @@ function normalizeResolvedIps(data: unknown): string[] {
     .filter(Boolean)
 }
 
-async function resolveDnsRecords(hostname: string): Promise<string[]> {
+async function resolveDnsRecords(hostname: string, timeoutMs: number): Promise<string[]> {
+  const boundedTimeout = Math.max(250, Math.min(timeoutMs, 3_000))
   const [aResp, aaaaResp] = await Promise.all([
     fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`, {
       method: 'GET',
-      signal: AbortSignal.timeout(3_000),
+      signal: AbortSignal.timeout(boundedTimeout),
     }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
     fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=AAAA`, {
       method: 'GET',
-      signal: AbortSignal.timeout(3_000),
+      signal: AbortSignal.timeout(boundedTimeout),
     }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
   ])
   return [...aResp, ...aaaaResp]
 }
 
-async function ensurePublicDnsResolution(target: URL): Promise<ResearchPolicyDecision> {
+async function ensurePublicDnsResolution(target: URL, timeoutMs: number): Promise<ResearchPolicyDecision> {
   const hostname = target.hostname.toLowerCase()
   const ipLiteralDecision = classifyIpLiteral(hostname)
   if (ipLiteralDecision.code !== 'blocked_ip_literal') {
-    return ipLiteralDecision
+    return {
+      allowed: false,
+      code: 'blocked_ip_literal',
+      reason: 'Direct IP-literal destinations are blocked; use public hostnames only.',
+    }
   }
 
-  const resolvedIps = await resolveDnsRecords(hostname)
+  const resolvedIps = await resolveDnsRecords(hostname, timeoutMs)
   if (resolvedIps.length === 0) {
     return {
       allowed: false,
@@ -573,8 +578,9 @@ async function readBoundedBodyText(response: Response, maxBytes: number): Promis
   return { text, bytes }
 }
 
-async function fetchRobotsDecision(url: URL): Promise<ResearchPolicyDecision> {
+async function fetchRobotsDecision(url: URL, timeoutMs: number): Promise<ResearchPolicyDecision> {
   const robotsUrl = new URL('/robots.txt', url)
+  const boundedTimeout = Math.max(250, Math.min(timeoutMs, 3_000))
   try {
     const response = await fetch(robotsUrl, {
       method: 'GET',
@@ -582,7 +588,7 @@ async function fetchRobotsDecision(url: URL): Promise<ResearchPolicyDecision> {
         Accept: 'text/plain',
         'User-Agent': RESEARCH_USER_AGENT,
       },
-      signal: AbortSignal.timeout(3_000),
+      signal: AbortSignal.timeout(boundedTimeout),
     })
     if (!response.ok) {
       return {
@@ -693,7 +699,7 @@ async function executePublicWebResearch(
     }
   }
 
-  const unsafeRequestDecision = classifyHighRiskResearch(`${request.search_query ?? ''}\n${targetUrl}`)
+  const unsafeRequestDecision = classifyHighRiskResearch(request.search_query ?? '')
   if (!unsafeRequestDecision.allowed) {
     return {
       request_type: 'public_web_research',
@@ -717,7 +723,9 @@ async function executePublicWebResearch(
   let finalResponse: Response | null = null
 
   while (runBudget.requests < IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRequestsPerRun) {
-    if (Date.now() - startedAt > RESEARCH_REQUEST_TIMEOUT_MS) {
+    const elapsedMs = Date.now() - startedAt
+    const remainingRuntimeMs = RESEARCH_REQUEST_TIMEOUT_MS - elapsedMs
+    if (remainingRuntimeMs <= 0) {
       return {
         request_type: 'public_web_research',
         status: 'policy_blocked',
@@ -734,7 +742,7 @@ async function executePublicWebResearch(
       }
     }
 
-    const dnsDecision = await ensurePublicDnsResolution(currentUrl)
+    const dnsDecision = await ensurePublicDnsResolution(currentUrl, remainingRuntimeMs)
     if (!dnsDecision.allowed) {
       return {
         request_type: 'public_web_research',
@@ -748,7 +756,7 @@ async function executePublicWebResearch(
       }
     }
 
-    const robotsDecision = await fetchRobotsDecision(currentUrl)
+    const robotsDecision = await fetchRobotsDecision(currentUrl, remainingRuntimeMs)
     if (!robotsDecision.allowed) {
       return {
         request_type: 'public_web_research',
@@ -786,7 +794,7 @@ async function executePublicWebResearch(
       method: requestMethod,
       redirect: 'manual',
       headers: fetchHeaders,
-      signal: AbortSignal.timeout(RESEARCH_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.max(250, remainingRuntimeMs)),
     })
 
     if (response.status >= 300 && response.status < 400) {
