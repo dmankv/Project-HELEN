@@ -787,12 +787,12 @@ export default function DaemonInterface({
         void insertLearningInteraction({
           id: interactionRecord.id,
           input: text,
-          response,
-          intent,
+          response: localResult.text,
+          intent: localResult.intent,
           confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
-          ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
-          memoryUsed: retrieved.length,
-          planComplexity: complexity,
+          ambiguity: localResult.intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
+          memoryUsed: localResult.retrievedMemories.length,
+          planComplexity: localResult.complexity,
           createdAt: new Date().toISOString(),
         })
         setSyncStatus('syncing')
