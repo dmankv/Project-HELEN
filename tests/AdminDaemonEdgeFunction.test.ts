@@ -135,6 +135,21 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain("logAudit('admin_evolution_status'")
   })
 
+  it('supports admin-only research_status diagnostics without exposing secret values', () => {
+    expect(src).toContain("request_type")
+    expect(src).toContain("research_status")
+    expect(src).toContain("if (isResearchStatusRequest(body))")
+    expect(src).toContain("buildResearchStatusResponse")
+    expect(src).toContain("from('research_fetch_provenance')")
+    expect(src).toContain("from('research_audit_events')")
+    expect(src).toContain("from('unverified_external_insights')")
+    expect(src).toContain("search_provider_configured")
+    expect(src).toContain("search_endpoint_configured")
+    expect(src).toContain("IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS")
+    expect(src).not.toContain("DAEMON_RESEARCH_SEARCH_API_KEY\"")
+    expect(src).toContain("logAudit('admin_research_status'")
+  })
+
   it('surfaces explicit diagnostics availability states instead of masking query failures', () => {
     expect(src).toContain("evolutionStatus: 'available'")
     expect(src).toContain("evolutionStatus: 'unavailable'")

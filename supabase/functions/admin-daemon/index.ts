@@ -34,6 +34,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS } from '../_shared/publicWebResearchPolicy.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -616,6 +617,121 @@ async function buildEvolutionStatusResponse(
   }
 }
 
+function parseResearchMode(value: string | undefined): 'denied' | 'configured' {
+  return value?.toLowerCase() === 'configured' ? 'configured' : 'denied'
+}
+
+function isResearchStatusRequest(body: unknown): body is Record<string, unknown> & { request_type: 'research_status' } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  return (body as Record<string, unknown>).request_type === 'research_status'
+}
+
+interface ResearchStatusResponse {
+  request_type: 'research_status'
+  diagnostics_status: 'available' | 'unavailable' | 'error'
+  configuration: {
+    mode: 'denied' | 'configured'
+    search_provider_configured: boolean
+    search_endpoint_configured: boolean
+    budgets: typeof IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS
+  }
+  counters: {
+    fetched_sources: number
+    blocked_events: number
+    quarantined_insights: number
+    expired_insights: number
+  }
+  blocked_reasons: Array<{ reason: string; count: number }>
+}
+
+async function buildResearchStatusResponse(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<ResearchStatusResponse> {
+  const mode = parseResearchMode(Deno.env.get('DAEMON_PUBLIC_WEB_RESEARCH_MODE') ?? undefined)
+  const searchEndpointConfigured = (Deno.env.get('DAEMON_RESEARCH_SEARCH_ENDPOINT') ?? '').trim().length > 0
+  const searchProviderConfigured = (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim().length > 0
+
+  const [provenanceCount, auditEvents, insightRows] = await Promise.all([
+    serviceClient
+      .from('research_fetch_provenance')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+    serviceClient
+      .from('research_audit_events')
+      .select('event_type, metadata')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200),
+    serviceClient
+      .from('unverified_external_insights')
+      .select('expires_at, evaluation_state')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200),
+  ])
+
+  if (provenanceCount.error || auditEvents.error || insightRows.error) {
+    return {
+      request_type: 'research_status',
+      diagnostics_status: 'error',
+      configuration: {
+        mode,
+        search_provider_configured: searchProviderConfigured,
+        search_endpoint_configured: searchEndpointConfigured,
+        budgets: IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+      },
+      counters: {
+        fetched_sources: 0,
+        blocked_events: 0,
+        quarantined_insights: 0,
+        expired_insights: 0,
+      },
+      blocked_reasons: [],
+    }
+  }
+
+  const blockedReasonCounts = new Map<string, number>()
+  let blockedEvents = 0
+  for (const event of auditEvents.data ?? []) {
+    const metadata = (event.metadata ?? {}) as Record<string, unknown>
+    const policyDecision = typeof metadata.policy_decision === 'string'
+      ? metadata.policy_decision
+      : typeof metadata.policyDecision === 'string'
+        ? metadata.policyDecision
+        : null
+    if (!policyDecision || !policyDecision.startsWith('blocked_')) continue
+    blockedEvents += 1
+    blockedReasonCounts.set(policyDecision, (blockedReasonCounts.get(policyDecision) ?? 0) + 1)
+  }
+
+  const now = Date.now()
+  const quarantinedInsights = (insightRows.data ?? [])
+    .filter(row => row.evaluation_state === 'quarantined').length
+  const expiredInsights = (insightRows.data ?? [])
+    .filter(row => Date.parse(row.expires_at) < now).length
+
+  return {
+    request_type: 'research_status',
+    diagnostics_status: mode === 'configured' ? 'available' : 'unavailable',
+    configuration: {
+      mode,
+      search_provider_configured: searchProviderConfigured,
+      search_endpoint_configured: searchEndpointConfigured,
+      budgets: IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+    },
+    counters: {
+      fetched_sources: provenanceCount.count ?? 0,
+      blocked_events: blockedEvents,
+      quarantined_insights: quarantinedInsights,
+      expired_insights: expiredInsights,
+    },
+    blocked_reasons: Array.from(blockedReasonCounts.entries())
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AI provider call
 // ---------------------------------------------------------------------------
@@ -781,6 +897,17 @@ Deno.serve(async (req: Request) => {
     logAudit('admin_evolution_status', { user_id: user.id })
     return new Response(
       JSON.stringify(await buildEvolutionStatusResponse(serviceClient, user.id, supabaseUrl)),
+      {
+        status: 200,
+        headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },
+      },
+    )
+  }
+
+  if (isResearchStatusRequest(body)) {
+    logAudit('admin_research_status', { user_id: user.id })
+    return new Response(
+      JSON.stringify(await buildResearchStatusResponse(serviceClient, user.id)),
       {
         status: 200,
         headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) },

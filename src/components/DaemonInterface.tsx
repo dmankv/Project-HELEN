@@ -28,6 +28,7 @@ import {
   getSafeEdgeFallbackMessage,
   hasEdgeFunction,
   isEdgeChatFailure,
+  requestPublicWebResearch,
 } from '../services/supabaseEdgeChat'
 import type {
   EdgeChatFailure,
@@ -224,6 +225,15 @@ function handleMemoryCommand(cmd: MemoryCommand): string {
         : 'Here\'s what I remember:\n\n' + formatMemoriesForContext(mems)
     }
   }
+}
+
+function parseResearchCommand(text: string): { url?: string; searchQuery?: string } | null {
+  const trimmed = text.trim()
+  const urlMatch = /^research\s+url\s*:\s*(.+)$/i.exec(trimmed)
+  if (urlMatch) return { url: urlMatch[1].trim() }
+  const queryMatch = /^research\s*:\s*(.+)$/i.exec(trimmed)
+  if (queryMatch) return { searchQuery: queryMatch[1].trim() }
+  return null
 }
 
 const MAX_API_TURNS = 20
@@ -543,6 +553,78 @@ export default function DaemonInterface({
         const updated = [...nextMessages, aiMsg]
         persistConversationMessages(convId, updated)
         setIsThinking(false)
+        return
+      }
+
+      const researchCommand = parseResearchCommand(text)
+      if (researchCommand) {
+        if (!hasEdgeFunction()) {
+          const aiMsg: Message = {
+            id: nextId(),
+            role: 'assistant',
+            content: 'Public-web research is unavailable in this build, so no browsing was performed.',
+            timestamp: new Date().toISOString(),
+          }
+          persistConversationMessages(convId, [...nextMessages, aiMsg])
+          setIsThinking(false)
+          return
+        }
+        if (!currentUser) {
+          const aiMsg: Message = {
+            id: nextId(),
+            role: 'assistant',
+            content: 'Sign in is required for server-side public-web research. No browsing was performed.',
+            timestamp: new Date().toISOString(),
+          }
+          persistConversationMessages(convId, [...nextMessages, aiMsg])
+          setIsThinking(false)
+          return
+        }
+
+        const controller = new AbortController()
+        abortRef.current = controller
+        const researchResult = await requestPublicWebResearch({
+          ...(researchCommand.url ? { url: researchCommand.url } : {}),
+          ...(researchCommand.searchQuery ? { searchQuery: researchCommand.searchQuery } : {}),
+          method: 'GET',
+          storeInsight: true,
+        }, controller.signal)
+
+        if (isEdgeChatFailure(researchResult)) {
+          const fallback = getSafeEdgeFallbackMessage(researchResult)
+            ?? 'Public-web research request was cancelled before browsing.'
+          const aiMsg: Message = {
+            id: nextId(),
+            role: 'assistant',
+            content: fallback,
+            timestamp: new Date().toISOString(),
+          }
+          persistConversationMessages(convId, [...nextMessages, aiMsg])
+          setIsThinking(false)
+          abortRef.current = null
+          return
+        }
+
+        const researchText = researchResult.status === 'success'
+          ? [
+              `Public-web research succeeded from ${researchResult.provenance?.host ?? 'a public source'}.`,
+              researchResult.excerpt ? `Excerpt: ${researchResult.excerpt}` : 'No textual excerpt was returned.',
+            ].join('\n\n')
+          : researchResult.status === 'policy_blocked'
+            ? `Research request was policy-blocked: ${researchResult.decision.reason} No browsing was performed beyond policy checks.`
+            : researchResult.status === 'unavailable'
+              ? `Research is currently unavailable: ${researchResult.decision.reason} No browsing was performed.`
+              : `Research failed safely: ${researchResult.decision.reason}`
+
+        const aiMsg: Message = {
+          id: nextId(),
+          role: 'assistant',
+          content: researchText,
+          timestamp: new Date().toISOString(),
+        }
+        persistConversationMessages(convId, [...nextMessages, aiMsg])
+        setIsThinking(false)
+        abortRef.current = null
         return
       }
 

@@ -26,6 +26,19 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+  classifyHighRiskResearch,
+  classifyIpLiteral,
+  deriveMinimalSearchTerms,
+  isSupportedResearchContentType,
+  redactResearchAuditMetadata,
+  robotsAllowsPath,
+  sanitizeBoundedText,
+  type ResearchPolicyDecision,
+  type ResearchPolicyDecisionCode,
+  validatePublicWebUrl,
+} from '../_shared/publicWebResearchPolicy.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,6 +76,50 @@ interface RequestBody {
   /** Optional client interaction id, echoed back for feedback attribution. */
   interaction_id?: string
   diagnosticContext?: string
+  request_type?: 'chat' | 'public_web_research'
+  research?: {
+    url?: string
+    search_query?: string
+    method?: 'GET' | 'HEAD'
+    store_insight?: boolean
+  }
+}
+
+interface ResearchRequest {
+  url?: string
+  search_query?: string
+  method?: 'GET' | 'HEAD'
+  store_insight?: boolean
+}
+
+interface ResearchConfig {
+  mode: 'denied' | 'configured'
+  searchEnabled: boolean
+  searchEndpoint: string
+  searchApiKey: string
+}
+
+interface ResearchProvenanceRecord {
+  normalizedUrl: string
+  host: string
+  fetchedAt: string
+  httpStatus: number
+  contentType: string
+  byteSize: number
+  contentHash: string
+  policyDecision: ResearchPolicyDecisionCode
+  sanitizedExcerpt: string
+}
+
+interface PublicWebResearchResponse {
+  request_type: 'public_web_research'
+  status: 'success' | 'unavailable' | 'policy_blocked' | 'error'
+  decision: ResearchPolicyDecision
+  provenance: ResearchProvenanceRecord | null
+  excerpt: string | null
+  source_count: number
+  blocked_count: number
+  blocked_reasons: string[]
 }
 
 type SafeErrorCode =
@@ -111,6 +168,8 @@ const MAX_MESSAGES = 40
 const MAX_CONTENT_BYTES = 8_000
 const MAX_DIAGNOSTIC_CONTEXT_BYTES = 64_000
 const REQUEST_TIMEOUT_MS = 30_000
+const RESEARCH_REQUEST_TIMEOUT_MS = IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRuntimeMs
+const RESEARCH_USER_AGENT = 'DaemonResearchBot/1.0 (+https://dmankv.github.io/Project-HELEN)'
 
 const DAEMON_SYSTEM_PROMPT = `You are Daemon, an AI assistant. You are not human, not conscious, not sentient, and not the user.
 
@@ -358,6 +417,545 @@ function validateDiagnosticContext(body: unknown): { valid: boolean; context?: s
   return { valid: true, context: redactDiagnosticContext(diagnosticContext) }
 }
 
+function parseResearchConfig(): ResearchConfig {
+  const mode = (Deno.env.get('DAEMON_PUBLIC_WEB_RESEARCH_MODE') ?? '').toLowerCase() === 'configured'
+    ? 'configured'
+    : 'denied'
+  const searchEndpoint = (Deno.env.get('DAEMON_RESEARCH_SEARCH_ENDPOINT') ?? '').trim()
+  const searchApiKey = (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim()
+  const searchProviderConfigured = searchEndpoint.length > 0 && searchApiKey.length > 0
+  return {
+    mode,
+    searchEnabled: searchProviderConfigured,
+    searchEndpoint,
+    searchApiKey,
+  }
+}
+
+function isPublicWebResearchRequest(body: unknown): body is RequestBody & { request_type: 'public_web_research' } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  return (body as Record<string, unknown>).request_type === 'public_web_research'
+}
+
+function validateResearchRequest(body: unknown): { valid: boolean; request?: ResearchRequest; error?: string } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { valid: false, error: 'Invalid request body.' }
+  const research = (body as RequestBody).research
+  if (!research || typeof research !== 'object') {
+    return { valid: false, error: 'research payload is required.' }
+  }
+  const request: ResearchRequest = {}
+  if (research.url !== undefined) {
+    if (typeof research.url !== 'string' || research.url.length > 2048) {
+      return { valid: false, error: 'research.url must be a bounded string.' }
+    }
+    request.url = research.url
+  }
+  if (research.search_query !== undefined) {
+    if (typeof research.search_query !== 'string' || research.search_query.length > 1_024) {
+      return { valid: false, error: 'research.search_query must be a bounded string.' }
+    }
+    request.search_query = research.search_query
+  }
+  if (!request.url && !request.search_query) {
+    return { valid: false, error: 'Provide either research.url or research.search_query.' }
+  }
+  if (research.method !== undefined) {
+    if (research.method !== 'GET' && research.method !== 'HEAD') {
+      return { valid: false, error: 'research.method must be GET or HEAD.' }
+    }
+    request.method = research.method
+  }
+  request.store_insight = research.store_insight === true
+  return { valid: true, request }
+}
+
+function normalizeResolvedIps(data: unknown): string[] {
+  const answers = Array.isArray((data as { Answer?: unknown[] })?.Answer)
+    ? (data as { Answer: Array<{ data?: string }> }).Answer
+    : []
+  return answers
+    .map(answer => typeof answer.data === 'string' ? answer.data.trim() : '')
+    .filter(Boolean)
+}
+
+async function resolveDnsRecords(hostname: string): Promise<string[]> {
+  const [aResp, aaaaResp] = await Promise.all([
+    fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(3_000),
+    }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
+    fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=AAAA`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(3_000),
+    }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
+  ])
+  return [...aResp, ...aaaaResp]
+}
+
+async function ensurePublicDnsResolution(target: URL): Promise<ResearchPolicyDecision> {
+  const hostname = target.hostname.toLowerCase()
+  const ipLiteralDecision = classifyIpLiteral(hostname)
+  if (ipLiteralDecision.allowed || ipLiteralDecision.code !== 'blocked_ip_literal') {
+    return ipLiteralDecision
+  }
+
+  const resolvedIps = await resolveDnsRecords(hostname)
+  if (resolvedIps.length === 0) {
+    return {
+      allowed: false,
+      code: 'blocked_network',
+      reason: 'No public DNS resolution available for destination host.',
+    }
+  }
+  for (const ip of resolvedIps) {
+    const decision = classifyIpLiteral(ip)
+    if (!decision.allowed) {
+      return {
+        allowed: false,
+        code: decision.code,
+        reason: `Resolved destination includes blocked address: ${ip}.`,
+      }
+    }
+  }
+  return {
+    allowed: true,
+    code: 'allowed_public_source',
+    reason: 'Destination resolves to public DNS addresses.',
+  }
+}
+
+function toHexDigest(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+async function hashString(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return toHexDigest(digest)
+}
+
+async function fetchRobotsDecision(url: URL): Promise<ResearchPolicyDecision> {
+  const robotsUrl = new URL('/robots.txt', url)
+  try {
+    const response = await fetch(robotsUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/plain',
+        'User-Agent': RESEARCH_USER_AGENT,
+      },
+      signal: AbortSignal.timeout(3_000),
+    })
+    if (!response.ok) {
+      return {
+        allowed: true,
+        code: 'allowed_public_source',
+        reason: 'No blocking robots.txt rule detected.',
+      }
+    }
+    const robotsText = await response.text()
+    if (!robotsAllowsPath(robotsText, url.pathname || '/')) {
+      return {
+        allowed: false,
+        code: 'blocked_publisher_restriction',
+        reason: 'Blocked by publisher robots restriction (robots.txt is advisory, not authorization).',
+      }
+    }
+    return {
+      allowed: true,
+      code: 'allowed_public_source',
+      reason: 'robots.txt allows the target path.',
+    }
+  } catch {
+    return {
+      allowed: true,
+      code: 'allowed_public_source',
+      reason: 'robots.txt unavailable; continuing with policy controls.',
+    }
+  }
+}
+
+async function appendResearchAuditEvent(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+  eventType: 'research_policy' | 'research_request' | 'research_result' | 'research_insight',
+  metadata: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  await serviceClient.from('research_audit_events').insert({
+    user_id: userId,
+    event_type: eventType,
+    metadata: redactResearchAuditMetadata(metadata),
+  })
+}
+
+async function executePublicWebResearch(
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string,
+  request: ResearchRequest,
+): Promise<PublicWebResearchResponse> {
+  const config = parseResearchConfig()
+  const blockedReasons: string[] = []
+  let sourceCount = 0
+  let searchProviderOrigin: string | null = null
+
+  if (config.mode !== 'configured') {
+    return {
+      request_type: 'public_web_research',
+      status: 'unavailable',
+      decision: {
+        allowed: false,
+        code: 'blocked_invalid_config',
+        reason: 'Public-web research is disabled by immutable server policy configuration.',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: 0,
+      blocked_count: 1,
+      blocked_reasons: ['Public-web research mode is not configured.'],
+    }
+  }
+
+  const requestMethod = request.method ?? 'GET'
+  let targetUrl = request.url?.trim() ?? ''
+  if (!targetUrl && request.search_query) {
+    if (!config.searchEnabled) {
+      return {
+        request_type: 'public_web_research',
+        status: 'unavailable',
+        decision: {
+          allowed: false,
+          code: 'blocked_discovery_unconfigured',
+          reason: 'Search/discovery provider is not configured.',
+        },
+        provenance: null,
+        excerpt: null,
+        source_count: 0,
+        blocked_count: 1,
+        blocked_reasons: ['Search provider is not configured; discovery is fail-closed.'],
+      }
+    }
+    const minimalTerms = deriveMinimalSearchTerms(request.search_query)
+    const searchUrl = new URL(config.searchEndpoint)
+    searchUrl.searchParams.set('q', minimalTerms)
+    targetUrl = searchUrl.toString()
+    searchProviderOrigin = searchUrl.origin
+  }
+
+  const urlDecision = validatePublicWebUrl(targetUrl, requestMethod)
+  if (!urlDecision.allowed) {
+    return {
+      request_type: 'public_web_research',
+      status: 'policy_blocked',
+      decision: urlDecision,
+      provenance: null,
+      excerpt: null,
+      source_count: 0,
+      blocked_count: 1,
+      blocked_reasons: [urlDecision.reason],
+    }
+  }
+
+  const unsafeRequestDecision = classifyHighRiskResearch(`${request.search_query ?? ''}\n${targetUrl}`)
+  if (!unsafeRequestDecision.allowed) {
+    return {
+      request_type: 'public_web_research',
+      status: 'policy_blocked',
+      decision: unsafeRequestDecision,
+      provenance: null,
+      excerpt: null,
+      source_count: 0,
+      blocked_count: 1,
+      blocked_reasons: [unsafeRequestDecision.reason],
+    }
+  }
+
+  const runBudget = {
+    requests: 0,
+    bytes: 0,
+    redirects: 0,
+  }
+  const startedAt = Date.now()
+  let currentUrl = new URL(targetUrl)
+  let finalResponse: Response | null = null
+
+  while (runBudget.requests < IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRequestsPerRun) {
+    if (Date.now() - startedAt > RESEARCH_REQUEST_TIMEOUT_MS) {
+      return {
+        request_type: 'public_web_research',
+        status: 'policy_blocked',
+        decision: {
+          allowed: false,
+          code: 'blocked_budget_limit',
+          reason: 'Research runtime budget exceeded.',
+        },
+        provenance: null,
+        excerpt: null,
+        source_count: sourceCount,
+        blocked_count: blockedReasons.length + 1,
+        blocked_reasons: [...blockedReasons, 'Runtime budget exceeded.'],
+      }
+    }
+
+    const dnsDecision = await ensurePublicDnsResolution(currentUrl)
+    if (!dnsDecision.allowed) {
+      return {
+        request_type: 'public_web_research',
+        status: 'policy_blocked',
+        decision: dnsDecision,
+        provenance: null,
+        excerpt: null,
+        source_count: sourceCount,
+        blocked_count: blockedReasons.length + 1,
+        blocked_reasons: [...blockedReasons, dnsDecision.reason],
+      }
+    }
+
+    const robotsDecision = await fetchRobotsDecision(currentUrl)
+    if (!robotsDecision.allowed) {
+      return {
+        request_type: 'public_web_research',
+        status: 'policy_blocked',
+        decision: robotsDecision,
+        provenance: null,
+        excerpt: null,
+        source_count: sourceCount,
+        blocked_count: blockedReasons.length + 1,
+        blocked_reasons: [...blockedReasons, robotsDecision.reason],
+      }
+    }
+
+    await appendResearchAuditEvent(serviceClient, userId, 'research_request', {
+      url: currentUrl.toString(),
+      method: requestMethod,
+      redirected: runBudget.redirects > 0,
+      search_provider_used: request.search_query ? 'true' : 'false',
+    })
+
+    runBudget.requests += 1
+    const fetchHeaders: Record<string, string> = {
+      Accept: 'text/plain,text/html,application/json,application/xml,text/xml;q=0.9',
+      'User-Agent': RESEARCH_USER_AGENT,
+    }
+    if (
+      request.search_query
+      && searchProviderOrigin
+      && currentUrl.origin === searchProviderOrigin
+      && config.searchApiKey
+    ) {
+      fetchHeaders['X-Research-Provider-Key'] = config.searchApiKey
+    }
+    const response = await fetch(currentUrl, {
+      method: requestMethod,
+      redirect: 'manual',
+      headers: fetchHeaders,
+      signal: AbortSignal.timeout(RESEARCH_REQUEST_TIMEOUT_MS),
+    })
+
+    if (response.status >= 300 && response.status < 400) {
+      const locationHeader = response.headers.get('location')
+      if (!locationHeader) {
+        return {
+          request_type: 'public_web_research',
+          status: 'policy_blocked',
+          decision: {
+            allowed: false,
+            code: 'blocked_host',
+            reason: 'Redirect missing location.',
+          },
+          provenance: null,
+          excerpt: null,
+          source_count: sourceCount,
+          blocked_count: blockedReasons.length + 1,
+          blocked_reasons: [...blockedReasons, 'Redirect missing location.'],
+        }
+      }
+      runBudget.redirects += 1
+      if (runBudget.redirects > IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRedirects) {
+        return {
+          request_type: 'public_web_research',
+          status: 'policy_blocked',
+          decision: {
+            allowed: false,
+            code: 'blocked_budget_limit',
+            reason: 'Redirect budget exceeded.',
+          },
+          provenance: null,
+          excerpt: null,
+          source_count: sourceCount,
+          blocked_count: blockedReasons.length + 1,
+          blocked_reasons: [...blockedReasons, 'Redirect budget exceeded.'],
+        }
+      }
+      currentUrl = new URL(locationHeader, currentUrl)
+      const redirectPolicy = validatePublicWebUrl(currentUrl.toString(), requestMethod)
+      if (!redirectPolicy.allowed) {
+        return {
+          request_type: 'public_web_research',
+          status: 'policy_blocked',
+          decision: redirectPolicy,
+          provenance: null,
+          excerpt: null,
+          source_count: sourceCount,
+          blocked_count: blockedReasons.length + 1,
+          blocked_reasons: [...blockedReasons, redirectPolicy.reason],
+        }
+      }
+      continue
+    }
+
+    finalResponse = response
+    break
+  }
+
+  if (!finalResponse) {
+    return {
+      request_type: 'public_web_research',
+      status: 'error',
+      decision: {
+        allowed: false,
+        code: 'blocked_budget_limit',
+        reason: 'No response within research request budget.',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: sourceCount,
+      blocked_count: blockedReasons.length + 1,
+      blocked_reasons: [...blockedReasons, 'No response returned.'],
+    }
+  }
+
+  const contentType = finalResponse.headers.get('content-type') ?? ''
+  if (!isSupportedResearchContentType(contentType)) {
+    return {
+      request_type: 'public_web_research',
+      status: 'policy_blocked',
+      decision: {
+        allowed: false,
+        code: 'blocked_unsupported_content_type',
+        reason: 'Unsupported content type for read-only research gateway.',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: sourceCount,
+      blocked_count: blockedReasons.length + 1,
+      blocked_reasons: [...blockedReasons, `Unsupported content type: ${contentType || '(missing)'}`],
+    }
+  }
+
+  const bodyText = requestMethod === 'HEAD' ? '' : await finalResponse.text()
+  const bodyBytes = new TextEncoder().encode(bodyText).byteLength
+  runBudget.bytes += bodyBytes
+  if (
+    bodyBytes > IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxResponseBytes
+    || runBudget.bytes > IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxBytesPerRun
+  ) {
+    return {
+      request_type: 'public_web_research',
+      status: 'policy_blocked',
+      decision: {
+        allowed: false,
+        code: 'blocked_oversized_response',
+        reason: 'Response exceeded immutable research size budget.',
+      },
+      provenance: null,
+      excerpt: null,
+      source_count: sourceCount,
+      blocked_count: blockedReasons.length + 1,
+      blocked_reasons: [...blockedReasons, 'Response exceeded immutable size budget.'],
+    }
+  }
+
+  const sanitizedExcerpt = sanitizeBoundedText(bodyText, IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxExcerptChars)
+  const contentRisk = classifyHighRiskResearch(`${currentUrl.toString()}\n${sanitizedExcerpt}`)
+  if (!contentRisk.allowed) {
+    return {
+      request_type: 'public_web_research',
+      status: 'policy_blocked',
+      decision: contentRisk,
+      provenance: null,
+      excerpt: null,
+      source_count: sourceCount,
+      blocked_count: blockedReasons.length + 1,
+      blocked_reasons: [...blockedReasons, contentRisk.reason],
+    }
+  }
+
+  const hash = await hashString(bodyText)
+  const now = new Date().toISOString()
+  const provenance: ResearchProvenanceRecord = {
+    normalizedUrl: currentUrl.toString(),
+    host: currentUrl.hostname.toLowerCase(),
+    fetchedAt: now,
+    httpStatus: finalResponse.status,
+    contentType: contentType.split(';')[0].trim().toLowerCase(),
+    byteSize: bodyBytes,
+    contentHash: hash,
+    policyDecision: 'allowed_public_source',
+    sanitizedExcerpt,
+  }
+  sourceCount += 1
+
+  await serviceClient.from('research_fetch_provenance').insert({
+    user_id: userId,
+    normalized_url: provenance.normalizedUrl,
+    host: provenance.host,
+    fetched_at: provenance.fetchedAt,
+    http_status: provenance.httpStatus,
+    content_type: provenance.contentType,
+    content_size_bytes: provenance.byteSize,
+    content_hash: provenance.contentHash,
+    policy_decision: provenance.policyDecision,
+    sanitized_excerpt: provenance.sanitizedExcerpt,
+  })
+  await appendResearchAuditEvent(serviceClient, userId, 'research_result', {
+    url: provenance.normalizedUrl,
+    host: provenance.host,
+    http_status: provenance.httpStatus,
+    content_type: provenance.contentType,
+    content_size_bytes: provenance.byteSize,
+    policy_decision: provenance.policyDecision,
+  })
+
+  if (request.store_insight) {
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString()
+    await serviceClient.from('unverified_external_insights').insert({
+      user_id: userId,
+      normalized_url: provenance.normalizedUrl,
+      host: provenance.host,
+      source_timestamp: provenance.fetchedAt,
+      source_hash: provenance.contentHash,
+      excerpt: provenance.sanitizedExcerpt,
+      confidence: 0.35,
+      expires_at: expiresAt,
+      policy_decision: provenance.policyDecision,
+      evaluation_state: 'quarantined',
+      promotion_state: 'blocked_pending_validation',
+    })
+    await appendResearchAuditEvent(serviceClient, userId, 'research_insight', {
+      url: provenance.normalizedUrl,
+      host: provenance.host,
+      confidence: 0.35,
+      expires_at: expiresAt,
+      evaluation_state: 'quarantined',
+    })
+  }
+
+  return {
+    request_type: 'public_web_research',
+    status: 'success',
+    decision: {
+      allowed: true,
+      code: 'allowed_public_source',
+      reason: 'Fetched and sanitized through server-side policy gateway.',
+    },
+    provenance,
+    excerpt: sanitizedExcerpt,
+    source_count: sourceCount,
+    blocked_count: blockedReasons.length,
+    blocked_reasons: blockedReasons,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AI provider call
 // ---------------------------------------------------------------------------
@@ -517,6 +1115,26 @@ Deno.serve(async (req: Request) => {
     body = await req.json()
   } catch {
     return jsonErrorResponse('BAD_REQUEST', 400, headers)
+  }
+
+  if (isPublicWebResearchRequest(body)) {
+    const validatedResearch = validateResearchRequest(body)
+    if (!validatedResearch.valid || !validatedResearch.request) {
+      return jsonErrorResponse('BAD_REQUEST', 400, headers)
+    }
+    const researchRequest = validatedResearch.request
+    await appendResearchAuditEvent(serviceClient, user.id, 'research_policy', {
+      request_type: 'public_web_research',
+      has_url: typeof researchRequest.url === 'string',
+      has_search_query: typeof researchRequest.search_query === 'string',
+      method: researchRequest.method ?? 'GET',
+      store_insight: researchRequest.store_insight === true,
+    })
+    const researchResult = await executePublicWebResearch(serviceClient, user.id, researchRequest)
+    return new Response(
+      JSON.stringify(researchResult),
+      { status: 200, headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) } },
+    )
   }
 
   const validation = validateMessages(body)

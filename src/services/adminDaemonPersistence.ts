@@ -287,26 +287,118 @@ export interface AdminDiagnosticsStatus {
   supabaseUrl: string
   evolution: AdminEvolutionStatusModel | null
   evolutionStatus: 'available' | 'unavailable' | 'error'
+  researchStatus: 'available' | 'unavailable' | 'error'
+  research: {
+    mode: 'denied' | 'configured'
+    searchProviderConfigured: boolean
+    searchEndpointConfigured: boolean
+    fetchedSources: number
+    blockedEvents: number
+    blockedReasons: Array<{ reason: string; count: number }>
+    quarantinedInsights: number
+    expiredInsights: number
+  } | null
 }
 
 export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatus> {
   const configured = isAdminPersistenceConfigured()
   const client = configured ? getClient() : null
   let sessionActive = false
+  let accessToken: string | null = null
   if (client) {
     const { data } = await client.auth.getSession()
     sessionActive = Boolean(data.session)
+    accessToken = data.session?.access_token ?? null
   }
   // Show only the hostname, not the full URL, to avoid leaking project details.
   let urlHost = ''
   try {
     if (SUPABASE_URL) urlHost = new URL(SUPABASE_URL).hostname
   } catch { /* best-effort */ }
+
+  let evolution: AdminEvolutionStatusModel | null = null
+  let evolutionStatus: 'available' | 'unavailable' | 'error' = 'unavailable'
+  let research: AdminDiagnosticsStatus['research'] = null
+  let researchStatus: 'available' | 'unavailable' | 'error' = 'unavailable'
+
+  if (configured && sessionActive && accessToken) {
+    const endpoint = `${SUPABASE_URL}/functions/v1/admin-daemon`
+    try {
+      const [evolutionRes, researchRes] = await Promise.all([
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + accessToken,
+          },
+          body: JSON.stringify({ request_type: 'evolution_status' }),
+        }),
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + accessToken,
+          },
+          body: JSON.stringify({ request_type: 'research_status' }),
+        }),
+      ])
+
+      if (evolutionRes.ok) {
+        const evolutionData = await evolutionRes.json() as {
+          evolution?: AdminEvolutionStatusModel | null
+          evolutionStatus?: 'available' | 'unavailable' | 'error'
+        }
+        evolution = evolutionData.evolution ?? null
+        evolutionStatus = evolutionData.evolutionStatus ?? 'unavailable'
+      } else {
+        evolutionStatus = 'error'
+      }
+
+      if (researchRes.ok) {
+        const researchData = await researchRes.json() as {
+          diagnostics_status?: 'available' | 'unavailable' | 'error'
+          configuration?: {
+            mode?: 'denied' | 'configured'
+            search_provider_configured?: boolean
+            search_endpoint_configured?: boolean
+          }
+          counters?: {
+            fetched_sources?: number
+            blocked_events?: number
+            quarantined_insights?: number
+            expired_insights?: number
+          }
+          blocked_reasons?: Array<{ reason?: string; count?: number }>
+        }
+        researchStatus = researchData.diagnostics_status ?? 'unavailable'
+        research = {
+          mode: researchData.configuration?.mode === 'configured' ? 'configured' : 'denied',
+          searchProviderConfigured: Boolean(researchData.configuration?.search_provider_configured),
+          searchEndpointConfigured: Boolean(researchData.configuration?.search_endpoint_configured),
+          fetchedSources: Number(researchData.counters?.fetched_sources ?? 0),
+          blockedEvents: Number(researchData.counters?.blocked_events ?? 0),
+          blockedReasons: (researchData.blocked_reasons ?? [])
+            .map(entry => ({ reason: String(entry.reason ?? ''), count: Number(entry.count ?? 0) }))
+            .filter(entry => entry.reason.length > 0),
+          quarantinedInsights: Number(researchData.counters?.quarantined_insights ?? 0),
+          expiredInsights: Number(researchData.counters?.expired_insights ?? 0),
+        }
+      } else {
+        researchStatus = 'error'
+      }
+    } catch {
+      evolutionStatus = 'error'
+      researchStatus = 'error'
+    }
+  }
+
   return {
     persistenceConfigured: configured,
     sessionActive,
     supabaseUrl: urlHost,
-    evolution: null,
-    evolutionStatus: 'unavailable',
+    evolution,
+    evolutionStatus,
+    researchStatus,
+    research,
   }
 }

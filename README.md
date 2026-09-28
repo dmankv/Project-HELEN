@@ -251,3 +251,4 @@ Browser (GitHub Pages)
 ## Specification
 
 See [docs/DAEMON_SPEC.md](docs/DAEMON_SPEC.md) for the personality, safety, and evaluation specification.
+For constrained internet research controls, see [docs/public-web-research-gateway.md](docs/public-web-research-gateway.md).
