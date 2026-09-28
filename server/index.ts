@@ -374,18 +374,21 @@ class AuthStore {
   }
 
   private load(): AuthStoreFile {
+    const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
     try {
       fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
-      const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
       try {
-        const fd = fs.openSync(this.filePath, 'wx', 0o600)
+        const initialJson = JSON.stringify(initial, null, 2)
+        const tmp = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`
         try {
-          const initialJson = JSON.stringify(initial, null, 2)
-          fs.writeFileSync(fd, initialJson, 'utf8')
+          fs.writeFileSync(tmp, initialJson, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+          fs.linkSync(tmp, this.filePath)
+          return initial
         } finally {
-          fs.closeSync(fd)
+          try {
+            fs.unlinkSync(tmp)
+          } catch {}
         }
-        return initial
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       }
