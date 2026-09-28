@@ -397,7 +397,6 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
       } else {
         researchStatus = 'error'
         research = null
-        researchResolved = true
       }
     } catch {
       // Preserve independent statuses where available; fail closed only for
