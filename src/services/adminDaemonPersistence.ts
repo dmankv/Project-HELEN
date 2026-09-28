@@ -394,7 +394,6 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
         } else {
           research = null
         }
-        researchResolved = true
       } else {
         researchStatus = 'error'
         research = null
