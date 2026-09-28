@@ -1,14 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
+  buildResponse,
   detectMood,
   detectIntent,
-  generateHumanLikeResponse,
 } from '../services/daemonResponseBrain'
-import type { MemorySnippet, ResponseIntent } from '../services/daemonResponseBrain'
+import type { ResponseIntent } from '../services/daemonResponseBrain'
 import { selectStrategy, attributeFeedback } from '../services/daemonResponsePolicy'
 import type { ResponseStrategy } from '../services/daemonResponsePolicy'
-import { retrieveRelevantMemories } from '../services/daemonMemoryRetrieval'
-import { routeRequest, classifyComplexity, extractTaskKeywords } from '../services/daemonCapabilityRouter'
 import { getAdaptiveProfile } from '../services/daemonAdaptiveProfile'
 import learningSystem from '../services/daemon_learning_integration'
 import {
@@ -55,7 +53,6 @@ import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
 import {
   loadLocalPreferences,
   loadCloudPreferences,
-  toPersonalitySettings,
 } from '../services/daemonPersonalityPreferences'
 import type { PersonalityPreferences } from '../services/daemonPersonalityPreferences'
 import { runPublicWebResearchGateway } from '../services/publicWebResearchGateway'
@@ -606,17 +603,6 @@ export default function DaemonInterface({
       const adaptiveProfile = getAdaptiveProfile()
       const mood = detectMood(text)
       const intent = detectIntent(text, lastIntent)
-      const complexity = classifyComplexity(text, intent)
-      const routing = routeRequest({
-        intent,
-        mood,
-        complexity,
-        isAuthenticated: Boolean(currentUser),
-        isOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
-        cloudAvailable: hasEdgeFunction() || hasBackend(),
-        privacyOptOut: false,
-        taskKeywords: extractTaskKeywords(text),
-      })
       const selection = selectStrategy(intent, mood, adaptiveProfile, personalityPrefs)
 
       // 1. Supabase Edge Function (authenticated, rate-limited, no browser API keys)
@@ -730,45 +716,36 @@ export default function DaemonInterface({
       await new Promise(r => setTimeout(r, thinkingDelay(text)))
 
       const durableMemories = retrieveRelevant(text, 5)
-
-      // Bounded, provenance-tagged context retrieval.
-      const retrieved = retrieveRelevantMemories(text, durableMemories, adaptiveProfile)
-      const legacySnippets: MemorySnippet[] = retrieved
-        .filter(m => m.type === 'explicit')
-        .map(m => ({ text: m.text, relevance: m.relevanceScore }))
-
-      const wantsShortAnswer = text.trim().split(/\s+/).length <= 5
-        || selection.strategy === 'concise-action-plan'
-
-      const response = generateHumanLikeResponse(text, {
+      const localResult = buildResponse({
         userMessage: text,
-        mood,
-        intent,
-        memories: legacySnippets.length > 0 ? legacySnippets : undefined,
-        wantsShortAnswer,
+        personalityPrefs,
+        adaptiveProfile,
+        memories: durableMemories,
         lastIntent,
-        personality: toPersonalitySettings(personalityPrefs),
+        isAuthenticated: Boolean(currentUser),
+        isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+        cloudAvailable: hasEdgeFunction() || hasBackend(),
       })
 
-      setLastIntent(intent)
+      setLastIntent(localResult.intent)
 
-      const interactionRecord = learningSystem.recordInteraction(text, response, {
-        intent,
+      const interactionRecord = learningSystem.recordInteraction(text, localResult.text, {
+        intent: localResult.intent,
         confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
-        ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
-        memoryUsed: retrieved.length,
-        planComplexity: complexity,
+        ambiguity: localResult.intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
+        memoryUsed: localResult.retrievedMemories.length,
+        planComplexity: localResult.complexity,
         timestamp: new Date(),
-        strategy: selection.strategy,
-        contextKey: selection.contextKey,
-        routingMode: routing.mode,
-        routingReason: routing.reason,
+        strategy: localResult.strategy,
+        contextKey: localResult.contextKey,
+        routingMode: localResult.routing.mode,
+        routingReason: localResult.routing.reason,
       })
 
       const aiMsg: Message = {
         id: nextId(),
         role: 'assistant',
-        content: response,
+        content: localResult.text,
         timestamp: new Date().toISOString(),
       }
       const fallbackText = cloudFailureForFallback

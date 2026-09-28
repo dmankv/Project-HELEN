@@ -15,9 +15,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // ---------------------------------------------------------------------------
 
 vi.mock('../src/services/daemonResponseBrain', () => ({
+  buildResponse: vi.fn(() => ({
+    text: 'Test response from local brain.',
+    mood: 'neutral',
+    intent: 'answer',
+    strategy: 'baseline-balanced',
+    contextKey: 'baseline-balanced:answer:neutral',
+    strategySelection: { strategy: 'baseline-balanced', contextKey: 'baseline-balanced:answer:neutral' },
+    routing: { mode: 'local', reason: 'mock' },
+    retrievedMemories: [],
+    complexity: 'simple',
+    wantsShortAnswer: false,
+    cognitive: { reasoningMode: 'direct-answer', draftPlan: [] },
+    approvedLearningCandidates: [],
+  })),
   detectMood: vi.fn(() => 'neutral'),
   detectIntent: vi.fn(() => 'answer'),
-  generateHumanLikeResponse: vi.fn(() => 'Test response from local brain.'),
 }))
 
 vi.mock('../src/services/daemonChatAPI', () => ({

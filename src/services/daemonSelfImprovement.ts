@@ -1,4 +1,4 @@
-import { genUUID } from './daemonStorageMigration'
+import { genUUID, isUUID } from './daemonStorageMigration'
 
 export interface SelfImprovementAssurances {
   testsPassed: boolean
@@ -29,6 +29,9 @@ export interface SelfImprovementManifest {
 export type SelfImprovementDecisionCode =
   | 'accepted'
   | 'rejected-target-branch'
+  | 'rejected-source-branch'
+  | 'rejected-proposal-id'
+  | 'rejected-created-at'
   | 'rejected-empty-files'
   | 'rejected-purpose'
   | 'rejected-assurance'
@@ -54,6 +57,27 @@ export function createSelfImprovementManifest(input: SelfImprovementManifestInpu
 }
 
 export function evaluateSelfImprovement(manifest: SelfImprovementManifest): SelfImprovementDecision {
+  if (!manifest.sourceBranch.trim()) {
+    return {
+      accepted: false,
+      code: 'rejected-source-branch',
+      reason: 'Self-improvement proposal must declare a non-empty source branch.',
+    }
+  }
+  if (!isUUID(manifest.proposalId)) {
+    return {
+      accepted: false,
+      code: 'rejected-proposal-id',
+      reason: 'Self-improvement proposalId must be a valid UUID.',
+    }
+  }
+  if (!Number.isFinite(Date.parse(manifest.createdAt))) {
+    return {
+      accepted: false,
+      code: 'rejected-created-at',
+      reason: 'Self-improvement createdAt must be a valid ISO-8601 timestamp.',
+    }
+  }
   if (manifest.targetBranch !== 'main') {
     return {
       accepted: false,

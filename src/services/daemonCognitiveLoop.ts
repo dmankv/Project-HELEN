@@ -1,4 +1,8 @@
-import { isLikelySecretLearningText, isLikelySensitiveLearningText } from './daemonValidatedLearning'
+import {
+  isLikelySecretLearningText,
+  isLikelySensitiveLearningText,
+  type DurableLearningSource,
+} from './daemonValidatedLearning'
 
 export type ReasoningMode =
   | 'direct-answer'
@@ -29,6 +33,10 @@ export interface CognitiveLoopOutput {
   draftPlan: string[]
   selfCritique: string[]
   safeLessons: string[]
+  learningCandidates: Array<{
+    text: string
+    source: DurableLearningSource
+  }>
 }
 
 const MEMORY_INTENT_PATTERN = /\b(remember|recall|memory|what do you remember|list memories)\b/i
@@ -92,7 +100,7 @@ function toSafeLessonCandidate(text: string): string | null {
 }
 
 function extractCandidateFromUserMessage(message: string): string | null {
-  const preference = /\b(?:i prefer|please|i like|for future(?:\s+responses)?)[^.\n]{0,160}/i.exec(message)?.[0]
+  const preference = /\b(?:i prefer|i like|for future(?:\s+responses)?|remember this:)[^.\n]{0,160}/i.exec(message)?.[0]
   if (preference) return toSafeLessonCandidate(preference)
   const concise = /\b(?:keep it concise|be concise|short answers?)\b/i.exec(message)?.[0]
   if (concise) return toSafeLessonCandidate(concise)
@@ -105,12 +113,20 @@ export function runCognitiveLoop(input: CognitiveLoopInput): CognitiveLoopOutput
   const draftPlan = buildDraftPlan(reasoningMode, inferredGoal)
   const selfCritique = buildSelfCritique(input, reasoningMode)
 
-  const safeLessons = [
-    ...input.context.validatedInsights.map(toSafeLessonCandidate).filter((value): value is string => Boolean(value)),
-    toSafeLessonCandidate(extractCandidateFromUserMessage(input.userMessage) ?? ''),
+  const learningCandidates = [
+    ...input.context.validatedInsights
+      .map(toSafeLessonCandidate)
+      .filter((value): value is string => Boolean(value))
+      .map(text => ({ text, source: 'validated-insight' as const })),
+    (() => {
+      const candidate = extractCandidateFromUserMessage(input.userMessage)
+      return candidate ? [{ text: candidate, source: 'user-confirmed' as const }] : []
+    })(),
   ]
-    .filter((value): value is string => Boolean(value))
+    .flat()
     .slice(0, 3)
+
+  const safeLessons = learningCandidates.map(candidate => candidate.text)
 
   return {
     inferredGoal,
@@ -118,5 +134,6 @@ export function runCognitiveLoop(input: CognitiveLoopInput): CognitiveLoopOutput
     draftPlan,
     selfCritique,
     safeLessons,
+    learningCandidates,
   }
 }

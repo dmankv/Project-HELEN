@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import readline from 'node:readline'
-import { detectIntent, detectMood, generateHumanLikeResponse, type MemorySnippet, type ResponseIntent } from '../services/daemonResponseBrain.js'
+import { buildResponse, type MemorySnippet, type ResponseIntent } from '../services/daemonResponseBrain.js'
 
 const colors = {
   reset: '\x1b[0m',
@@ -96,16 +96,17 @@ function commandResponse(input: string): CommandResult {
 
 function generateLocalReply(input: string): string {
   const previousIntent = session.lastIntent
-  const mood = detectMood(input)
-  const intent = detectIntent(input, previousIntent)
-  session.lastIntent = intent
-  return generateHumanLikeResponse(input, {
+  const result = buildResponse({
     userMessage: input,
-    mood,
-    intent,
-    memories: session.memories.slice(-5),
+    memories: session.memories.slice(-5).map((memory, index) => ({
+      id: `session-memory-${index}-${memory.timestamp?.getTime() ?? Date.now()}`,
+      text: memory.text,
+      createdAt: memory.timestamp?.toISOString() ?? new Date().toISOString(),
+    })),
     lastIntent: previousIntent,
   })
+  session.lastIntent = result.intent
+  return result.text
 }
 
 function handleInput(input: string | null): string | null {

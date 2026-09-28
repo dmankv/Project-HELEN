@@ -671,15 +671,15 @@ export function buildResponse(options: BuildResponseOptions): BuildResponseResul
     },
   })
 
-  const approvedLearningCandidates = cognitive.safeLessons
-    .map(text => ({ text, decision: acceptLearningItem({
-      text,
-      source: 'validated-insight',
+  const approvedLearningCandidates = cognitive.learningCandidates
+    .map(candidate => ({ candidate, decision: acceptLearningItem({
+      text: candidate.text,
+      source: candidate.source,
       confidence: 0.5,
       createdAt: new Date().toISOString(),
     }) }))
     .filter(item => item.decision.accepted)
-    .map(item => item.text)
+    .map(item => item.candidate.text)
 
   const text = generateHumanLikeResponse(userMessage, {
     userMessage,

@@ -79,6 +79,24 @@ describe('validated durable learning gate', () => {
 })
 
 describe('daemon self-improvement manifest', () => {
+  const validManifest = createSelfImprovementManifest({
+    sourceBranch: 'copilot/daemon-self-improve',
+    changedFiles: ['src/services/daemonSelfImprovement.ts'],
+    purpose: 'Propose governed daemon self-improvement metadata.',
+    assurances: {
+      testsPassed: true,
+      securityAssured: true,
+      auditAssured: true,
+      rollbackAssured: true,
+    },
+  })
+
+  it('rejects manifests with invalid metadata fields', () => {
+    expect(evaluateSelfImprovement({ ...validManifest, sourceBranch: '' }).code).toBe('rejected-source-branch')
+    expect(evaluateSelfImprovement({ ...validManifest, proposalId: 'not-a-uuid' }).code).toBe('rejected-proposal-id')
+    expect(evaluateSelfImprovement({ ...validManifest, createdAt: 'not-a-date' }).code).toBe('rejected-created-at')
+  })
+
   it('rejects manifest submission when any assurance is false', () => {
     const manifest = createSelfImprovementManifest({
       sourceBranch: 'copilot/daemon-self-improve',
