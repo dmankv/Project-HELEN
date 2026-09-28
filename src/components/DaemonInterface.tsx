@@ -238,7 +238,7 @@ function parseResearchCommand(text: string): { url?: string; searchQuery?: strin
 
 function formatUntrustedExcerpt(excerpt: string): string {
   const escapedFence = excerpt.replace(/```/g, '``\\`')
-  return `Untrusted external excerpt (verbatim):\n\`\`\`text\n${escapedFence}\n\`\`\``
+  return `Untrusted external excerpt (sanitized and bounded):\n\`\`\`text\n${escapedFence}\n\`\`\``
 }
 
 const MAX_API_TURNS = 20

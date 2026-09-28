@@ -97,7 +97,6 @@ interface ResearchRequest {
 interface ResearchConfig {
   mode: 'denied' | 'configured'
   dnsPinningConfigured: boolean
-  pinnedTransportAvailable: boolean
   searchEnabled: boolean
   searchEndpoint: string
   searchApiKey: string
@@ -181,7 +180,6 @@ const MAX_DIAGNOSTIC_CONTEXT_BYTES = 64_000
 const REQUEST_TIMEOUT_MS = 30_000
 const RESEARCH_REQUEST_TIMEOUT_MS = IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRuntimeMs
 const RESEARCH_USER_AGENT = 'DaemonResearchBot/1.0 (+https://dmankv.github.io/Project-HELEN)'
-const PINNED_RESEARCH_TRANSPORT_AVAILABLE = false
 
 const DAEMON_SYSTEM_PROMPT = `You are Daemon, an AI assistant. You are not human, not conscious, not sentient, and not the user.
 
@@ -440,7 +438,6 @@ function parseResearchConfig(): ResearchConfig {
   return {
     mode,
     dnsPinningConfigured,
-    pinnedTransportAvailable: PINNED_RESEARCH_TRANSPORT_AVAILABLE,
     searchEnabled: searchProviderConfigured,
     searchEndpoint,
     searchApiKey,
@@ -759,21 +756,19 @@ async function executePublicWebResearch(
       blocked_reasons: ['Research DNS pinning backend is not configured.'],
     }
   }
-  if (!config.pinnedTransportAvailable) {
-    return {
-      request_type: 'public_web_research',
-      status: 'unavailable',
-      decision: {
-        allowed: false,
-        code: 'blocked_invalid_config',
-        reason: 'Research DNS pinning transport is not available; gateway remains fail-closed.',
-      },
-      provenance: null,
-      excerpt: null,
-      source_count: 0,
-      blocked_count: 1,
-      blocked_reasons: ['Research DNS pinning transport is not available.'],
-    }
+  return {
+    request_type: 'public_web_research',
+    status: 'unavailable',
+    decision: {
+      allowed: false,
+      code: 'blocked_invalid_config',
+      reason: 'Research DNS-pinned transport is not implemented; gateway remains fail-closed.',
+    },
+    provenance: null,
+    excerpt: null,
+    source_count: 0,
+    blocked_count: 1,
+    blocked_reasons: ['Research DNS-pinned transport is not implemented.'],
   }
 
   const requestMethod = request.method ?? 'GET'
@@ -1157,15 +1152,6 @@ async function executePublicWebResearch(
       blocked_reasons: [...blockedReasons, 'Research provenance persistence failed.'],
     }
   }
-  await appendResearchAuditEvent(serviceClient, userId, 'research_result', {
-    url: provenance.normalizedUrl,
-    host: provenance.host,
-    http_status: provenance.httpStatus,
-    content_type: provenance.contentType,
-    content_size_bytes: provenance.byteSize,
-    policy_decision: provenance.policyDecision,
-  })
-
   if (request.store_insight) {
     const expiresAt = new Date(Date.now() + DEFAULT_EXTERNAL_INSIGHT_TTL_MS).toISOString()
     const { error: insightError } = await serviceClient.from('unverified_external_insights').insert({
@@ -1408,6 +1394,11 @@ Deno.serve(async (req: Request) => {
         reason: researchResult.decision.reason,
         source_count: researchResult.source_count,
         blocked_count: researchResult.blocked_count,
+        url: researchResult.provenance?.normalizedUrl ?? null,
+        host: researchResult.provenance?.host ?? null,
+        http_status: researchResult.provenance?.httpStatus ?? null,
+        content_type: researchResult.provenance?.contentType ?? null,
+        content_size_bytes: researchResult.provenance?.byteSize ?? null,
       })
     } catch (error) {
       researchResult = {

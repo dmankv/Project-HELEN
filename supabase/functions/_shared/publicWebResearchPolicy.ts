@@ -410,6 +410,17 @@ export function redactResearchAuditMetadata(
       redacted[key] = '[REDACTED]'
       continue
     }
+    if (typeof value === 'string' && /(?:^|_)(?:url|uri)$/i.test(key)) {
+      try {
+        const parsed = new URL(value)
+        parsed.search = ''
+        parsed.hash = ''
+        redacted[key] = parsed.toString()
+        continue
+      } catch {
+        // keep the original value when it is not a URL
+      }
+    }
     redacted[key] = value
   }
   return redacted

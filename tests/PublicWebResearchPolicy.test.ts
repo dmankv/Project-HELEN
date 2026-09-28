@@ -102,11 +102,15 @@ describe('public web research policy', () => {
       authorization: '******',
       cookie: 'sid=abc',
       apiKey: 'sk-secret',
+      url: 'https://example.com/path?token=secret#frag',
+      normalized_url: 'https://example.com/other?api_key=secret',
       safe: 'ok',
     })
     expect(redacted.authorization).toBe('[REDACTED]')
     expect(redacted.cookie).toBe('[REDACTED]')
     expect(redacted.apiKey).toBe('[REDACTED]')
+    expect(redacted.url).toBe('https://example.com/path')
+    expect(redacted.normalized_url).toBe('https://example.com/other')
     expect(redacted.safe).toBe('ok')
   })
 
