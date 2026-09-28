@@ -1,0 +1,179 @@
+name: Evolution Canary Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Candidate version identifier
+        required: true
+        type: string
+      candidate_snapshot_id:
+        description: Candidate snapshot UUID
+        required: true
+        type: string
+      run_id:
+        description: Evolution run UUID
+        required: true
+        type: string
+      candidate_sha:
+        description: Commit SHA tied to candidate gate validation
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    environment:
+      name: evolution-canary
+    steps:
+      - name: Validate immutable enablement flag
+        run: |
+          if [ "${{ secrets.DAEMON_EVOLUTION_CANARY_ENABLED }}" != "true" ]; then
+            echo "Canary promotion is disabled by immutable infrastructure."
+            exit 1
+          fi
+
+      - name: Validate required identifiers
+        env:
+          CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
+          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+        run: |
+          UUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          printf '%s' "$CANDIDATE_SNAPSHOT_ID" | grep -Eq "$UUID_PATTERN"
+          printf '%s' "$EVOLUTION_RUN_ID" | grep -Eq "$UUID_PATTERN"
+          printf '%s' "$CANDIDATE_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'
+          test -n "$CANDIDATE_VERSION"
+
+      - name: Verify bound required gate attestations
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF_NAME: ${{ github.event.repository.default_branch }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
+          EXPECTED_ARTIFACT_NAME: ${{ format('evolution-gate-results-{0}-{1}-{2}', inputs.candidate_version, inputs.candidate_snapshot_id, inputs.run_id) }}
+          MAX_LIVE_EVAL_LOOKUP_PAGES: '5'
+        run: |
+          RUN_IDS="$(node <<'NODE'
+          const repo = process.env.REPO
+          const token = process.env.GITHUB_TOKEN
+          const refName = (process.env.REF_NAME || '').trim()
+          const maxPages = Number(process.env.MAX_LIVE_EVAL_LOOKUP_PAGES || '5')
+
+          async function loadRuns() {
+            if (!Number.isInteger(maxPages) || maxPages <= 0) {
+              throw new Error(`Invalid MAX_LIVE_EVAL_LOOKUP_PAGES: ${process.env.MAX_LIVE_EVAL_LOOKUP_PAGES}`)
+            }
+            const matched = []
+            for (let page = 1; page <= maxPages; page += 1) {
+              const params = new URLSearchParams({
+                event: 'workflow_dispatch',
+                status: 'completed',
+                per_page: '100',
+                page: `${page}`,
+              })
+              if (refName) params.set('branch', refName)
+              const url = `https://api.github.com/repos/${repo}/actions/workflows/live-eval.yml/runs?${params.toString()}`
+              const response = await fetch(url, {
+                headers: {
+                  Authorization: `token ${token}`,
+                  Accept: 'application/vnd.github+json',
+                },
+              })
+              if (!response.ok) {
+                throw new Error(`GitHub API request failed with ${response.status}`)
+              }
+              const doc = await response.json()
+              const runs = Array.isArray(doc.workflow_runs) ? doc.workflow_runs : []
+              if (runs.length === 0) break
+              for (const run of runs) {
+                if (run.conclusion === 'success') {
+                  const workflowSha = String(run.head_sha || '')
+                  const workflowRef = String(run.workflow_ref || '').trim() || (() => {
+                    const workflowPath = String(run.path || '').trim()
+                    const headBranch = String(run.head_branch || '').trim()
+                    if (!workflowPath || !headBranch) return ''
+                    if (workflowPath.startsWith(`${repo}/`)) {
+                      return workflowPath.includes('@')
+                        ? workflowPath
+                        : `${workflowPath}@refs/heads/${headBranch}`
+                    }
+                    return `${repo}/${workflowPath.includes('@')
+                      ? workflowPath
+                      : `${workflowPath}@refs/heads/${headBranch}`}`
+                  })()
+                  if (/^[0-9a-fA-F]{40}$/.test(workflowSha) && workflowRef) {
+                    matched.push(`${run.id}\t${workflowSha}\t${workflowRef}`)
+                  }
+                }
+              }
+            }
+
+            if (matched.length === 0) {
+              throw new Error(`No matching recent live-eval attestations found within ${maxPages} page(s) of workflow_dispatch runs.`)
+            }
+            process.stdout.write(matched.join('\n'))
+          }
+
+          loadRuns().catch((error) => {
+            console.error(error.message)
+            process.exit(1)
+          })
+          NODE
+          )"
+
+          MATCHED_RUN_ID=""
+          while IFS="$(printf '\t')" read -r RUN_ID RUN_WORKFLOW_SHA RUN_WORKFLOW_REF; do
+            if [ -z "$RUN_ID" ] || [ -z "$RUN_WORKFLOW_SHA" ] || [ -z "$RUN_WORKFLOW_REF" ]; then
+              continue
+            fi
+            ARTIFACTS_URL="https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100"
+            DOWNLOAD_URL="$(curl --fail --silent --show-error \
+              -H "Authorization: token ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "$ARTIFACTS_URL" \
+              | node -e "const fs=require('fs');const doc=JSON.parse(fs.readFileSync(0,'utf8'));const expected=process.env.EXPECTED_ARTIFACT_NAME;const a=(doc.artifacts||[]).find(x=>x.name===expected && !x.expired);if(!a||!a.archive_download_url){process.exit(1)};process.stdout.write(a.archive_download_url);" 2>/dev/null)" || continue
+
+            rm -rf /tmp/evolution-gates
+            mkdir -p /tmp/evolution-gates
+            curl --fail --silent --show-error -L \
+              -H "Authorization: token ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "$DOWNLOAD_URL" \
+              -o /tmp/evolution-gates/evolution-gate-results.zip
+            unzip -q -o /tmp/evolution-gates/evolution-gate-results.zip -d /tmp/evolution-gates
+            if TRUSTED_WORKFLOW_SHA="$RUN_WORKFLOW_SHA" TRUSTED_WORKFLOW_REF="$RUN_WORKFLOW_REF" node -e "const fs=require('fs');const p='/tmp/evolution-gates/evolution-gate-results.json';const doc=JSON.parse(fs.readFileSync(p,'utf8'));const required=['typecheck','lint','unit','build','security_scan','secret_scan','resource_budget','regression'];const expected={candidate_sha:process.env.CANDIDATE_SHA,run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.CANDIDATE_VERSION,candidate_snapshot_id:process.env.CANDIDATE_SNAPSHOT_ID,workflow_ref:process.env.TRUSTED_WORKFLOW_REF,workflow_sha:process.env.TRUSTED_WORKFLOW_SHA};if(!Object.entries(expected).every(([key,value])=>doc[key]===value)){process.exit(1)}const gates=Array.isArray(doc.gates)?doc.gates:[];for(const gate of required){const matches=gates.filter(result=>result&&result.gate===gate&&result.required===true);if(matches.length!==1||matches[0].status!=='passed'){process.exit(1)}}"; then
+              MATCHED_RUN_ID="$RUN_ID"
+              break
+            fi
+          done <<<"$RUN_IDS"
+
+          test -n "$MATCHED_RUN_ID"
+
+      - name: Trigger immutable canary backend
+        env:
+          EVOLUTION_CANARY_BACKEND_URL: ${{ secrets.EVOLUTION_CANARY_BACKEND_URL }}
+          EVOLUTION_CANARY_BACKEND_TOKEN: ${{ secrets.EVOLUTION_CANARY_BACKEND_TOKEN }}
+          EVOLUTION_RUN_ID: ${{ inputs.run_id }}
+          EVOLUTION_CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          EVOLUTION_CANDIDATE_SNAPSHOT_ID: ${{ inputs.candidate_snapshot_id }}
+          EVOLUTION_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          if [ -z "$EVOLUTION_CANARY_BACKEND_URL" ] || [ -z "$EVOLUTION_CANARY_BACKEND_TOKEN" ]; then
+            echo "Canary backend is not configured."
+            exit 1
+          fi
+          payload="$(node -e \"process.stdout.write(JSON.stringify({run_id:process.env.EVOLUTION_RUN_ID,candidate_version:process.env.EVOLUTION_CANDIDATE_VERSION,candidate_snapshot_id:process.env.EVOLUTION_CANDIDATE_SNAPSHOT_ID,candidate_sha:process.env.EVOLUTION_CANDIDATE_SHA}))\")"
+          curl --fail --show-error --silent \
+            -X POST "$EVOLUTION_CANARY_BACKEND_URL" \
+            -H "X-Canary-Token: $EVOLUTION_CANARY_BACKEND_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$payload"
