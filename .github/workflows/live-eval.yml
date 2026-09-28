@@ -99,8 +99,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -234,12 +232,7 @@ jobs:
             return 'change_control_plane_policy'
           }
 
-          const trustedBase = execGit(['merge-base', trustedWorkflowSha, candidateSha]).trim()
-          if (!trustedBase) {
-            throw new Error('Unable to resolve a trusted base for the promotion-bound candidate diff.')
-          }
-
-          const changedPaths = execGit(['diff', '--name-only', '--no-renames', trustedBase, candidateSha])
+          const changedPaths = execGit(['diff', '--name-only', '--no-renames', trustedWorkflowSha, candidateSha])
             .split('\n')
             .map((path) => path.trim())
             .filter(Boolean)
