@@ -73,11 +73,14 @@ const PROTECTED_SANDBOX_PATHS = Object.freeze([
   { prefix: 'src/components/LoginView.tsx', capability: 'modify_auth' },
   { prefix: 'src/components/SupabaseProjectAccessPanel.tsx', capability: 'modify_production_access_controls' },
   { prefix: 'src/services/adminDaemon', capability: 'modify_audit_controls' },
+  { prefix: 'src/services/adminDaemonPersistence.ts', capability: 'modify_audit_controls' },
   { prefix: 'src/services/daemonAuth', capability: 'modify_auth' },
+  { prefix: 'src/services/daemonAuthAPI.ts', capability: 'modify_auth' },
   { prefix: 'src/services/daemonEvolutionFoundation.ts', capability: 'change_control_plane_policy' },
   { prefix: 'src/services/daemonStorageMigration.ts', capability: 'change_control_plane_policy' },
   { prefix: 'src/main.tsx', capability: 'modify_production_access_controls' },
   { prefix: 'src/services/supabaseAuth', capability: 'modify_auth' },
+  { prefix: 'src/services/supabaseAuthAPI.ts', capability: 'modify_auth' },
   { prefix: 'src/services/supabasePersistence.ts', capability: 'modify_audit_controls' },
   { prefix: 'src/services/supabaseProjectAccess.ts', capability: 'modify_production_access_controls' },
   { prefix: '.env', capability: 'modify_secrets' },
@@ -128,7 +131,9 @@ function decideSandboxWritePath(filePath: string): CapabilityDecision {
   const protectedPath = PROTECTED_SANDBOX_PATHS.find(({ prefix }) => (
     prefix === '.env'
       ? normalizedPath === prefix || normalizedPath.startsWith(`${prefix}.`)
-      : normalizedPath === prefix || normalizedPath.startsWith(prefix)
+      : prefix.endsWith('/')
+        ? normalizedPath.startsWith(prefix)
+        : normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
   ))
   const writablePath = SANDBOX_WRITABLE_PATH_ALLOWLIST.some(pattern => pattern.test(normalizedPath))
 
