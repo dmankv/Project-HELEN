@@ -377,31 +377,72 @@ class AuthStore {
     const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
     try {
       fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
+      const initialJson = JSON.stringify(initial, null, 2)
       try {
-        const initialJson = JSON.stringify(initial, null, 2)
-        const tmp = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`
-        try {
-          fs.writeFileSync(tmp, initialJson, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-          fs.linkSync(tmp, this.filePath)
-          return initial
-        } finally {
-          try {
-            fs.unlinkSync(tmp)
-          } catch {}
-        }
+        if (this.publishInitialFile(initialJson)) return initial
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       }
-      const raw = fs.readFileSync(this.filePath, 'utf8')
-      const parsed = JSON.parse(raw) as Partial<AuthStoreFile>
-      return {
-        users: Array.isArray(parsed.users) ? parsed.users : [],
-        sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-        tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
-      }
+      return this.readExistingFile()
     } catch {
-      return { users: [], sessions: [], tokens: [] }
+      return initial
     }
+  }
+
+  private publishInitialFile(initialJson: string): boolean {
+    const tmp = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`
+    try {
+      fs.writeFileSync(tmp, initialJson, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+      try {
+        fs.linkSync(tmp, this.filePath)
+        return true
+      } catch (error) {
+        if (!this.isUnsupportedLinkError(error)) throw error
+      }
+
+      const lockDir = `${this.filePath}.lock`
+      fs.mkdirSync(lockDir)
+      try {
+        try {
+          fs.statSync(this.filePath)
+          return false
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        fs.renameSync(tmp, this.filePath)
+        return true
+      } finally {
+        fs.rmdirSync(lockDir)
+      }
+    } finally {
+      try {
+        fs.unlinkSync(tmp)
+      } catch {}
+    }
+  }
+
+  private readExistingFile(): AuthStoreFile {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const raw = fs.readFileSync(this.filePath, 'utf8')
+        const parsed = JSON.parse(raw) as Partial<AuthStoreFile>
+        return {
+          users: Array.isArray(parsed.users) ? parsed.users : [],
+          sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+          tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if ((code !== 'ENOENT' && !(error instanceof SyntaxError)) || attempt >= 24) throw error
+        const waitState = new Int32Array(new SharedArrayBuffer(4))
+        Atomics.wait(waitState, 0, 0, 10)
+      }
+    }
+  }
+
+  private isUnsupportedLinkError(error: unknown): boolean {
+    const code = (error as NodeJS.ErrnoException).code
+    return code === 'EMLINK' || code === 'ENOSYS' || code === 'ENOTSUP' || code === 'EPERM' || code === 'EXDEV'
   }
 
   private persist(): void {
