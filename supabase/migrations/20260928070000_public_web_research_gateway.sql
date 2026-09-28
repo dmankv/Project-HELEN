@@ -230,7 +230,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if auth.role() <> 'service_role' and auth.uid() <> target_user_id then
+  if auth.role() <> 'service_role' then
     raise exception 'Access denied.';
   end if;
 

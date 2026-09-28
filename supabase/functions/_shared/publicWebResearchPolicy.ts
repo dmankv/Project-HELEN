@@ -139,7 +139,11 @@ function isBlockedIPv4Octets(octets: number[]): boolean {
     || (a === 100 && b >= 64 && b <= 127)
     || (a === 169 && b === 254)
     || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 0)
     || (a === 192 && b === 168)
+    || (a === 198 && (b === 18 || b === 19))
+    || (a === 198 && b === 51)
+    || (a === 203 && b === 0)
     || a >= 224
   )
 }
@@ -257,6 +261,9 @@ export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
       || (ipv6Segments[0] & 0xfe00) === 0xfc00
       || (ipv6Segments[0] & 0xffc0) === 0xfe80
       || (ipv6Segments[0] & 0xff00) === 0xff00
+      || (ipv6Segments[0] & 0xe000) !== 0x2000
+      || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] === 0x0db8)
+      || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] === 0x0002 && ipv6Segments[2] === 0)
     ) {
       return {
         allowed: false,
@@ -413,14 +420,18 @@ export function robotsAllowsPath(robotsTxt: string, targetPath: string): boolean
     .map(line => line.trim())
     .filter(line => line.length > 0 && !line.startsWith('#'))
   let appliesToAllAgents = false
+  let readingUserAgentGroup = false
   const rules: Array<{ type: 'allow' | 'disallow'; path: string }> = []
   for (const line of lines) {
     const lower = line.toLowerCase()
     if (lower.startsWith('user-agent:')) {
+      if (!readingUserAgentGroup) appliesToAllAgents = false
+      readingUserAgentGroup = true
       const ua = line.slice('user-agent:'.length).trim()
-      appliesToAllAgents = ua === '*'
+      appliesToAllAgents = appliesToAllAgents || ua === '*'
       continue
     }
+    readingUserAgentGroup = false
     if (!appliesToAllAgents) continue
     if (lower.startsWith('disallow:')) {
       const path = line.slice('disallow:'.length).trim()

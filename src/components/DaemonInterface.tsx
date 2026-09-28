@@ -236,11 +236,6 @@ function parseResearchCommand(text: string): { url?: string; searchQuery?: strin
   return null
 }
 
-function formatUntrustedExcerpt(excerpt: string): string {
-  const escapedFence = excerpt.replace(/```/g, '``\\`')
-  return `Untrusted external excerpt (sanitized and bounded):\n\`\`\`text\n${escapedFence}\n\`\`\``
-}
-
 const MAX_API_TURNS = 20
 const CLOUD_CHAT_DOCS_URL = 'https://github.com/dmankv/Project-HELEN/blob/main/DEPLOYMENT.md#cloud-chat-diagnostics'
 
@@ -612,19 +607,11 @@ export default function DaemonInterface({
           return
         }
 
-        const researchText = researchResult.status === 'success'
-          ? [
-              `Public-web research succeeded from ${researchResult.provenance?.host ?? 'a public source'}.`,
-              `Source: ${researchResult.provenance?.normalizedUrl ?? '(unknown)'}`,
-              researchResult.excerpt
-                ? formatUntrustedExcerpt(researchResult.excerpt)
-                : 'No textual excerpt was returned.',
-            ].join('\n\n')
-          : researchResult.status === 'policy_blocked'
-            ? `Research request was policy-blocked: ${researchResult.decision.reason} No usable browsing result was returned.`
-            : researchResult.status === 'unavailable'
-              ? `Research is currently unavailable: ${researchResult.decision.reason} No browsing was performed.`
-              : `Research failed safely: ${researchResult.decision.reason}`
+        const researchText = researchResult.status === 'policy_blocked'
+          ? `Research request was policy-blocked: ${researchResult.decision.reason} No usable browsing result was returned.`
+          : researchResult.status === 'unavailable'
+            ? `Research is currently unavailable: ${researchResult.decision.reason} No browsing was performed.`
+            : `Research failed safely: ${researchResult.decision.reason}`
 
         const aiMsg: Message = {
           id: nextId(),

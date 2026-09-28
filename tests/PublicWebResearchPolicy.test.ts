@@ -40,11 +40,14 @@ describe('public web research policy', () => {
   it('classifies ip literals and blocks metadata/local ranges', () => {
     expect(classifyIpLiteral('169.254.169.254').allowed).toBe(false)
     expect(classifyIpLiteral('10.0.0.8').allowed).toBe(false)
+    expect(classifyIpLiteral('192.0.2.1').allowed).toBe(false)
+    expect(classifyIpLiteral('198.51.100.25').allowed).toBe(false)
     expect(classifyIpLiteral('8.8.8.8').allowed).toBe(true)
     expect(classifyIpLiteral('::1').allowed).toBe(false)
     expect(classifyIpLiteral('::ffff:127.0.0.1').allowed).toBe(false)
     expect(classifyIpLiteral('::ffff:7f00:1').allowed).toBe(false)
     expect(classifyIpLiteral('::ffff:10.0.0.1').allowed).toBe(false)
+    expect(classifyIpLiteral('2001:db8::1').allowed).toBe(false)
     expect(classifyIpLiteral('2001:4860:4860::8888').allowed).toBe(true)
   })
 
@@ -84,6 +87,17 @@ describe('public web research policy', () => {
     `
     expect(robotsAllowsPath(robots, '/private/secret')).toBe(false)
     expect(robotsAllowsPath(robots, '/private/public/doc')).toBe(true)
+  })
+
+  it('does not treat later non-wildcard robots groups as wildcard rules', () => {
+    const robots = `
+      User-agent: *
+      Disallow: /shared
+      User-agent: ExampleBot
+      Disallow: /example-only
+    `
+    expect(robotsAllowsPath(robots, '/shared/file')).toBe(false)
+    expect(robotsAllowsPath(robots, '/example-only/file')).toBe(true)
   })
 
   it('supports only bounded text-like content types', () => {
