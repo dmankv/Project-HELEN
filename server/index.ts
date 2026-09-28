@@ -417,7 +417,7 @@ class AuthStore {
         fs.renameSync(tmp, this.filePath)
         return true
       } finally {
-        fs.rmdirSync(lockDir)
+        fs.rmSync(lockDir)
       }
     } finally {
       try {
