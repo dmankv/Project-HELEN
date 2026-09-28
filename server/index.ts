@@ -401,7 +401,12 @@ class AuthStore {
       }
 
       const lockDir = `${this.filePath}.lock`
-      fs.mkdirSync(lockDir)
+      try {
+        fs.mkdirSync(lockDir)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+        throw error
+      }
       try {
         try {
           fs.statSync(this.filePath)
@@ -422,6 +427,7 @@ class AuthStore {
   }
 
   private readExistingFile(): AuthStoreFile {
+    const waitState = new Int32Array(new SharedArrayBuffer(4))
     for (let attempt = 0; ; attempt += 1) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8')
@@ -434,7 +440,6 @@ class AuthStore {
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code
         if ((code !== 'ENOENT' && !(error instanceof SyntaxError)) || attempt >= 24) throw error
-        const waitState = new Int32Array(new SharedArrayBuffer(4))
         Atomics.wait(waitState, 0, 0, 10)
       }
     }
