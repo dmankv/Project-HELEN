@@ -301,6 +301,17 @@ export interface AdminDiagnosticsStatus {
   } | null
 }
 
+function parseNonNegativeIntegerCount(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 0 ? value : null
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) ? parsed : null
+  }
+  return null
+}
+
 export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatus> {
   const configured = isAdminPersistenceConfigured()
   const client = configured ? getClient() : null
@@ -369,10 +380,10 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
             search_endpoint_configured?: boolean
           }
           counters?: {
-            fetched_sources?: number
-            blocked_events?: number
-            quarantined_insights?: number
-            expired_insights?: number
+            fetched_sources?: unknown
+            blocked_events?: unknown
+            quarantined_insights?: unknown
+            expired_insights?: unknown
           }
           blocked_reasons?: Array<{ reason?: unknown; count?: unknown }>
         }
@@ -383,17 +394,17 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
             dnsPinningConfigured: Boolean(researchData.configuration?.dns_pinning_configured),
             searchProviderConfigured: Boolean(researchData.configuration?.search_provider_configured),
             searchEndpointConfigured: Boolean(researchData.configuration?.search_endpoint_configured),
-            fetchedSources: Number(researchData.counters?.fetched_sources ?? 0),
-            blockedEvents: Number(researchData.counters?.blocked_events ?? 0),
+            fetchedSources: parseNonNegativeIntegerCount(researchData.counters?.fetched_sources) ?? 0,
+            blockedEvents: parseNonNegativeIntegerCount(researchData.counters?.blocked_events) ?? 0,
             blockedReasons: (researchData.blocked_reasons ?? [])
               .flatMap(entry => {
                 const reason = typeof entry.reason === 'string' ? entry.reason : ''
-                const count = entry.count
-                if (reason.length === 0 || typeof count !== 'number' || !Number.isInteger(count) || count < 0) return []
+                const count = parseNonNegativeIntegerCount(entry.count)
+                if (reason.length === 0 || count === null) return []
                 return [{ reason, count }]
               }),
-            quarantinedInsights: Number(researchData.counters?.quarantined_insights ?? 0),
-            expiredInsights: Number(researchData.counters?.expired_insights ?? 0),
+            quarantinedInsights: parseNonNegativeIntegerCount(researchData.counters?.quarantined_insights) ?? 0,
+            expiredInsights: parseNonNegativeIntegerCount(researchData.counters?.expired_insights) ?? 0,
           }
         } else {
           research = null

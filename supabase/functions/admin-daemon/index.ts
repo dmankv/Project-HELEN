@@ -621,6 +621,17 @@ function parseResearchMode(value: string | undefined): 'denied' | 'configured' {
   return value?.toLowerCase() === 'configured' ? 'configured' : 'denied'
 }
 
+function parseNonNegativeIntegerCount(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 0 ? value : null
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) ? parsed : null
+  }
+  return null
+}
+
 function isResearchStatusRequest(body: unknown): body is Record<string, unknown> & { request_type: 'research_status' } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return false
   return (body as Record<string, unknown>).request_type === 'research_status'
@@ -690,8 +701,8 @@ async function buildResearchStatusResponse(
     ? (aggregates.data.blocked_reasons as Array<{ reason?: unknown; count?: unknown }>)
       .flatMap(entry => {
         const reason = typeof entry.reason === 'string' ? entry.reason : ''
-        const count = entry.count
-        if (reason.length === 0 || typeof count !== 'number' || !Number.isInteger(count) || count < 0) return []
+        const count = parseNonNegativeIntegerCount(entry.count)
+        if (reason.length === 0 || count === null) return []
         return [{ reason, count }]
       })
     : []
@@ -708,9 +719,9 @@ async function buildResearchStatusResponse(
     },
     counters: {
       fetched_sources: provenanceCount.count ?? 0,
-      blocked_events: Number(aggregates.data?.blocked_events ?? 0),
-      quarantined_insights: Number(aggregates.data?.quarantined_insights ?? 0),
-      expired_insights: Number(aggregates.data?.expired_insights ?? 0),
+      blocked_events: parseNonNegativeIntegerCount(aggregates.data?.blocked_events) ?? 0,
+      quarantined_insights: parseNonNegativeIntegerCount(aggregates.data?.quarantined_insights) ?? 0,
+      expired_insights: parseNonNegativeIntegerCount(aggregates.data?.expired_insights) ?? 0,
     },
     blocked_reasons: blockedReasons,
   }
