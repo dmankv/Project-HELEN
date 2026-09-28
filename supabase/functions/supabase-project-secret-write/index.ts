@@ -12,7 +12,6 @@ import {
   errorResponse,
   getAllowedOrigin,
   jsonResponse,
-  ProjectAccessError,
   writeProjectSecret,
 } from '../_shared/supabaseProjectAccess.ts'
 

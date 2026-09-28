@@ -90,7 +90,7 @@ vi.mock('../src/services/supabasePersistence', async (importActual) => {
 // Import the component after mocks are registered.
 import DaemonInterface from '../src/components/DaemonInterface'
 import { saveMemory, listMemories, forgetAll } from '../src/services/daemonMemory'
-import { callChatAPI, hasBackend, isAPIFailure } from '../src/services/daemonChatAPI'
+import { callChatAPI, hasBackend } from '../src/services/daemonChatAPI'
 import { callEdgeFunction, hasEdgeFunction, createEdgeChatFailure } from '../src/services/supabaseEdgeChat'
 import {
   isPersistenceConfigured,

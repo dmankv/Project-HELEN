@@ -204,7 +204,7 @@ function buildTokenLink(route: string, token: string): string {
 }
 
 function parseCookies(header: string | undefined): ParsedCookies {
-  const out: ParsedCookies = {}
+  const out = Object.create(null) as ParsedCookies
   if (!header) return out
   const pairs = header.split(';')
   for (const pair of pairs) {
@@ -375,11 +375,18 @@ class AuthStore {
 
   private load(): AuthStoreFile {
     try {
-      if (!fs.existsSync(this.filePath)) {
-        fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
-        const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
-        fs.writeFileSync(this.filePath, JSON.stringify(initial, null, 2), { mode: 0o600 })
+      fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
+      const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
+      try {
+        const fd = fs.openSync(this.filePath, 'wx', 0o600)
+        try {
+          fs.writeFileSync(fd, JSON.stringify(initial, null, 2), 'utf8')
+        } finally {
+          fs.closeSync(fd)
+        }
         return initial
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       }
       const raw = fs.readFileSync(this.filePath, 'utf8')
       const parsed = JSON.parse(raw) as Partial<AuthStoreFile>
