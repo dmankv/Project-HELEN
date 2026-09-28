@@ -49,6 +49,7 @@ export const IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS: Readonly<PublicWebResearchBu
 
 export const DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE = 0.35
 export const DEFAULT_EXTERNAL_INSIGHT_TTL_MS = 1000 * 60 * 60 * 24 * 7
+export const PUBLIC_WEB_RESEARCH_MAX_SEARCH_QUERY_LENGTH = 1_024
 
 export interface PublicWebResearchProvenanceRecord {
   normalizedUrl: string

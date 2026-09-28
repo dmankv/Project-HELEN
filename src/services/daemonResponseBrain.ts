@@ -8,6 +8,8 @@ import { getAdaptiveProfile } from './daemonAdaptiveProfile'
 import type { AdaptiveProfile } from './daemonAdaptiveProfile'
 import type { PersonalityPreferences } from './daemonPersonalityPreferences'
 import type { DurableMemory } from './daemonMemory'
+import { runCognitiveLoop } from './daemonCognitiveLoop'
+import { acceptLearningItem } from './daemonValidatedLearning'
 
 export type UserMood = 'neutral' | 'frustrated' | 'excited' | 'confused' | 'urgent' | 'sad'
   | 'overwhelmed' | 'discouraged'
@@ -586,6 +588,7 @@ export interface BuildResponseOptions {
   cloudAvailable?: boolean
   privacyOptOut?: boolean
   retrievalConfig?: Partial<RetrievalConfig>
+  validatedInsights?: string[]
 }
 
 export interface BuildResponseResult {
@@ -599,6 +602,11 @@ export interface BuildResponseResult {
   retrievedMemories: RetrievedMemory[]
   complexity: 'simple' | 'moderate' | 'complex'
   wantsShortAnswer: boolean
+  cognitive: {
+    reasoningMode: string
+    draftPlan: string[]
+  }
+  approvedLearningCandidates: string[]
 }
 
 /**
@@ -616,6 +624,7 @@ export function buildResponse(options: BuildResponseOptions): BuildResponseResul
     cloudAvailable = false,
     privacyOptOut = false,
     retrievalConfig,
+    validatedInsights = [],
   } = options
 
   const mood = detectMood(userMessage)
@@ -650,6 +659,28 @@ export function buildResponse(options: BuildResponseOptions): BuildResponseResul
     .filter(m => m.type === 'explicit')
     .map(m => ({ text: m.text, relevance: m.relevanceScore }))
 
+  const cognitive = runCognitiveLoop({
+    userMessage,
+    mood,
+    intent,
+    context: {
+      recentConversation: [],
+      retrievedMemories: snippets.map(snippet => snippet.text),
+      preferences: personalityPrefs,
+      validatedInsights,
+    },
+  })
+
+  const approvedLearningCandidates = cognitive.learningCandidates
+    .map(candidate => ({ candidate, decision: acceptLearningItem({
+      text: candidate.text,
+      source: candidate.source,
+      confidence: 0.5,
+      createdAt: new Date().toISOString(),
+    }) }))
+    .filter(item => item.decision.accepted)
+    .map(item => item.candidate.text)
+
   const text = generateHumanLikeResponse(userMessage, {
     userMessage,
     mood,
@@ -671,6 +702,11 @@ export function buildResponse(options: BuildResponseOptions): BuildResponseResul
     retrievedMemories,
     complexity,
     wantsShortAnswer,
+    cognitive: {
+      reasoningMode: cognitive.reasoningMode,
+      draftPlan: cognitive.draftPlan,
+    },
+    approvedLearningCandidates,
   }
 }
 

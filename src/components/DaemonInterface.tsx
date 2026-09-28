@@ -1,14 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
+  buildResponse,
   detectMood,
   detectIntent,
-  generateHumanLikeResponse,
 } from '../services/daemonResponseBrain'
-import type { MemorySnippet, ResponseIntent } from '../services/daemonResponseBrain'
+import type { ResponseIntent } from '../services/daemonResponseBrain'
 import { selectStrategy, attributeFeedback } from '../services/daemonResponsePolicy'
 import type { ResponseStrategy } from '../services/daemonResponsePolicy'
-import { retrieveRelevantMemories } from '../services/daemonMemoryRetrieval'
-import { routeRequest, classifyComplexity, extractTaskKeywords } from '../services/daemonCapabilityRouter'
 import { getAdaptiveProfile } from '../services/daemonAdaptiveProfile'
 import learningSystem from '../services/daemon_learning_integration'
 import {
@@ -28,7 +26,6 @@ import {
   getSafeEdgeFallbackMessage,
   hasEdgeFunction,
   isEdgeChatFailure,
-  requestPublicWebResearch,
 } from '../services/supabaseEdgeChat'
 import type {
   EdgeChatFailure,
@@ -56,9 +53,9 @@ import { loadSidebarOpen, saveSidebarOpen } from './sidebarPreference'
 import {
   loadLocalPreferences,
   loadCloudPreferences,
-  toPersonalitySettings,
 } from '../services/daemonPersonalityPreferences'
 import type { PersonalityPreferences } from '../services/daemonPersonalityPreferences'
+import { runPublicWebResearchGateway } from '../services/publicWebResearchGateway'
 import PersonalityPreferencesEditor from './PersonalityPreferencesEditor'
 import SupabaseProjectAccessPanel from './SupabaseProjectAccessPanel'
 import '../styles/DaemonInterface.css'
@@ -558,60 +555,26 @@ export default function DaemonInterface({
 
       const researchCommand = parseResearchCommand(text)
       if (researchCommand) {
-        if (!hasEdgeFunction()) {
-          const aiMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: 'Public-web research is unavailable in this build, so no browsing was performed.',
-            timestamp: new Date().toISOString(),
-          }
-          persistConversationMessages(convId, [...nextMessages, aiMsg])
-          abortRef.current = null
-          setIsThinking(false)
-          return
-        }
-        if (!currentUser) {
-          const aiMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: 'Sign in is required for server-side public-web research. No browsing was performed.',
-            timestamp: new Date().toISOString(),
-          }
-          persistConversationMessages(convId, [...nextMessages, aiMsg])
-          abortRef.current = null
-          setIsThinking(false)
-          return
-        }
-
         const controller = new AbortController()
         abortRef.current = controller
-        const researchResult = await requestPublicWebResearch({
+        const researchResult = await runPublicWebResearchGateway({
           ...(researchCommand.url ? { url: researchCommand.url } : {}),
           ...(researchCommand.searchQuery ? { searchQuery: researchCommand.searchQuery } : {}),
           method: 'GET',
-          storeInsight: false,
-        }, controller.signal)
-
-        if (isEdgeChatFailure(researchResult)) {
-          const fallback = getSafeEdgeFallbackMessage(researchResult)
-            ?? 'Public-web research is temporarily unavailable. No browsing result was returned.'
-          const aiMsg: Message = {
-            id: nextId(),
-            role: 'assistant',
-            content: fallback,
-            timestamp: new Date().toISOString(),
-          }
-          persistConversationMessages(convId, [...nextMessages, aiMsg])
+          signal: controller.signal,
+        })
+        if (controller.signal.aborted) {
           setIsThinking(false)
           abortRef.current = null
           return
         }
 
+        const primarySource = researchResult.sources[0]
         const researchText = researchResult.status === 'success'
           ? [
-            `Research result from ${researchResult.provenance?.host ?? 'an external source'}${researchResult.provenance?.httpStatus ? ` (HTTP ${researchResult.provenance.httpStatus})` : ''}.`,
-            researchResult.provenance?.normalizedUrl
-              ? `Source: ${researchResult.provenance.normalizedUrl}`
+            `Research result from ${primarySource?.host ?? 'an external source'}${primarySource?.httpStatus ? ` (HTTP ${primarySource.httpStatus})` : ''}.`,
+            primarySource?.normalizedUrl
+              ? `Source: ${primarySource.normalizedUrl}`
               : null,
             researchResult.excerpt
               ? `Untrusted excerpt:\n${researchResult.excerpt}`
@@ -645,17 +608,6 @@ export default function DaemonInterface({
       const adaptiveProfile = getAdaptiveProfile()
       const mood = detectMood(text)
       const intent = detectIntent(text, lastIntent)
-      const complexity = classifyComplexity(text, intent)
-      const routing = routeRequest({
-        intent,
-        mood,
-        complexity,
-        isAuthenticated: Boolean(currentUser),
-        isOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
-        cloudAvailable: hasEdgeFunction() || hasBackend(),
-        privacyOptOut: false,
-        taskKeywords: extractTaskKeywords(text),
-      })
       const selection = selectStrategy(intent, mood, adaptiveProfile, personalityPrefs)
 
       // 1. Supabase Edge Function (authenticated, rate-limited, no browser API keys)
@@ -769,45 +721,36 @@ export default function DaemonInterface({
       await new Promise(r => setTimeout(r, thinkingDelay(text)))
 
       const durableMemories = retrieveRelevant(text, 5)
-
-      // Bounded, provenance-tagged context retrieval.
-      const retrieved = retrieveRelevantMemories(text, durableMemories, adaptiveProfile)
-      const legacySnippets: MemorySnippet[] = retrieved
-        .filter(m => m.type === 'explicit')
-        .map(m => ({ text: m.text, relevance: m.relevanceScore }))
-
-      const wantsShortAnswer = text.trim().split(/\s+/).length <= 5
-        || selection.strategy === 'concise-action-plan'
-
-      const response = generateHumanLikeResponse(text, {
+      const localResult = buildResponse({
         userMessage: text,
-        mood,
-        intent,
-        memories: legacySnippets.length > 0 ? legacySnippets : undefined,
-        wantsShortAnswer,
+        personalityPrefs,
+        adaptiveProfile,
+        memories: durableMemories,
         lastIntent,
-        personality: toPersonalitySettings(personalityPrefs),
+        isAuthenticated: Boolean(currentUser),
+        isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+        cloudAvailable: hasEdgeFunction() || hasBackend(),
       })
 
-      setLastIntent(intent)
+      setLastIntent(localResult.intent)
 
-      const interactionRecord = learningSystem.recordInteraction(text, response, {
-        intent,
+      const interactionRecord = learningSystem.recordInteraction(text, localResult.text, {
+        intent: localResult.intent,
         confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
-        ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
-        memoryUsed: retrieved.length,
-        planComplexity: complexity,
+        ambiguity: localResult.intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
+        memoryUsed: localResult.retrievedMemories.length,
+        planComplexity: localResult.complexity,
         timestamp: new Date(),
-        strategy: selection.strategy,
-        contextKey: selection.contextKey,
-        routingMode: routing.mode,
-        routingReason: routing.reason,
+        strategy: localResult.strategy,
+        contextKey: localResult.contextKey,
+        routingMode: localResult.routing.mode,
+        routingReason: localResult.routing.reason,
       })
 
       const aiMsg: Message = {
         id: nextId(),
         role: 'assistant',
-        content: response,
+        content: localResult.text,
         timestamp: new Date().toISOString(),
       }
       const fallbackText = cloudFailureForFallback
@@ -844,12 +787,12 @@ export default function DaemonInterface({
         void insertLearningInteraction({
           id: interactionRecord.id,
           input: text,
-          response,
-          intent,
+          response: localResult.text,
+          intent: localResult.intent,
           confidence: LOCAL_BRAIN_DEFAULT_CONFIDENCE,
-          ambiguity: intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
-          memoryUsed: retrieved.length,
-          planComplexity: complexity,
+          ambiguity: localResult.intent === 'clarify' ? LOCAL_BRAIN_CLARIFY_AMBIGUITY : LOCAL_BRAIN_DEFAULT_AMBIGUITY,
+          memoryUsed: localResult.retrievedMemories.length,
+          planComplexity: localResult.complexity,
           createdAt: new Date().toISOString(),
         })
         setSyncStatus('syncing')

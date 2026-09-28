@@ -30,6 +30,7 @@ import {
   DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE,
   DEFAULT_EXTERNAL_INSIGHT_TTL_MS,
   IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+  PUBLIC_WEB_RESEARCH_MAX_SEARCH_QUERY_LENGTH,
   buildResearchUnavailableResponse,
   classifyHighRiskResearch,
   classifyIpLiteral,
@@ -467,7 +468,7 @@ function validateResearchRequest(body: unknown): { valid: boolean; request?: Res
     request.url = research.url
   }
   if (research.search_query !== undefined) {
-    if (typeof research.search_query !== 'string' || research.search_query.length > 1_024) {
+    if (typeof research.search_query !== 'string' || research.search_query.length > PUBLIC_WEB_RESEARCH_MAX_SEARCH_QUERY_LENGTH) {
       return { valid: false, error: 'research.search_query must be a bounded string.' }
     }
     request.search_query = research.search_query
