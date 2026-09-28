@@ -92,7 +92,7 @@ export function evaluateSelfImprovement(manifest: SelfImprovementManifest): Self
       reason: 'Self-improvement proposal purpose is missing or too short.',
     }
   }
-  if (manifest.changedFiles.length === 0) {
+  if (manifest.changedFiles.length === 0 || manifest.changedFiles.some(path => !path.trim())) {
     return {
       accepted: false,
       code: 'rejected-empty-files',

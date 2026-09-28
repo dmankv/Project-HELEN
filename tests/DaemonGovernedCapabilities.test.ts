@@ -76,6 +76,20 @@ describe('validated durable learning gate', () => {
     expect(sensitiveDecision.accepted).toBe(false)
     expect(sensitiveDecision.code).toBe('rejected-sensitive')
   })
+
+  it('rejects complete GitHub token forms', () => {
+    for (const text of [
+      `credential ${'ghp_'}${'a'.repeat(36)}`,
+      `credential ${'github_pat_'}${'a'.repeat(82)}`,
+    ]) {
+      expect(acceptLearningItem({
+        text,
+        source: 'validated-insight',
+        confidence: 0.9,
+        createdAt: new Date().toISOString(),
+      }).code).toBe('rejected-secret')
+    }
+  })
 })
 
 describe('daemon self-improvement manifest', () => {
@@ -95,6 +109,7 @@ describe('daemon self-improvement manifest', () => {
     expect(evaluateSelfImprovement({ ...validManifest, sourceBranch: '' }).code).toBe('rejected-source-branch')
     expect(evaluateSelfImprovement({ ...validManifest, proposalId: 'not-a-uuid' }).code).toBe('rejected-proposal-id')
     expect(evaluateSelfImprovement({ ...validManifest, createdAt: 'not-a-date' }).code).toBe('rejected-created-at')
+    expect(evaluateSelfImprovement({ ...validManifest, changedFiles: [' '] }).code).toBe('rejected-empty-files')
   })
 
   it('rejects manifest submission when any assurance is false', () => {
@@ -129,6 +144,16 @@ describe('public web research gateway', () => {
     }
     const result = await runPublicWebResearchGateway(
       { url: 'https://localhost/private', method: 'GET' },
+      { provider },
+    )
+    expect(result.status).toBe('policy_blocked')
+    expect(provider.execute).not.toHaveBeenCalled()
+  })
+
+  it('rejects oversized search queries before provider execution', async () => {
+    const provider = { execute: vi.fn() }
+    const result = await runPublicWebResearchGateway(
+      { searchQuery: 'x'.repeat(1_025) },
       { provider },
     )
     expect(result.status).toBe('policy_blocked')

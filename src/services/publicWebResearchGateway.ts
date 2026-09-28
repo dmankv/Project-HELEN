@@ -1,5 +1,6 @@
 import {
   IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
+  PUBLIC_WEB_RESEARCH_MAX_SEARCH_QUERY_LENGTH,
   validatePublicWebUrl,
   type PublicWebResearchBudgets,
 } from '../../supabase/functions/_shared/publicWebResearchPolicy'
@@ -153,6 +154,9 @@ export async function runPublicWebResearchGateway(
   const hasSearchQuery = typeof request.searchQuery === 'string' && request.searchQuery.trim().length > 0
   if (!hasUrl && !hasSearchQuery) {
     return policyBlocked('blocked_invalid_config', 'Provide either a URL or a bounded search query.')
+  }
+  if (hasSearchQuery && request.searchQuery!.trim().length > PUBLIC_WEB_RESEARCH_MAX_SEARCH_QUERY_LENGTH) {
+    return policyBlocked('blocked_invalid_config', 'Search query exceeds the bounded length limit.')
   }
 
   try {

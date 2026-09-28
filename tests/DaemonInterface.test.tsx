@@ -297,6 +297,36 @@ describe('DaemonInterface', () => {
     })
   })
 
+  it('does not persist a research result after cancellation', async () => {
+    let resolveResearch!: (value: Awaited<ReturnType<typeof runPublicWebResearchGateway>>) => void
+    vi.mocked(runPublicWebResearchGateway).mockImplementationOnce(() => new Promise(resolve => {
+      resolveResearch = resolve
+    }))
+
+    render(<DaemonInterface currentUser={{ email: 'user@example.com', role: 'user' }} onLoginClick={vi.fn()} />)
+    const input = screen.getByPlaceholderText(/Message Daemon/i)
+    fireEvent.change(input, { target: { value: 'research: example source' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send message/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/i }))
+
+    await act(async () => {
+      resolveResearch({
+        status: 'unavailable',
+        quarantined: true,
+        decision: { allowed: false, code: 'blocked_invalid_config', reason: 'Research is unavailable.' },
+        budgets: {
+          maxRequestsPerRun: 4, maxBytesPerRun: 1_500_000, maxResponseBytes: 350_000,
+          maxRuntimeMs: 12_000, maxRedirects: 3, maxConcurrency: 1, maxExcerptChars: 2_000, maxSearchApiCalls: 2,
+        },
+        excerpt: null,
+        sources: [],
+        blockedReasons: ['Research is unavailable.'],
+      })
+    })
+
+    expect(screen.queryByText(/Research is currently unavailable:/i)).toBeNull()
+  })
+
   // ── Sending a message ─────────────────────────────────────────────────────
 
   it('displays the user message immediately after sending', async () => {

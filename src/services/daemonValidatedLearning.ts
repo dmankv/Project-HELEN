@@ -35,7 +35,7 @@ export const VALIDATED_LEARNING_MIN_CONFIDENCE = 0.45
 
 const SECRET_PATTERNS = [
   /\b(?:password|api[_-]?key|access[_-]?token|refresh[_-]?token|secret(?:_key)?)\b\s*(?:is|=|:)\s*['"]?[^\s'"]{4,}/i,
-  /\b(?:ghp_|github_pat_|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,})\b/i,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,})\b/i,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
 ] as const
 

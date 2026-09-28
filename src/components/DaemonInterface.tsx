@@ -563,6 +563,11 @@ export default function DaemonInterface({
           method: 'GET',
           signal: controller.signal,
         })
+        if (controller.signal.aborted) {
+          setIsThinking(false)
+          abortRef.current = null
+          return
+        }
 
         const primarySource = researchResult.sources[0]
         const researchText = researchResult.status === 'success'
