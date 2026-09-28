@@ -596,7 +596,7 @@ jobs:
           NODE
 
       - name: Build evolution gate artifact
-        if: always() && steps.binding.outcome != 'failure' && steps.binding.outputs.ready == 'true' && steps.live_eval.outcome == 'success'
+        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
         env:
           CANDIDATE_SHA: ${{ steps.binding.outputs.candidate_sha }}
           CANDIDATE_VERSION: ${{ github.event.inputs.candidate_version || '' }}
@@ -662,7 +662,7 @@ jobs:
           NODE
 
       - name: Upload evolution gate artifact
-        if: always() && steps.binding.outcome != 'failure' && steps.binding.outputs.ready == 'true' && steps.live_eval.outcome == 'success'
+        if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: >-

@@ -215,5 +215,6 @@ describe('Live eval workflow', () => {
     expect(workflow).toContain('git fetch --no-tags origin "$CANDIDATE_SHA"')
     expect(workflow).toContain('git checkout --detach "$CANDIDATE_SHA"')
     expect(workflow).toContain('Promotion-bound unit gate must run from the protected default branch workflow ref.')
+    expect(workflow).toContain("if: always() && steps.binding.outcome == 'success' && steps.binding.outputs.ready == 'true'")
   })
 })

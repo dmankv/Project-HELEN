@@ -1068,7 +1068,7 @@ function deriveCanaryStatus(run: EvolutionRunRecord | null): CanaryStatus {
   }
   if (run.status === 'failed' || run.status === 'denied' || run.status === 'timed_out') return 'failed'
   if (hasHealthyCanaryDecision(run)) return 'healthy'
-  if (run.stage === 'rollback' || run.status === 'rolled_back') return 'failed'
+  if (run.stage === 'rollback') return run.canaryDecision?.status ?? 'not_started'
   if (run.stage === 'promote') return 'failed'
   if (run.stage === 'canary') {
     return run.status === 'running'

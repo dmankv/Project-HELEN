@@ -958,7 +958,7 @@ describe('admin observability model', () => {
     expect(runningCanary.rollbackStatus).toBe('not_needed')
     expect(promoteReady.canaryStatus).toBe('healthy')
     expect(promoteWithoutCanary.canaryStatus).toBe('failed')
-    expect(rolledBack.canaryStatus).toBe('failed')
+    expect(rolledBack.canaryStatus).toBe('not_started')
     expect(rolledBack.rollbackStatus).toBe('requested')
     expect(rollbackAfterHealthyCanary.canaryStatus).toBe('healthy')
     expect(rollbackAfterHealthyCanary.rollbackStatus).toBe('requested')
