@@ -747,6 +747,7 @@ export type AuditEventType =
   | 'budget_check'
   | 'canary_decision'
   | 'rollback_triggered'
+  | 'rollback_completed'
   | 'run_finished'
 
 export interface AuditEvent {

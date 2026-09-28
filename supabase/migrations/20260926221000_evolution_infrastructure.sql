@@ -120,7 +120,7 @@ create table if not exists public.evolution_audit_events (
   message              text not null default '',
   metadata             jsonb not null default '{}'::jsonb,
   created_at           timestamptz not null default now(),
-  check (event_type in ('run_started', 'policy_decision', 'stage_transition', 'gate_result', 'budget_check', 'canary_decision', 'rollback_triggered', 'run_finished'))
+  check (event_type in ('run_started', 'policy_decision', 'stage_transition', 'gate_result', 'budget_check', 'canary_decision', 'rollback_triggered', 'rollback_completed', 'run_finished'))
 );
 
 create index if not exists evolution_audit_events_run_idx
@@ -141,7 +141,7 @@ create policy "evolution_audit_events_insert_admin_own"
   with check (
     auth.uid() = user_id
     and public.is_admin()
-    and evolution_audit_events.event_type not in ('canary_decision', 'rollback_triggered', 'run_finished')
+    and evolution_audit_events.event_type not in ('canary_decision', 'rollback_triggered', 'rollback_completed', 'run_finished')
     and (
       evolution_audit_events.run_id is null
       or exists (
@@ -159,7 +159,7 @@ create policy "evolution_audit_events_insert_service_control_plane"
   on public.evolution_audit_events for insert
   to service_role
   with check (
-    evolution_audit_events.event_type in ('canary_decision', 'rollback_triggered', 'run_finished')
+    evolution_audit_events.event_type in ('canary_decision', 'rollback_triggered', 'rollback_completed', 'run_finished')
     and evolution_audit_events.run_id is not null
     and exists (
       select 1
@@ -355,25 +355,25 @@ begin
         from public.evolution_audit_events as event
         where event.run_id = old.run_id
           and event.user_id = old.user_id
-          and event.event_type = 'rollback_triggered'
+          and event.event_type = 'rollback_completed'
         order by event.created_at desc, event.event_id desc
         limit 1
-      ) as latest_rollback
+      ) as latest_rollback_completed
       where (
-          (latest_rollback.metadata ? 'runId' and latest_rollback.metadata ->> 'runId' = old.run_id::text)
-          or (latest_rollback.metadata ? 'run_id' and latest_rollback.metadata ->> 'run_id' = old.run_id::text)
+          (latest_rollback_completed.metadata ? 'runId' and latest_rollback_completed.metadata ->> 'runId' = old.run_id::text)
+          or (latest_rollback_completed.metadata ? 'run_id' and latest_rollback_completed.metadata ->> 'run_id' = old.run_id::text)
         )
         and (
-          (latest_rollback.metadata ? 'candidateSnapshotId' and latest_rollback.metadata ->> 'candidateSnapshotId' = old.candidate_snapshot_id::text)
-          or (latest_rollback.metadata ? 'candidate_snapshot_id' and latest_rollback.metadata ->> 'candidate_snapshot_id' = old.candidate_snapshot_id::text)
+          (latest_rollback_completed.metadata ? 'candidateSnapshotId' and latest_rollback_completed.metadata ->> 'candidateSnapshotId' = old.candidate_snapshot_id::text)
+          or (latest_rollback_completed.metadata ? 'candidate_snapshot_id' and latest_rollback_completed.metadata ->> 'candidate_snapshot_id' = old.candidate_snapshot_id::text)
         )
         and (
-          (latest_rollback.metadata ? 'candidateVersion' and latest_rollback.metadata ->> 'candidateVersion' = old.candidate_version)
-          or (latest_rollback.metadata ? 'candidate_version' and latest_rollback.metadata ->> 'candidate_version' = old.candidate_version)
+          (latest_rollback_completed.metadata ? 'candidateVersion' and latest_rollback_completed.metadata ->> 'candidateVersion' = old.candidate_version)
+          or (latest_rollback_completed.metadata ? 'candidate_version' and latest_rollback_completed.metadata ->> 'candidate_version' = old.candidate_version)
         )
         and (
-          (latest_rollback.metadata ? 'targetDeployedVersion' and latest_rollback.metadata ->> 'targetDeployedVersion' = old.last_known_good)
-          or (latest_rollback.metadata ? 'target_deployed_version' and latest_rollback.metadata ->> 'target_deployed_version' = old.last_known_good)
+          (latest_rollback_completed.metadata ? 'targetDeployedVersion' and latest_rollback_completed.metadata ->> 'targetDeployedVersion' = old.last_known_good)
+          or (latest_rollback_completed.metadata ? 'target_deployed_version' and latest_rollback_completed.metadata ->> 'target_deployed_version' = old.last_known_good)
         )
     );
   end if;

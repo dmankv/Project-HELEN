@@ -184,14 +184,14 @@ describe('Evolution infrastructure migration', () => {
   })
 
   it('reserves control-plane audit events for service_role and blocks browser clients from forging them', () => {
-    expect(normalizedSql).toContain("event_type not in ('canary_decision', 'rollback_triggered', 'run_finished')")
-    expect(normalizedSql).toContain("event_type in ('canary_decision', 'rollback_triggered', 'run_finished')")
+    expect(normalizedSql).toContain("event_type not in ('canary_decision', 'rollback_triggered', 'rollback_completed', 'run_finished')")
+    expect(normalizedSql).toContain("event_type in ('canary_decision', 'rollback_triggered', 'rollback_completed', 'run_finished')")
     expect(normalizedSql).toContain('to service_role')
   })
 
   it('requires backend rollback and run-finished attestations bound to the run identity', () => {
     expect(normalizedSql).toContain("event.event_type = 'run_finished'")
-    expect(normalizedSql).toContain("event.event_type = 'rollback_triggered'")
+    expect(normalizedSql).toContain("event.event_type = 'rollback_completed'")
     expect(normalizedSql).toContain("old.status is distinct from new.status")
     expect(normalizedSql).toContain("metadata ->> 'candidateversion' = old.candidate_version")
     expect(normalizedSql).toContain("metadata ->> 'targetdeployedversion' = old.last_known_good")
@@ -199,5 +199,21 @@ describe('Evolution infrastructure migration', () => {
     expect(normalizedSql).toContain("if rollback_finalization_requested")
     expect(normalizedSql).toContain(") and privileged_control_plane_actor")
     expect(normalizedSql).toContain("and rollback_attestation_present")
+  })
+})
+
+const liveEvalWorkflowPath = path.resolve(
+  process.cwd(),
+  '.github/workflows/live-eval.yml',
+)
+
+describe('Live eval workflow', () => {
+  const workflow = fs.readFileSync(liveEvalWorkflowPath, 'utf8')
+
+  it('checks out promotion-bound candidate code before restoring trusted unit gate files', () => {
+    expect(workflow).toContain('Promotion-bound unit gate requires candidate_version, candidate_snapshot_id, run_id, and candidate_sha together.')
+    expect(workflow).toContain('git fetch --no-tags origin "$CANDIDATE_SHA"')
+    expect(workflow).toContain('git checkout --detach "$CANDIDATE_SHA"')
+    expect(workflow).toContain('Promotion-bound unit gate must run from the protected default branch workflow ref.')
   })
 })
