@@ -725,10 +725,10 @@ export function enforceEvolutionBudget(
     && Number.isFinite(source[field])
     && (source[field] as number) >= 0
   )
-  if (!requiredUsageFields.every(field => hasValidField(usage as Record<string, unknown>, field))) {
+  if (!requiredUsageFields.every(field => hasValidField(usage as unknown as Record<string, unknown>, field))) {
     return { ok: false, reason: 'Budget usage must include finite, non-negative runtime/cpu/memory/api/spend fields.' }
   }
-  if (!requiredLimitFields.every(field => hasValidField(limits as Record<string, unknown>, field))) {
+  if (!requiredLimitFields.every(field => hasValidField(limits as unknown as Record<string, unknown>, field))) {
     return { ok: false, reason: 'Budget limits must include finite, non-negative maxRuntime/maxCpu/maxMemory/maxApi/maxSpend fields.' }
   }
   if (usage.runtimeMs > limits.maxRuntimeMs) return { ok: false, reason: 'Runtime budget exceeded.' }
