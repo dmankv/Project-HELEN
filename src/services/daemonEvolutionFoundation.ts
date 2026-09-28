@@ -41,7 +41,6 @@ export const AUTONOMOUS_ALLOWED_CAPABILITIES = Object.freeze([
   'evaluate_candidate',
   'deploy_canary',
   'research_public_web',
-  'store_external_insight',
 ] as const)
 
 export const AUTONOMOUS_DENIED_CAPABILITIES = Object.freeze([

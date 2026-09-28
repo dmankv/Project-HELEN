@@ -594,7 +594,7 @@ export default function DaemonInterface({
           ...(researchCommand.url ? { url: researchCommand.url } : {}),
           ...(researchCommand.searchQuery ? { searchQuery: researchCommand.searchQuery } : {}),
           method: 'GET',
-          storeInsight: true,
+          storeInsight: false,
         }, controller.signal)
 
         if (isEdgeChatFailure(researchResult)) {

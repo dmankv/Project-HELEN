@@ -46,7 +46,7 @@ describe('daemon evolution foundation policy', () => {
     expect(decideDaemonCapability('read_repository').allowed).toBe(true)
     expect(decideDaemonCapability('write_sandbox').allowed).toBe(true)
     expect(decideDaemonCapability('research_public_web').allowed).toBe(true)
-    expect(decideDaemonCapability('store_external_insight').allowed).toBe(true)
+    expect(decideDaemonCapability('store_external_insight').allowed).toBe(false)
 
     const denied = decideDaemonCapability('write_main')
     expect(denied.allowed).toBe(false)

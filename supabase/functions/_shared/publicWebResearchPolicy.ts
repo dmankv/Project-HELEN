@@ -453,7 +453,7 @@ export function redactResearchAuditMetadata(
       redacted[key] = '[REDACTED]'
       continue
     }
-    if (typeof value === 'string' && /(?:^|_)(?:url|uri)$/i.test(key)) {
+    if (typeof value === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
       try {
         const parsed = new URL(value)
         parsed.search = ''

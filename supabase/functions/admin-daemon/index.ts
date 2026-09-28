@@ -694,7 +694,7 @@ async function buildResearchStatusResponse(
 
   return {
     request_type: 'research_status',
-    diagnostics_status: mode === 'configured' ? 'available' : 'unavailable',
+    diagnostics_status: 'available',
     configuration: {
       mode,
       dns_pinning_configured: dnsPinningConfigured,
