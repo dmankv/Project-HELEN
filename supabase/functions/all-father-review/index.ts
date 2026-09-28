@@ -100,7 +100,7 @@ function normalizeChangedFiles(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > MAX_CHANGED_FILES) {
     throw new Error('changed_files')
   }
-  return value.map(entry => {
+  const normalizedFiles = value.map(entry => {
     if (typeof entry !== 'string') throw new Error('changed_files')
     const normalized = entry.replace(/\\/g, '/').replace(/^\.\//, '').trim()
     if (!normalized || normalized.length > MAX_CHANGED_FILE_LENGTH) {
@@ -108,6 +108,7 @@ function normalizeChangedFiles(value: unknown): string[] {
     }
     return normalized
   })
+  return Array.from(new Set(normalizedFiles))
 }
 
 function assuranceFlag(value: unknown): boolean {

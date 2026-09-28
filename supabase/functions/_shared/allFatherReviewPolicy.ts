@@ -69,10 +69,12 @@ export const ALL_FATHER_PROTECTED_PATH_PREFIXES = Object.freeze([
   '.env',
 ] as const)
 
-const DANGEROUS_SCAN_EXEMPT_PATHS = new Set([
-  'supabase/functions/_shared/allFatherReviewPolicy.ts',
-  'src/services/allFatherReviewPolicy.ts',
-  'tests/AllFatherReviewPolicy.test.ts',
+const POLICY_PATTERN_DEFINITION_MARKERS = new Set([
+  'const SECRET_LITERAL_PATTERNS = [',
+  'const SENSITIVE_DATA_LITERAL_PATTERNS = [',
+  'const AUTH_BYPASS_PATTERNS = [',
+  'const DISABLE_GUARD_PATTERNS = [',
+  'const PRIVILEGED_CONTROL_PLANE_PATTERNS = [',
 ])
 
 interface AddedDiffLine {
@@ -177,6 +179,21 @@ export function isAllFatherProtectedPath(filePath: string): boolean {
   return ALL_FATHER_PROTECTED_PATH_PREFIXES.some(prefix => prefixMatches(normalizedPath, prefix))
 }
 
+function shouldSkipDangerousScan(path: string | null, content: string): boolean {
+  if (path === 'tests/AllFatherReviewPolicy.test.ts') return true
+  if (path === 'supabase/functions/_shared/allFatherReviewPolicy.ts') {
+    const trimmed = content.trim()
+    return POLICY_PATTERN_DEFINITION_MARKERS.has(trimmed)
+      || trimmed.startsWith('/')
+      || trimmed.startsWith("code: '")
+      || trimmed.startsWith("message: '")
+      || trimmed.startsWith('patterns: ')
+      || trimmed.startsWith('redact: ')
+      || trimmed === '] as const'
+  }
+  return false
+}
+
 function redactExcerpt(line: string): string {
   return line
     .replace(/\bghp_[A-Za-z0-9]{20,}\b/g, '[REDACTED_GITHUB_TOKEN]')
@@ -225,7 +242,9 @@ export function extractAddedDiffLines(diff: string): AddedDiffLine[] {
 }
 
 export function evaluateAllFatherReview(input: AllFatherReviewInput): AllFatherReviewResult {
-  const changedFiles = input.changedFiles.map(normalizePath).filter(Boolean)
+  const changedFiles = Array.from(new Set(
+    input.changedFiles.map(normalizePath).filter(Boolean),
+  ))
   const findings: AllFatherReviewFinding[] = []
   const findingKeys = new Set<string>()
 
@@ -291,7 +310,7 @@ export function evaluateAllFatherReview(input: AllFatherReviewInput): AllFatherR
   }
 
   for (const addedLine of extractAddedDiffLines(input.diff)) {
-    if (addedLine.path && DANGEROUS_SCAN_EXEMPT_PATHS.has(addedLine.path)) continue
+    if (shouldSkipDangerousScan(addedLine.path, addedLine.content)) continue
     for (const pattern of DANGEROUS_PATTERNS) {
       if (!pattern.patterns.some(candidate => candidate.test(addedLine.content))) continue
       pushFinding({

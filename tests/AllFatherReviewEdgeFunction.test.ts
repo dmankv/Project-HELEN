@@ -24,6 +24,7 @@ describe('ALL-FATHER review edge function source', () => {
     expect(src).toContain('MAX_CHANGED_FILE_LENGTH = 255')
     expect(src).toContain('MAX_DIFF_CHARS = 1_000_000')
     expect(src).toContain("if (payload.targetBranch !== 'main')")
+    expect(src).toContain('Array.from(new Set(normalizedFiles))')
     expect(src).toContain('evaluateAllFatherReview(payload)')
   })
 

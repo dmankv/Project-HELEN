@@ -66,12 +66,16 @@ function rollbackControlsRemainPresent(): boolean {
   ])
 }
 
+function autoHasTests(changedFiles: string[]): boolean {
+  return changedFiles.length > 0 && changedFiles.every(filePath => TEST_FILE_PATTERN.test(filePath))
+}
+
 function main(): number {
   const changedFiles = changedFilesFromGit()
   const diff = diffFromGit()
   const auditMigrationExists = fileExists('supabase/migrations/20260928100000_all_father_reviews.sql')
   const reviewEndpointExists = fileExists('supabase/functions/all-father-review/index.ts')
-  const hasTests = changedFiles.some(filePath => TEST_FILE_PATTERN.test(filePath))
+  const hasTests = autoHasTests(changedFiles)
   const rollbackAssured = rollbackControlsRemainPresent()
 
   const result = evaluateAllFatherReview({
