@@ -239,7 +239,7 @@ describe('ALL-FATHER review migration', () => {
   it('creates the append-only audit table with decision and assurance fields', () => {
     expect(normalizedSql).toContain('create table if not exists public.all_father_reviews')
     expect(normalizedSql).toContain("target_branch       text not null check (target_branch = 'main')")
-    expect(normalizedSql).toContain("decision            text not null check (decision in ('approved', 'rejected', 'requires_human_review'))")
+    expect(rawSql).toContain("decision            text not null check (decision in ('APPROVED', 'REJECTED', 'REQUIRES_HUMAN_REVIEW'))")
     expect(normalizedSql).toContain('has_tests           boolean not null')
     expect(normalizedSql).toContain('security_assured    boolean not null')
     expect(normalizedSql).toContain('audit_assured       boolean not null')

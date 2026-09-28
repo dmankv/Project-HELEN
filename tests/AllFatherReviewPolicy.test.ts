@@ -85,6 +85,8 @@ diff --git a/src/config.ts b/src/config.ts
     expect(rejected.decision).toBe(ALL_FATHER_DECISIONS.REJECTED)
     expect(rejected.findings).toContainEqual(expect.objectContaining({
       code: 'secret_literal_added',
+      path: 'src/config.ts',
+      lineNumber: 1,
     }))
     expect(removedOnly.decision).toBe(ALL_FATHER_DECISIONS.APPROVED)
   })

@@ -56,6 +56,7 @@ set search_path = public
 as $$
 begin
   raise exception 'ALL-FATHER reviews are append-only';
+  return old;
 end;
 $$;
 
