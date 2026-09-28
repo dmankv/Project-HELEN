@@ -1,4 +1,7 @@
 /CODEOWNERS @dmankv
+/.github/workflows/** @dmankv
+/supabase/functions/** @dmankv
+/supabase/migrations/** @dmankv
 /.github/workflows/all-father-review.yml @dmankv
 /.github/workflows/supabase-functions.yml @dmankv
 /scripts/all-father-review.ts @dmankv
