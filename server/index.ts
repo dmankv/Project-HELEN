@@ -419,7 +419,11 @@ class AuthStore {
         fs.renameSync(tmp, this.filePath)
         return true
       } finally {
-        fs.rmSync(lockDir)
+        try {
+          fs.rmSync(lockDir)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
       }
     } finally {
       try {
