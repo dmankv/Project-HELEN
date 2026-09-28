@@ -141,8 +141,7 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain("if (isResearchStatusRequest(body))")
     expect(src).toContain("buildResearchStatusResponse")
     expect(src).toContain("from('research_fetch_provenance')")
-    expect(src).toContain("from('research_audit_events')")
-    expect(src).toContain("from('unverified_external_insights')")
+    expect(src).toContain(".rpc('get_research_status_aggregates'")
     expect(src).toContain("search_provider_configured")
     expect(src).toContain("search_endpoint_configured")
     expect(src).toContain("IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS")
@@ -150,7 +149,8 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain("logAudit('admin_research_status'")
   })
 
-  it('counts research diagnostics from uncapped query results', () => {
+  it('counts research diagnostics with database-side aggregation', () => {
+    expect(src).toContain(".rpc('get_research_status_aggregates'")
     expect(src).not.toContain(".limit(200)")
   })
 

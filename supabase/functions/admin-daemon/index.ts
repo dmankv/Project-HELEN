@@ -655,24 +655,17 @@ async function buildResearchStatusResponse(
   const searchProviderConfigured = searchEndpointConfigured
     && (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim().length > 0
 
-  const [provenanceCount, auditEvents, insightRows] = await Promise.all([
+  const [provenanceCount, aggregates] = await Promise.all([
     serviceClient
       .from('research_fetch_provenance')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId),
     serviceClient
-      .from('research_audit_events')
-      .select('event_type, metadata')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false }),
-    serviceClient
-      .from('unverified_external_insights')
-      .select('expires_at, evaluation_state')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false }),
+      .rpc('get_research_status_aggregates', { target_user_id: userId })
+      .single(),
   ])
 
-  if (provenanceCount.error || auditEvents.error || insightRows.error) {
+  if (provenanceCount.error || aggregates.error) {
     return {
       request_type: 'research_status',
       diagnostics_status: 'error',
@@ -693,25 +686,11 @@ async function buildResearchStatusResponse(
     }
   }
 
-  const blockedReasonCounts = new Map<string, number>()
-  let blockedEvents = 0
-  for (const event of auditEvents.data ?? []) {
-    const metadata = (event.metadata ?? {}) as Record<string, unknown>
-    const policyDecision = typeof metadata.policy_decision === 'string'
-      ? metadata.policy_decision
-      : typeof metadata.policyDecision === 'string'
-        ? metadata.policyDecision
-        : null
-    if (!policyDecision || !policyDecision.startsWith('blocked_')) continue
-    blockedEvents += 1
-    blockedReasonCounts.set(policyDecision, (blockedReasonCounts.get(policyDecision) ?? 0) + 1)
-  }
-
-  const now = Date.now()
-  const quarantinedInsights = (insightRows.data ?? [])
-    .filter(row => row.evaluation_state === 'quarantined').length
-  const expiredInsights = (insightRows.data ?? [])
-    .filter(row => Date.parse(row.expires_at) < now).length
+  const blockedReasons = Array.isArray(aggregates.data?.blocked_reasons)
+    ? (aggregates.data.blocked_reasons as Array<{ reason?: unknown; count?: unknown }>)
+      .filter(entry => typeof entry.reason === 'string' && typeof entry.count === 'number')
+      .map(entry => ({ reason: entry.reason as string, count: entry.count as number }))
+    : []
 
   return {
     request_type: 'research_status',
@@ -725,13 +704,11 @@ async function buildResearchStatusResponse(
     },
     counters: {
       fetched_sources: provenanceCount.count ?? 0,
-      blocked_events: blockedEvents,
-      quarantined_insights: quarantinedInsights,
-      expired_insights: expiredInsights,
+      blocked_events: Number(aggregates.data?.blocked_events ?? 0),
+      quarantined_insights: Number(aggregates.data?.quarantined_insights ?? 0),
+      expired_insights: Number(aggregates.data?.expired_insights ?? 0),
     },
-    blocked_reasons: Array.from(blockedReasonCounts.entries())
-      .map(([reason, count]) => ({ reason, count }))
-      .sort((a, b) => b.count - a.count),
+    blocked_reasons: blockedReasons,
   }
 }
 

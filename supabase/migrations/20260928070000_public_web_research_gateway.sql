@@ -217,3 +217,57 @@ drop trigger if exists prevent_research_audit_events_delete on public.research_a
 create trigger prevent_research_audit_events_delete
   before delete on public.research_audit_events
   for each row execute function public.prevent_research_audit_event_mutation();
+
+create or replace function public.get_research_status_aggregates(target_user_id uuid)
+returns table (
+  blocked_events bigint,
+  quarantined_insights bigint,
+  expired_insights bigint,
+  blocked_reasons jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  with blocked_reason_counts as (
+    select
+      coalesce(metadata->>'policy_decision', metadata->>'policyDecision') as reason,
+      count(*)::bigint as count
+    from public.research_audit_events
+    where user_id = target_user_id
+      and coalesce(metadata->>'policy_decision', metadata->>'policyDecision') like 'blocked_%'
+    group by 1
+  )
+  select
+    (
+      select count(*)::bigint
+      from public.research_audit_events
+      where user_id = target_user_id
+        and coalesce(metadata->>'policy_decision', metadata->>'policyDecision') like 'blocked_%'
+    ) as blocked_events,
+    (
+      select count(*)::bigint
+      from public.unverified_external_insights
+      where user_id = target_user_id
+        and evaluation_state = 'quarantined'
+    ) as quarantined_insights,
+    (
+      select count(*)::bigint
+      from public.unverified_external_insights
+      where user_id = target_user_id
+        and expires_at < now()
+    ) as expired_insights,
+    coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object('reason', reason, 'count', count)
+          order by count desc, reason asc
+        )
+        from blocked_reason_counts
+      ),
+      '[]'::jsonb
+    ) as blocked_reasons;
+$$;
+
+revoke all on function public.get_research_status_aggregates(uuid) from public;
+grant execute on function public.get_research_status_aggregates(uuid) to service_role;
