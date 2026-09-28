@@ -7,7 +7,8 @@ import {
 } from '../supabase/functions/_shared/allFatherReviewPolicy'
 
 const REPO_ROOT = process.cwd()
-const DIFF_RANGE = 'origin/main...HEAD'
+const DIFF_BASE_REF = 'origin/main'
+const DIFF_RANGE = `${DIFF_BASE_REF}...HEAD`
 const TEST_FILE_PATTERN = /(?:^|\/)(?:tests\/.+|.+\.test\.(?:ts|tsx|js|jsx|mjs|cjs))$/
 
 function execGit(args: string[]): string {
@@ -27,6 +28,7 @@ function includesAll(source: string, required: readonly string[]): boolean {
 }
 
 function changedFilesFromGit(): string[] {
+  ensureDiffBaseRef()
   const output = execGit(['diff', '--name-only', '--no-renames', DIFF_RANGE])
   return output
     .split('\n')
@@ -35,7 +37,16 @@ function changedFilesFromGit(): string[] {
 }
 
 function diffFromGit(): string {
+  ensureDiffBaseRef()
   return execGit(['diff', '--no-ext-diff', '--unified=0', '--no-renames', DIFF_RANGE])
+}
+
+function ensureDiffBaseRef(): void {
+  try {
+    execGit(['rev-parse', '--verify', DIFF_BASE_REF])
+  } catch {
+    execGit(['fetch', '--no-tags', 'origin', 'main:refs/remotes/origin/main'])
+  }
 }
 
 function rollbackControlsRemainPresent(): boolean {

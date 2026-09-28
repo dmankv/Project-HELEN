@@ -92,7 +92,6 @@ const SECRET_LITERAL_PATTERNS = [
   /\bghp_[A-Za-z0-9]{20,}\b/,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
   /\b(?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{16,}\b/i,
-  /\b(?:sb|supabase)_[A-Za-z0-9_-]{16,}\b/i,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
   /\b(?:SUPABASE_SERVICE_ROLE_KEY|SERVICE_ROLE_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|PASSWORD|SECRET(?:_KEY)?)\s*[:=]\s*['"][^'"\n]{8,}['"]/i,
@@ -183,7 +182,6 @@ function redactExcerpt(line: string): string {
     .replace(/\bghp_[A-Za-z0-9]{20,}\b/g, '[REDACTED_GITHUB_TOKEN]')
     .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '[REDACTED_GITHUB_TOKEN]')
     .replace(/\b(?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{16,}\b/gi, '[REDACTED_API_KEY]')
-    .replace(/\b(?:sb|supabase)_[A-Za-z0-9_-]{16,}\b/gi, '[REDACTED_SUPABASE_TOKEN]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, '******')
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_JWT]')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')

@@ -38,7 +38,7 @@ jobs:
 
       - name: Create proposal diff
         run: |
-          git fetch --no-tags origin main
+          git fetch --no-tags origin main:refs/remotes/origin/main
           git diff --no-ext-diff --unified=0 --no-renames origin/main...HEAD > proposal.diff
 
       - name: Execute ALL-FATHER review

@@ -37,8 +37,8 @@ describe('ALL-FATHER review edge function source', () => {
 
   it('allows only approved browser origins and POST requests', () => {
     expect(src).toContain('https://dmankv.github.io')
-    expect(src).toContain('/^http:\\/\\/localhost(:\\\\d+)?$/')
-    expect(src).toContain('/^http:\\/\\/127\\.0\\.0\\.1(:\\\\d+)?$/')
+    expect(src).toContain("/^http:\\/\\/localhost(:\\d+)?$/")
+    expect(src).toContain("/^http:\\/\\/127\\.0\\.0\\.1(:\\d+)?$/")
     expect(src).toContain("if (req.method === 'OPTIONS')")
     expect(src).toContain("if (req.method !== 'POST')")
   })
