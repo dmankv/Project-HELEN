@@ -664,14 +664,12 @@ async function buildResearchStatusResponse(
       .from('research_audit_events')
       .select('event_type, metadata')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(200),
+      .order('created_at', { ascending: false }),
     serviceClient
       .from('unverified_external_insights')
       .select('expires_at, evaluation_state')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(200),
+      .order('created_at', { ascending: false }),
   ])
 
   if (provenanceCount.error || auditEvents.error || insightRows.error) {

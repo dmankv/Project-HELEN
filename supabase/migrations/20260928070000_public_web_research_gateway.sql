@@ -110,26 +110,59 @@ create policy "unverified_external_insights_insert_service"
     and promotion_state = 'blocked_pending_validation'
   );
 
-create or replace function public.prevent_unverified_external_insight_mutation()
+create or replace function public.enforce_unverified_external_insight_lifecycle()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
 begin
-  raise exception 'Unverified external insights are immutable while promotion remains blocked.';
+  if auth.role() <> 'service_role' then
+    raise exception 'Unverified external insight lifecycle requires service-role access.';
+  end if;
+
+  if tg_op = 'DELETE' then
+    if old.expires_at > now() then
+      raise exception 'Unverified external insights can only be deleted after expiry.';
+    end if;
+    return old;
+  end if;
+
+  if new.user_id <> old.user_id
+     or new.normalized_url <> old.normalized_url
+     or new.host <> old.host
+     or new.source_timestamp <> old.source_timestamp
+     or new.source_hash <> old.source_hash
+     or new.excerpt <> old.excerpt
+     or new.confidence <> old.confidence
+     or new.expires_at <> old.expires_at
+     or new.policy_decision <> old.policy_decision
+     or new.created_at <> old.created_at then
+    raise exception 'Unverified external insights only allow privileged lifecycle transitions.';
+  end if;
+
+  if old.evaluation_state = 'quarantined'
+     and old.promotion_state = 'blocked_pending_validation'
+     and (
+       (new.evaluation_state = 'rejected' and new.promotion_state = 'rejected')
+       or (new.evaluation_state = 'validated' and new.promotion_state = 'approved_manual_only')
+     ) then
+    return new;
+  end if;
+
+  raise exception 'Unverified external insight lifecycle transition not permitted.';
 end;
 $$;
 
 drop trigger if exists prevent_unverified_external_insight_update on public.unverified_external_insights;
 create trigger prevent_unverified_external_insight_update
   before update on public.unverified_external_insights
-  for each row execute function public.prevent_unverified_external_insight_mutation();
+  for each row execute function public.enforce_unverified_external_insight_lifecycle();
 
 drop trigger if exists prevent_unverified_external_insight_delete on public.unverified_external_insights;
 create trigger prevent_unverified_external_insight_delete
   before delete on public.unverified_external_insights
-  for each row execute function public.prevent_unverified_external_insight_mutation();
+  for each row execute function public.enforce_unverified_external_insight_lifecycle();
 
 create table if not exists public.research_audit_events (
   event_id             uuid primary key default gen_random_uuid(),

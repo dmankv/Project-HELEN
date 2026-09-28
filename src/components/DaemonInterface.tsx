@@ -621,7 +621,7 @@ export default function DaemonInterface({
                 : 'No textual excerpt was returned.',
             ].join('\n\n')
           : researchResult.status === 'policy_blocked'
-            ? `Research request was policy-blocked: ${researchResult.decision.reason} No browsing was performed beyond policy checks.`
+            ? `Research request was policy-blocked: ${researchResult.decision.reason} No usable browsing result was returned.`
             : researchResult.status === 'unavailable'
               ? `Research is currently unavailable: ${researchResult.decision.reason} No browsing was performed.`
               : `Research failed safely: ${researchResult.decision.reason}`

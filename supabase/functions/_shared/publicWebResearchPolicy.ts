@@ -11,6 +11,7 @@ export type ResearchPolicyDecisionCode =
   | 'blocked_category'
   | 'blocked_uncertain_category'
   | 'blocked_publisher_restriction'
+  | 'blocked_persistence_failure'
   | 'blocked_rate_limit'
   | 'blocked_budget_limit'
   | 'blocked_oversized_response'
@@ -104,11 +105,49 @@ function isHexLike(value: string): boolean {
   return /^[0-9a-f]+$/i.test(value)
 }
 
-function isIPv6Literal(hostname: string): boolean {
+function parseIPv6Segments(hostname: string): number[] | null {
   const normalized = hostname.replace(/^\[|\]$/g, '')
-  if (!normalized.includes(':')) return false
-  const segments = normalized.split(':')
-  return segments.every(segment => segment === '' || (segment.length >= 1 && segment.length <= 4 && isHexLike(segment)))
+  if (!normalized.includes(':')) return null
+
+  const compressionIndex = normalized.indexOf('::')
+  if (compressionIndex !== normalized.lastIndexOf('::')) return null
+
+  const normalizedWithIpv4 = normalized.includes('.')
+    ? normalized.replace(/(^|:)(\d{1,3}(?:\.\d{1,3}){3})$/, (_, prefix: string, ipv4Literal: string) => {
+        const ipv4 = parseIPv4(ipv4Literal)
+        if (!ipv4) return `${prefix}invalid-ipv4`
+        return `${prefix}${((ipv4[0] << 8) | ipv4[1]).toString(16)}:${((ipv4[2] << 8) | ipv4[3]).toString(16)}`
+      })
+    : normalized
+  if (normalizedWithIpv4.includes('invalid-ipv4')) return null
+
+  const [leftRaw, rightRaw = ''] = normalizedWithIpv4.split('::')
+  const parseSide = (value: string): number[] | null => {
+    if (!value) return []
+    const segments = value.split(':')
+    const parsed = segments.map(segment => {
+      if (segment.length < 1 || segment.length > 4 || !isHexLike(segment)) return null
+      return Number.parseInt(segment, 16)
+    })
+    return parsed.some(segment => segment === null) ? null : parsed as number[]
+  }
+
+  const left = parseSide(leftRaw)
+  const right = parseSide(rightRaw)
+  if (!left || !right) return null
+
+  if (compressionIndex >= 0) {
+    const zeroSegments = 8 - (left.length + right.length)
+    if (zeroSegments < 1) return null
+    return [...left, ...Array.from({ length: zeroSegments }, () => 0), ...right]
+  }
+
+  if (left.length !== 8) return null
+  return left
+}
+
+function isIPv6Literal(hostname: string): boolean {
+  return parseIPv6Segments(hostname) !== null
 }
 
 function isSingleLabelHost(hostname: string): boolean {
@@ -135,11 +174,28 @@ export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
   }
 
   if (isIPv6Literal(lowerHost)) {
-    const normalized = lowerHost.replace(/^\[|\]$/g, '')
-    const mappedIpv4Match = /::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(normalized)
-    if (mappedIpv4Match) {
-      const mappedIpv4 = parseIPv4(mappedIpv4Match[1])
-      if (!mappedIpv4 || isBlockedIPv4Octets(mappedIpv4)) {
+    const ipv6Segments = parseIPv6Segments(lowerHost)
+    if (!ipv6Segments) {
+      return {
+        allowed: false,
+        code: 'blocked_ip_literal',
+        reason: 'Malformed or unsupported IP literal.',
+      }
+    }
+    const isMappedIpv4 = ipv6Segments[0] === 0
+      && ipv6Segments[1] === 0
+      && ipv6Segments[2] === 0
+      && ipv6Segments[3] === 0
+      && ipv6Segments[4] === 0
+      && ipv6Segments[5] === 0xffff
+    if (isMappedIpv4) {
+      const mappedIpv4 = [
+        ipv6Segments[6] >> 8,
+        ipv6Segments[6] & 0xff,
+        ipv6Segments[7] >> 8,
+        ipv6Segments[7] & 0xff,
+      ]
+      if (isBlockedIPv4Octets(mappedIpv4)) {
         return {
           allowed: false,
           code: 'blocked_network',
@@ -153,15 +209,11 @@ export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
       }
     }
     if (
-      normalized === '::1'
-      || normalized === '::'
-      || normalized.startsWith('fc')
-      || normalized.startsWith('fd')
-      || normalized.startsWith('fe8')
-      || normalized.startsWith('fe9')
-      || normalized.startsWith('fea')
-      || normalized.startsWith('feb')
-      || normalized.startsWith('ff')
+      ipv6Segments.every(segment => segment === 0)
+      || (ipv6Segments.slice(0, 7).every(segment => segment === 0) && ipv6Segments[7] === 1)
+      || (ipv6Segments[0] & 0xfe00) === 0xfc00
+      || (ipv6Segments[0] & 0xffc0) === 0xfe80
+      || (ipv6Segments[0] & 0xff00) === 0xff00
     ) {
       return {
         allowed: false,

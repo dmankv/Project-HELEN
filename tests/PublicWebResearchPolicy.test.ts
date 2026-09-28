@@ -43,6 +43,7 @@ describe('public web research policy', () => {
     expect(classifyIpLiteral('8.8.8.8').allowed).toBe(true)
     expect(classifyIpLiteral('::1').allowed).toBe(false)
     expect(classifyIpLiteral('::ffff:127.0.0.1').allowed).toBe(false)
+    expect(classifyIpLiteral('::ffff:7f00:1').allowed).toBe(false)
     expect(classifyIpLiteral('::ffff:10.0.0.1').allowed).toBe(false)
     expect(classifyIpLiteral('2001:4860:4860::8888').allowed).toBe(true)
   })

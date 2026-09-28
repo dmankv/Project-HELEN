@@ -29,6 +29,17 @@ describe('public web research edge gateway source', () => {
     expect(src).toContain('blocked_budget_limit')
   })
 
+  it('filters DNS answers, bounds robots reads, and redacts stored provenance URLs', () => {
+    expect(src).toContain('answer.type === 1 || answer.type === 28')
+    expect(src).toContain('readBoundedBodyText(')
+    expect(src).toContain('normalizeUrlForStorage(currentUrl)')
+  })
+
+  it('propagates research audit persistence failures', () => {
+    expect(src).toContain("throw new ResearchPersistenceError(`Research audit persistence failed for ${eventType}.`)")
+    expect(src).toContain('error instanceof ResearchPersistenceError')
+  })
+
   it('sanitizes extracted content and blocks unsupported content types', () => {
     expect(src).toContain('isSupportedResearchContentType(')
     expect(src).toContain('sanitizeBoundedText(')
@@ -64,7 +75,8 @@ describe('public web research migration', () => {
 
   it('keeps lifecycle records append-only and blocks direct mutation', () => {
     expect(sql).toContain('research provenance is append-only')
-    expect(sql).toContain('unverified external insights are immutable while promotion remains blocked')
+    expect(sql).toContain('unverified external insight lifecycle requires service-role access')
+    expect(sql).toContain('unverified external insight lifecycle transition not permitted')
     expect(sql).toContain('research audit events are append-only')
   })
 })

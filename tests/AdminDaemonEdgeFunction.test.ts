@@ -150,6 +150,10 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).toContain("logAudit('admin_research_status'")
   })
 
+  it('counts research diagnostics from uncapped query results', () => {
+    expect(src).not.toContain(".limit(200)")
+  })
+
   it('surfaces explicit diagnostics availability states instead of masking query failures', () => {
     expect(src).toContain("evolutionStatus: 'available'")
     expect(src).toContain("evolutionStatus: 'unavailable'")
