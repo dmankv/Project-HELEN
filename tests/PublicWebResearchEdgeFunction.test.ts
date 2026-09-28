@@ -54,7 +54,8 @@ describe('public web research edge gateway source', () => {
 })
 
 describe('public web research migration', () => {
-  const sql = fs.readFileSync(migrationPath, 'utf8').toLowerCase()
+  const rawSql = fs.readFileSync(migrationPath, 'utf8')
+  const sql = rawSql.toLowerCase()
 
   it('creates provenance, quarantine, and audit tables with RLS', () => {
     expect(sql).toContain('create table if not exists public.research_fetch_provenance')
@@ -70,5 +71,16 @@ describe('public web research migration', () => {
     expect(sql).toContain('unverified external insight lifecycle requires service-role access')
     expect(sql).toContain('unverified external insight lifecycle transition not permitted')
     expect(sql).toContain('research audit events are append-only')
+  })
+
+  it('executes research aggregate rpc as the caller and restricts it to service_role', () => {
+    const match = rawSql.match(
+      /create or replace function public\.get_research_status_aggregates\(target_user_id uuid\)[\s\S]+?\$\$;/i,
+    )
+    expect(match).not.toBeNull()
+    const fn = match![0].toLowerCase()
+    expect(fn).toContain('security invoker')
+    expect(fn).toContain("if current_user <> 'service_role' then")
+    expect(sql).toContain('grant execute on function public.get_research_status_aggregates(uuid) to service_role;')
   })
 })

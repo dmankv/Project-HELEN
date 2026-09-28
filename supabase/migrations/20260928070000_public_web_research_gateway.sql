@@ -226,11 +226,11 @@ returns table (
   blocked_reasons jsonb
 )
 language plpgsql
-security definer
+security invoker
 set search_path = public
 as $$
 begin
-  if auth.role() <> 'service_role' then
+  if current_user <> 'service_role' then
     raise exception 'Access denied.';
   end if;
 

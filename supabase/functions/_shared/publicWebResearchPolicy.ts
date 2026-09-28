@@ -414,36 +414,69 @@ export function deriveMinimalSearchTerms(explicitRequest: string): string {
     .join(' ')
 }
 
-export function robotsAllowsPath(robotsTxt: string, targetPath: string): boolean {
+function normalizeRobotsUserAgent(userAgent: string): string {
+  return userAgent.trim().toLowerCase().split(/[\s/]+/, 1)[0] ?? ''
+}
+
+export function robotsAllowsPath(robotsTxt: string, targetPath: string, userAgent = '*'): boolean {
   const lines = robotsTxt
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(line => line.length > 0 && !line.startsWith('#'))
-  let appliesToAllAgents = false
-  let readingUserAgentGroup = false
-  const rules: Array<{ type: 'allow' | 'disallow'; path: string }> = []
+  const groups: Array<{
+    userAgents: string[]
+    rules: Array<{ type: 'allow' | 'disallow'; path: string }>
+  }> = []
+  let currentGroup: {
+    userAgents: string[]
+    rules: Array<{ type: 'allow' | 'disallow'; path: string }>
+  } | null = null
   for (const line of lines) {
     const lower = line.toLowerCase()
     if (lower.startsWith('user-agent:')) {
-      if (!readingUserAgentGroup) appliesToAllAgents = false
-      readingUserAgentGroup = true
-      const ua = line.slice('user-agent:'.length).trim()
-      appliesToAllAgents = appliesToAllAgents || ua === '*'
+      if (currentGroup?.rules.length) {
+        groups.push(currentGroup)
+        currentGroup = null
+      }
+      if (!currentGroup) currentGroup = { userAgents: [], rules: [] }
+      currentGroup.userAgents.push(normalizeRobotsUserAgent(line.slice('user-agent:'.length)))
       continue
     }
-    readingUserAgentGroup = false
-    if (!appliesToAllAgents) continue
+    if (!currentGroup) continue
     if (lower.startsWith('disallow:')) {
       const path = line.slice('disallow:'.length).trim()
-      if (path) rules.push({ type: 'disallow', path })
+      if (path) currentGroup.rules.push({ type: 'disallow', path })
       continue
     }
     if (lower.startsWith('allow:')) {
       const path = line.slice('allow:'.length).trim()
-      if (path) rules.push({ type: 'allow', path })
+      if (path) currentGroup.rules.push({ type: 'allow', path })
     }
   }
-  const matchingRules = rules.filter(rule => targetPath.startsWith(rule.path))
+  if (currentGroup) groups.push(currentGroup)
+
+  const normalizedAgent = normalizeRobotsUserAgent(userAgent)
+  const specificMatchLength = groups.reduce((longest, group) => {
+    const matchLength = group.userAgents.reduce((best, candidate) => {
+      if (candidate === '*' || candidate.length === 0) return best
+      return normalizedAgent.startsWith(candidate) ? Math.max(best, candidate.length) : best
+    }, 0)
+    return Math.max(longest, matchLength)
+  }, 0)
+
+  const applicableRules = groups
+    .filter(group => group.userAgents.some(candidate => {
+      if (specificMatchLength > 0) {
+        return candidate !== '*'
+          && candidate.length > 0
+          && normalizedAgent.startsWith(candidate)
+          && candidate.length === specificMatchLength
+      }
+      return candidate === '*'
+    }))
+    .flatMap(group => group.rules)
+
+  const matchingRules = applicableRules.filter(rule => targetPath.startsWith(rule.path))
   if (matchingRules.length === 0) return true
   matchingRules.sort((a, b) => b.path.length - a.path.length)
   const strongest = matchingRules[0]

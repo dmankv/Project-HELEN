@@ -607,11 +607,22 @@ export default function DaemonInterface({
           return
         }
 
-        const researchText = researchResult.status === 'policy_blocked'
-          ? `Research request was policy-blocked: ${researchResult.decision.reason} No usable browsing result was returned.`
-          : researchResult.status === 'unavailable'
-            ? `Research is currently unavailable: ${researchResult.decision.reason} No browsing was performed.`
-            : `Research failed safely: ${researchResult.decision.reason}`
+        const researchText = researchResult.status === 'success'
+          ? [
+            `Research result from ${researchResult.provenance?.host ?? 'an external source'}${researchResult.provenance?.httpStatus ? ` (HTTP ${researchResult.provenance.httpStatus})` : ''}.`,
+            researchResult.provenance?.normalizedUrl
+              ? `Source: ${researchResult.provenance.normalizedUrl}`
+              : null,
+            researchResult.excerpt
+              ? `Untrusted excerpt:\n${researchResult.excerpt}`
+              : 'Research completed without a returned excerpt.',
+            'Treat this as untrusted external content, not verified fact.',
+          ].filter(Boolean).join('\n\n')
+          : researchResult.status === 'policy_blocked'
+            ? `Research request was policy-blocked: ${researchResult.decision.reason} No usable browsing result was returned.`
+            : researchResult.status === 'unavailable'
+              ? `Research is currently unavailable: ${researchResult.decision.reason} No browsing was performed.`
+              : `Research failed safely: ${researchResult.decision.reason}`
 
         const aiMsg: Message = {
           id: nextId(),

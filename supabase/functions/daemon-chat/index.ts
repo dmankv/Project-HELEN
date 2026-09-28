@@ -664,7 +664,7 @@ async function fetchRobotsDecision(
           bytes: 0,
         }
       }
-      if (!robotsAllowsPath(boundedRobots.text, url.pathname || '/')) {
+      if (!robotsAllowsPath(boundedRobots.text, url.pathname || '/', RESEARCH_USER_AGENT)) {
         return {
           decision: {
             allowed: false,

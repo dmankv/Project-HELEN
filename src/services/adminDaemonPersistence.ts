@@ -321,6 +321,8 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
   let evolutionStatus: 'available' | 'unavailable' | 'error' = 'unavailable'
   let research: AdminDiagnosticsStatus['research'] = null
   let researchStatus: 'available' | 'unavailable' | 'error' = 'unavailable'
+  let evolutionResolved = false
+  let researchResolved = false
 
   if (configured && sessionActive && accessToken) {
     const endpoint = `${SUPABASE_URL}/functions/v1/admin-daemon`
@@ -351,8 +353,10 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
         }
         evolution = evolutionData.evolution ?? null
         evolutionStatus = evolutionData.evolutionStatus ?? 'unavailable'
+        evolutionResolved = true
       } else {
         evolutionStatus = 'error'
+        evolutionResolved = true
       }
 
       if (researchRes.status === 'fulfilled' && researchRes.value.ok) {
@@ -373,7 +377,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
           blocked_reasons?: Array<{ reason?: string; count?: number }>
         }
         researchStatus = researchData.diagnostics_status ?? 'unavailable'
-        if (researchStatus !== 'error') {
+        if (researchStatus === 'available') {
           research = {
             mode: researchData.configuration?.mode === 'configured' ? 'configured' : 'denied',
             dnsPinningConfigured: Boolean(researchData.configuration?.dns_pinning_configured),
@@ -390,15 +394,17 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
         } else {
           research = null
         }
+        researchResolved = true
       } else {
         researchStatus = 'error'
         research = null
+        researchResolved = true
       }
     } catch {
       // Preserve independent statuses where available; fail closed only for
       // any still-unknown diagnostics channel.
-      if (evolutionStatus === 'unavailable' && !evolution) evolutionStatus = 'error'
-      if (researchStatus === 'unavailable') researchStatus = 'error'
+      if (!evolutionResolved && evolutionStatus === 'unavailable' && !evolution) evolutionStatus = 'error'
+      if (!researchResolved && researchStatus === 'unavailable') researchStatus = 'error'
     }
   }
 

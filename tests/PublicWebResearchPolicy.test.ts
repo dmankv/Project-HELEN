@@ -100,6 +100,17 @@ describe('public web research policy', () => {
     expect(robotsAllowsPath(robots, '/example-only/file')).toBe(true)
   })
 
+  it('prefers bot-specific robots groups over wildcard rules', () => {
+    const robots = `
+      User-agent: DaemonResearchBot
+      Disallow: /
+      User-agent: *
+      Allow: /
+    `
+    expect(robotsAllowsPath(robots, '/anything', 'DaemonResearchBot/1.0')).toBe(false)
+    expect(robotsAllowsPath(robots, '/anything', 'OtherBot/1.0')).toBe(true)
+  })
+
   it('supports only bounded text-like content types', () => {
     expect(isSupportedResearchContentType('text/html; charset=utf-8')).toBe(true)
     expect(isSupportedResearchContentType('application/json')).toBe(true)

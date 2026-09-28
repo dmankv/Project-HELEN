@@ -154,6 +154,11 @@ describe('Admin Daemon Edge Function source', () => {
     expect(src).not.toContain(".limit(200)")
   })
 
+  it('coerces blocked-reason counts from aggregate JSON before filtering', () => {
+    expect(src).toContain('const count = Number(entry.count)')
+    expect(src).toContain('Number.isFinite(entry.count)')
+  })
+
   it('surfaces explicit diagnostics availability states instead of masking query failures', () => {
     expect(src).toContain("evolutionStatus: 'available'")
     expect(src).toContain("evolutionStatus: 'unavailable'")

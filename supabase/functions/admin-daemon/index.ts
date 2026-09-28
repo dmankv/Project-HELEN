@@ -688,8 +688,12 @@ async function buildResearchStatusResponse(
 
   const blockedReasons = Array.isArray(aggregates.data?.blocked_reasons)
     ? (aggregates.data.blocked_reasons as Array<{ reason?: unknown; count?: unknown }>)
-      .filter(entry => typeof entry.reason === 'string' && typeof entry.count === 'number')
-      .map(entry => ({ reason: entry.reason as string, count: entry.count as number }))
+      .map(entry => {
+        const reason = typeof entry.reason === 'string' ? entry.reason : ''
+        const count = Number(entry.count)
+        return { reason, count }
+      })
+      .filter(entry => entry.reason.length > 0 && Number.isFinite(entry.count))
     : []
 
   return {
