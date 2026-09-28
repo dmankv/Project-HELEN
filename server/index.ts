@@ -384,7 +384,9 @@ class AuthStore {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       }
       return this.readExistingFile()
-    } catch {
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'ENOENT' || error instanceof SyntaxError) throw error
       return initial
     }
   }
@@ -439,7 +441,7 @@ class AuthStore {
         }
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code
-        if ((code !== 'ENOENT' && !(error instanceof SyntaxError)) || attempt >= 24) throw error
+        if ((code !== 'ENOENT' && !(error instanceof SyntaxError)) || attempt >= 500) throw error
         Atomics.wait(waitState, 0, 0, 10)
       }
     }
