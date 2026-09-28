@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { once } from 'node:events'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 let passed = 0
 let failed = 0
@@ -23,6 +25,9 @@ function section(name) {
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-auth-'))
 const authFile = path.join(tempRoot, 'auth-store.json')
 const outboxFile = path.join(tempRoot, 'email-outbox.jsonl')
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const repoRoot = path.resolve(__dirname, '..')
+const authStoreInitWorker = path.join(__dirname, 'helpers', 'auth-store-init-worker.mjs')
 
 process.env.PORT = '3111'
 process.env.AUTH_DATA_FILE = authFile
@@ -33,6 +38,86 @@ process.env.DAEMON_ALLOWED_ORIGINS = 'http://localhost:3000'
 process.env.AUTH_RATE_LIMIT_MAX = '5'
 process.env.AUTH_RATE_LIMIT_WINDOW_MS = '60000'
 process.env.OPENAI_API_KEY = ''
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function runAuthStoreInitWorker(envOverrides = {}) {
+  return new Promise(resolve => {
+    const child = spawn('npx', ['tsx', authStoreInitWorker], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        OPENAI_API_KEY: '',
+        AUTH_REQUIRE_HTTPS: 'false',
+        AUTH_SECURE_COOKIES: 'false',
+        ...envOverrides,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => {
+      stdout += String(chunk)
+    })
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk)
+    })
+    child.on('close', code => {
+      let parsed = null
+      try {
+        parsed = JSON.parse(stdout.trim().split('\n').filter(Boolean).at(-1) ?? '')
+      } catch {}
+      resolve({ code, stdout, stderr, parsed })
+    })
+  })
+}
+
+section('Auth store initialization safety checks')
+{
+  const failClosedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-auth-init-fail-'))
+  const failClosedAuthFile = path.join(failClosedRoot, 'auth-store.json')
+  const failClosed = await runAuthStoreInitWorker({
+    AUTH_DATA_FILE: failClosedAuthFile,
+    AUTH_TEST_TMP_WRITE_ERROR_CODE: 'EACCES',
+  })
+  assert(
+    failClosed.parsed?.ok === false && failClosed.parsed?.code === 'EACCES',
+    'unexpected init filesystem errors fail startup instead of returning in-memory empty state',
+  )
+
+  const raceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-auth-init-race-'))
+  const raceAuthFile = path.join(raceRoot, 'auth-store.json')
+  const winnerPromise = runAuthStoreInitWorker({
+    AUTH_DATA_FILE: raceAuthFile,
+    AUTH_TEST_LINK_UNSUPPORTED: '1',
+    AUTH_TEST_RENAME_DELAY_MS: '180',
+  })
+  await wait(30)
+  const contenderPromise = runAuthStoreInitWorker({
+    AUTH_DATA_FILE: raceAuthFile,
+    AUTH_TEST_LINK_UNSUPPORTED: '1',
+  })
+  const [winner, contender] = await Promise.all([winnerPromise, contenderPromise])
+
+  const initializerResults = [winner, contender]
+  const successfulInitializers = initializerResults.filter(result => result.parsed?.ok === true).length
+  assert(successfulInitializers >= 1, 'one concurrent initializer publishes the auth store file')
+  const failedInitializerHadRaceError = initializerResults
+    .filter(result => result.parsed?.ok === false)
+    .every(result => result.parsed?.code === 'ENOENT' || result.parsed?.name === 'SyntaxError')
+  assert(
+    failedInitializerHadRaceError,
+    'contenders either load the published store or fail closed during read-race retries',
+  )
+
+  const raceRaw = fs.readFileSync(raceAuthFile, 'utf8')
+  const raceParsed = JSON.parse(raceRaw)
+  assert(Array.isArray(raceParsed.users), 'race fallback writes valid users array')
+  assert(Array.isArray(raceParsed.sessions), 'race fallback writes valid sessions array')
+  assert(Array.isArray(raceParsed.tokens), 'race fallback writes valid tokens array')
+}
 
 const { default: server } = await import('../server/index.ts')
 server.listen(Number(process.env.PORT))

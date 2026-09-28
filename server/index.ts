@@ -375,20 +375,14 @@ class AuthStore {
 
   private load(): AuthStoreFile {
     const initial: AuthStoreFile = { users: [], sessions: [], tokens: [] }
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
+    const initialJson = JSON.stringify(initial, null, 2)
     try {
-      fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
-      const initialJson = JSON.stringify(initial, null, 2)
-      try {
-        if (this.publishInitialFile(initialJson)) return initial
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      }
-      return this.readExistingFile()
+      if (this.publishInitialFile(initialJson)) return initial
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code === 'ENOENT' || error instanceof SyntaxError) throw error
-      return initial
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
+    return this.readExistingFile()
   }
 
   private publishInitialFile(initialJson: string): boolean {
@@ -451,7 +445,7 @@ class AuthStore {
     const waitState = new Int32Array(new SharedArrayBuffer(4))
     for (let attempt = 0; ; attempt += 1) {
       try {
-        fs.rmSync(lockDir)
+        fs.rmdirSync(lockDir)
         return
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code
