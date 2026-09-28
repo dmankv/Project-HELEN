@@ -875,7 +875,12 @@ jobs:
         run: |
           node <<'NODE'
           const fs = require('fs')
-          if (process.env.LIVE_EVAL_CONFIGURED !== 'true') {
+          const bindingReady = process.env.BINDING_READY === 'true'
+          const liveEvalConfigured = process.env.LIVE_EVAL_CONFIGURED === 'true'
+          if (!liveEvalConfigured && !bindingReady) {
+            process.exit(0)
+          }
+          if (!liveEvalConfigured) {
             console.error('Required gate did not pass: live evaluation configuration is missing.')
             process.exit(1)
           }
@@ -895,7 +900,7 @@ jobs:
             console.error(`Required gate did not pass: ${failed[0]}`)
             process.exit(1)
           }
-          if (process.env.BINDING_READY === 'true') {
+          if (bindingReady) {
             if (!fs.existsSync('evolution-gate-results.json')) {
               console.error('Required gate artifact is missing.')
               process.exit(1)

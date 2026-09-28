@@ -435,12 +435,29 @@ function getMetadataNumber(
 
 function derivePersistedCanaryStatus(
   run: { stage: string; status: string },
-  latestCanaryDecision: { status: string | null; allowed: boolean | null } | null,
+  latestCanaryDecision: {
+    status: string | null
+    allowed: boolean | null
+    runId: string | null
+    candidateSnapshotId: string | null
+    candidateVersion: string | null
+  } | null,
+  expectedBinding: {
+    runId: string
+    candidateSnapshotId: string
+    candidateVersion: string
+  },
 ): CanaryStatus {
+  const hasHealthyBoundDecision = latestCanaryDecision?.allowed === true
+    && latestCanaryDecision.status === 'healthy'
+    && latestCanaryDecision.runId === expectedBinding.runId
+    && latestCanaryDecision.candidateSnapshotId === expectedBinding.candidateSnapshotId
+    && latestCanaryDecision.candidateVersion === expectedBinding.candidateVersion
+
   if (run.status === 'failed' || run.status === 'denied' || run.status === 'timed_out') return 'failed'
-  if (latestCanaryDecision?.allowed === true && latestCanaryDecision.status === 'healthy') return 'healthy'
+  if (hasHealthyBoundDecision) return 'healthy'
   if (run.stage === 'rollback' || run.status === 'rolled_back') {
-    if (latestCanaryDecision?.status === 'healthy') return 'healthy'
+    if (latestCanaryDecision?.status === 'healthy') return 'failed'
     if (latestCanaryDecision?.status === 'failed') return 'failed'
     if (latestCanaryDecision?.status === 'denied') return 'denied'
     return 'not_started'
@@ -566,6 +583,13 @@ async function buildEvolutionStatusResponse(
       canaryStatus: derivePersistedCanaryStatus(run, {
         status: getMetadataString(latestCanaryDecision?.metadata, 'status', 'status'),
         allowed: getMetadataBoolean(latestCanaryDecision?.metadata, 'allowed', 'allowed'),
+        runId: getMetadataString(latestCanaryDecision?.metadata, 'runId', 'run_id'),
+        candidateSnapshotId: getMetadataString(latestCanaryDecision?.metadata, 'candidateSnapshotId', 'candidate_snapshot_id'),
+        candidateVersion: getMetadataString(latestCanaryDecision?.metadata, 'candidateVersion', 'candidate_version'),
+      }, {
+        runId: run.run_id,
+        candidateSnapshotId: run.candidate_snapshot_id,
+        candidateVersion: run.candidate_version,
       }),
       rollbackStatus: run.status === 'rolled_back'
         ? 'completed'
