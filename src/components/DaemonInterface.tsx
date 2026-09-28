@@ -236,6 +236,11 @@ function parseResearchCommand(text: string): { url?: string; searchQuery?: strin
   return null
 }
 
+function formatUntrustedExcerpt(excerpt: string): string {
+  const escapedFence = excerpt.replace(/```/g, '``\\`')
+  return `Untrusted external excerpt (verbatim):\n\`\`\`text\n${escapedFence}\n\`\`\``
+}
+
 const MAX_API_TURNS = 20
 const CLOUD_CHAT_DOCS_URL = 'https://github.com/dmankv/Project-HELEN/blob/main/DEPLOYMENT.md#cloud-chat-diagnostics'
 
@@ -610,7 +615,7 @@ export default function DaemonInterface({
               `Public-web research succeeded from ${researchResult.provenance?.host ?? 'a public source'}.`,
               `Source: ${researchResult.provenance?.normalizedUrl ?? '(unknown)'}`,
               researchResult.excerpt
-                ? `Untrusted external excerpt (quoted):\n> ${researchResult.excerpt.replace(/\n/g, '\n> ')}`
+                ? formatUntrustedExcerpt(researchResult.excerpt)
                 : 'No textual excerpt was returned.',
             ].join('\n\n')
           : researchResult.status === 'policy_blocked'

@@ -43,6 +43,7 @@ This capability is **not unrestricted internet access**. It is a constrained, se
 ## Provider/search prerequisites
 
 - Discovery/search adapter is deny-by-default until explicit provider configuration is present.
+- DNS pinning backend mode must be configured; otherwise research stays fail-closed.
 - Direct URL retrieval uses the same research policy gateway.
 - Search terms are derived only from explicit research requests, not private conversation history or secrets.
 

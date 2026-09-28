@@ -631,6 +631,7 @@ interface ResearchStatusResponse {
   diagnostics_status: 'available' | 'unavailable' | 'error'
   configuration: {
     mode: 'denied' | 'configured'
+    dns_pinning_configured: boolean
     search_provider_configured: boolean
     search_endpoint_configured: boolean
     budgets: typeof IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS
@@ -649,6 +650,7 @@ async function buildResearchStatusResponse(
   userId: string,
 ): Promise<ResearchStatusResponse> {
   const mode = parseResearchMode(Deno.env.get('DAEMON_PUBLIC_WEB_RESEARCH_MODE') ?? undefined)
+  const dnsPinningConfigured = (Deno.env.get('DAEMON_RESEARCH_DNS_PINNING_MODE') ?? '').toLowerCase() === 'configured'
   const searchEndpointConfigured = (Deno.env.get('DAEMON_RESEARCH_SEARCH_ENDPOINT') ?? '').trim().length > 0
   const searchProviderConfigured = searchEndpointConfigured
     && (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim().length > 0
@@ -678,6 +680,7 @@ async function buildResearchStatusResponse(
       diagnostics_status: 'error',
       configuration: {
         mode,
+        dns_pinning_configured: dnsPinningConfigured,
         search_provider_configured: searchProviderConfigured,
         search_endpoint_configured: searchEndpointConfigured,
         budgets: IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,
@@ -717,6 +720,7 @@ async function buildResearchStatusResponse(
     diagnostics_status: mode === 'configured' ? 'available' : 'unavailable',
     configuration: {
       mode,
+      dns_pinning_configured: dnsPinningConfigured,
       search_provider_configured: searchProviderConfigured,
       search_endpoint_configured: searchEndpointConfigured,
       budgets: IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS,

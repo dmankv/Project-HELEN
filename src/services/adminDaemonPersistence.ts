@@ -290,6 +290,7 @@ export interface AdminDiagnosticsStatus {
   researchStatus: 'available' | 'unavailable' | 'error'
   research: {
     mode: 'denied' | 'configured'
+    dnsPinningConfigured: boolean
     searchProviderConfigured: boolean
     searchEndpointConfigured: boolean
     fetchedSources: number
@@ -359,6 +360,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
           diagnostics_status?: 'available' | 'unavailable' | 'error'
           configuration?: {
             mode?: 'denied' | 'configured'
+            dns_pinning_configured?: boolean
             search_provider_configured?: boolean
             search_endpoint_configured?: boolean
           }
@@ -371,20 +373,26 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
           blocked_reasons?: Array<{ reason?: string; count?: number }>
         }
         researchStatus = researchData.diagnostics_status ?? 'unavailable'
-        research = {
-          mode: researchData.configuration?.mode === 'configured' ? 'configured' : 'denied',
-          searchProviderConfigured: Boolean(researchData.configuration?.search_provider_configured),
-          searchEndpointConfigured: Boolean(researchData.configuration?.search_endpoint_configured),
-          fetchedSources: Number(researchData.counters?.fetched_sources ?? 0),
-          blockedEvents: Number(researchData.counters?.blocked_events ?? 0),
-          blockedReasons: (researchData.blocked_reasons ?? [])
-            .map(entry => ({ reason: String(entry.reason ?? ''), count: Number(entry.count ?? 0) }))
-            .filter(entry => entry.reason.length > 0),
-          quarantinedInsights: Number(researchData.counters?.quarantined_insights ?? 0),
-          expiredInsights: Number(researchData.counters?.expired_insights ?? 0),
+        if (researchStatus !== 'error') {
+          research = {
+            mode: researchData.configuration?.mode === 'configured' ? 'configured' : 'denied',
+            dnsPinningConfigured: Boolean(researchData.configuration?.dns_pinning_configured),
+            searchProviderConfigured: Boolean(researchData.configuration?.search_provider_configured),
+            searchEndpointConfigured: Boolean(researchData.configuration?.search_endpoint_configured),
+            fetchedSources: Number(researchData.counters?.fetched_sources ?? 0),
+            blockedEvents: Number(researchData.counters?.blocked_events ?? 0),
+            blockedReasons: (researchData.blocked_reasons ?? [])
+              .map(entry => ({ reason: String(entry.reason ?? ''), count: Number(entry.count ?? 0) }))
+              .filter(entry => entry.reason.length > 0),
+            quarantinedInsights: Number(researchData.counters?.quarantined_insights ?? 0),
+            expiredInsights: Number(researchData.counters?.expired_insights ?? 0),
+          }
+        } else {
+          research = null
         }
       } else {
         researchStatus = 'error'
+        research = null
       }
     } catch {
       // Preserve independent statuses where available; fail closed only for

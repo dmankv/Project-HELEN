@@ -828,6 +828,7 @@ export default function AdminDaemonInterface({
                 <>
                   <li>Research status: {diagnostics.researchStatus}</li>
                   <li>Research mode: {diagnostics.research.mode}</li>
+                  <li>DNS pinning configured: {String(diagnostics.research.dnsPinningConfigured)}</li>
                   <li>Search provider configured: {String(diagnostics.research.searchProviderConfigured)}</li>
                   <li>Search endpoint configured: {String(diagnostics.research.searchEndpointConfigured)}</li>
                   <li>Research sources fetched: {diagnostics.research.fetchedSources}</li>

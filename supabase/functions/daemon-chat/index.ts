@@ -96,6 +96,7 @@ interface ResearchRequest {
 
 interface ResearchConfig {
   mode: 'denied' | 'configured'
+  dnsPinningConfigured: boolean
   searchEnabled: boolean
   searchEndpoint: string
   searchApiKey: string
@@ -423,11 +424,13 @@ function parseResearchConfig(): ResearchConfig {
   const mode = (Deno.env.get('DAEMON_PUBLIC_WEB_RESEARCH_MODE') ?? '').toLowerCase() === 'configured'
     ? 'configured'
     : 'denied'
+  const dnsPinningConfigured = (Deno.env.get('DAEMON_RESEARCH_DNS_PINNING_MODE') ?? '').toLowerCase() === 'configured'
   const searchEndpoint = (Deno.env.get('DAEMON_RESEARCH_SEARCH_ENDPOINT') ?? '').trim()
   const searchApiKey = (Deno.env.get('DAEMON_RESEARCH_SEARCH_API_KEY') ?? '').trim()
   const searchProviderConfigured = searchEndpoint.length > 0 && searchApiKey.length > 0
   return {
     mode,
+    dnsPinningConfigured,
     searchEnabled: searchProviderConfigured,
     searchEndpoint,
     searchApiKey,
@@ -656,6 +659,22 @@ async function executePublicWebResearch(
       source_count: 0,
       blocked_count: 1,
       blocked_reasons: ['Public-web research mode is not configured.'],
+    }
+    if (!config.dnsPinningConfigured) {
+      return {
+        request_type: 'public_web_research',
+        status: 'unavailable',
+        decision: {
+          allowed: false,
+          code: 'blocked_invalid_config',
+          reason: 'Research DNS pinning backend is not configured; gateway remains fail-closed.',
+        },
+        provenance: null,
+        excerpt: null,
+        source_count: 0,
+        blocked_count: 1,
+        blocked_reasons: ['Research DNS pinning backend is not configured.'],
+      }
     }
   }
 
