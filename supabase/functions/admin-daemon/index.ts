@@ -693,7 +693,7 @@ async function buildResearchStatusResponse(
         const count = Number(entry.count)
         return { reason, count }
       })
-      .filter(entry => entry.reason.length > 0 && Number.isFinite(entry.count))
+      .filter(entry => entry.reason.length > 0 && Number.isInteger(entry.count) && entry.count >= 0)
     : []
 
   return {

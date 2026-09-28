@@ -387,16 +387,18 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
             blockedEvents: Number(researchData.counters?.blocked_events ?? 0),
             blockedReasons: (researchData.blocked_reasons ?? [])
               .map(entry => ({ reason: String(entry.reason ?? ''), count: Number(entry.count ?? 0) }))
-              .filter(entry => entry.reason.length > 0),
+              .filter(entry => entry.reason.length > 0 && Number.isInteger(entry.count) && entry.count >= 0),
             quarantinedInsights: Number(researchData.counters?.quarantined_insights ?? 0),
             expiredInsights: Number(researchData.counters?.expired_insights ?? 0),
           }
         } else {
           research = null
         }
+        researchResolved = true
       } else {
         researchStatus = 'error'
         research = null
+        researchResolved = true
       }
     } catch {
       // Preserve independent statuses where available; fail closed only for
