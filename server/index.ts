@@ -427,7 +427,16 @@ class AuthStore {
     for (let attempt = 0; ; attempt += 1) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8')
-        const parsed = JSON.parse(raw) as Partial<AuthStoreFile>
+        let parsed: Partial<AuthStoreFile>
+        try {
+          parsed = JSON.parse(raw) as Partial<AuthStoreFile>
+        } catch (error) {
+          if (this.isTransientJsonReadRace(error, raw) && attempt < 24) {
+            Atomics.wait(waitState, 0, 0, 10)
+            continue
+          }
+          throw error
+        }
         return {
           users: Array.isArray(parsed.users) ? parsed.users : [],
           sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
@@ -435,10 +444,53 @@ class AuthStore {
         }
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code
-        if ((code !== 'ENOENT' && !(error instanceof SyntaxError)) || attempt >= 24) throw error
+        if (code !== 'ENOENT' || attempt >= 24) throw error
         Atomics.wait(waitState, 0, 0, 10)
       }
     }
+  }
+
+  private isTransientJsonReadRace(error: unknown, raw: string): boolean {
+    if (!(error instanceof SyntaxError)) return false
+    const text = raw.trim()
+    if (text.length === 0) return true
+    if (!text.endsWith('}') && !text.endsWith(']')) return true
+
+    let objectDepth = 0
+    let arrayDepth = 0
+    let inString = false
+    let escaping = false
+    for (let i = 0; i < text.length; i += 1) {
+      const char = text[i]
+      if (inString) {
+        if (escaping) {
+          escaping = false
+          continue
+        }
+        if (char === '\\') {
+          escaping = true
+          continue
+        }
+        if (char === '"') inString = false
+        continue
+      }
+      if (char === '"') {
+        inString = true
+        continue
+      }
+      if (char === '{') objectDepth += 1
+      if (char === '}') {
+        objectDepth -= 1
+        if (objectDepth < 0) return false
+      }
+      if (char === '[') arrayDepth += 1
+      if (char === ']') {
+        arrayDepth -= 1
+        if (arrayDepth < 0) return false
+      }
+    }
+
+    return inString || objectDepth > 0 || arrayDepth > 0
   }
 
   private removeLockDir(lockDir: string): void {

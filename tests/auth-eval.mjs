@@ -101,16 +101,8 @@ section('Auth store initialization safety checks')
   })
   const [winner, contender] = await Promise.all([winnerPromise, contenderPromise])
 
-  const initializerResults = [winner, contender]
-  const successfulInitializers = initializerResults.filter(result => result.parsed?.ok === true).length
-  assert(successfulInitializers >= 1, 'one concurrent initializer publishes the auth store file')
-  const failedInitializerHadRaceError = initializerResults
-    .filter(result => result.parsed?.ok === false)
-    .every(result => result.parsed?.code === 'ENOENT' || result.parsed?.name === 'SyntaxError')
-  assert(
-    failedInitializerHadRaceError,
-    'contenders either load the published store or fail closed during read-race retries',
-  )
+  assert(winner.parsed?.ok === true, 'one concurrent initializer publishes the auth store file')
+  assert(contender.parsed?.ok === true, 'contender loads published store during fallback read-race handling')
 
   const raceRaw = fs.readFileSync(raceAuthFile, 'utf8')
   const raceParsed = JSON.parse(raceRaw)
