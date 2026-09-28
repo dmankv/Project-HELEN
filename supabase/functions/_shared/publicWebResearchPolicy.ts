@@ -201,6 +201,11 @@ function isSingleLabelHost(hostname: string): boolean {
   return hostname.split('.').length < 2
 }
 
+export function isIpLiteralHost(hostname: string): boolean {
+  const normalizedHost = hostname.toLowerCase()
+  return parseIPv4(normalizedHost) !== null || isIPv6Literal(normalizedHost)
+}
+
 export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
   const lowerHost = hostname.toLowerCase()
   const ipv4 = parseIPv4(lowerHost)
@@ -335,8 +340,7 @@ export function validatePublicWebUrl(
     }
   }
 
-  const ipLiteralDecision = classifyIpLiteral(hostname)
-  if (ipLiteralDecision.code !== 'blocked_ip_literal') {
+  if (isIpLiteralHost(hostname)) {
     return {
       allowed: false,
       code: 'blocked_ip_literal',

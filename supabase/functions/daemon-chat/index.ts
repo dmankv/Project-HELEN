@@ -35,6 +35,7 @@ import {
   classifyIpLiteral,
   deriveMinimalSearchTerms,
   isSupportedResearchContentType,
+  isIpLiteralHost,
   redactResearchAuditMetadata,
   robotsAllowsPath,
   sanitizeBoundedText,
@@ -511,8 +512,7 @@ async function resolveDnsRecords(hostname: string, timeoutMs: number): Promise<s
 
 async function ensurePublicDnsResolution(target: URL, timeoutMs: number): Promise<ResearchPolicyDecision> {
   const hostname = target.hostname.toLowerCase()
-  const ipLiteralDecision = classifyIpLiteral(hostname)
-  if (ipLiteralDecision.code !== 'blocked_ip_literal') {
+  if (isIpLiteralHost(hostname)) {
     return {
       allowed: false,
       code: 'blocked_ip_literal',
