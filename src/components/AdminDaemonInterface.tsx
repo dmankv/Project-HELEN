@@ -792,7 +792,7 @@ export default function AdminDaemonInterface({
             className="admin-daemon-diagnostics-panel"
           >
             <strong>Diagnostics</strong>
-            <p className="admin-daemon-diagnostics-note" aria-live="polite" aria-atomic="true">
+            <p className="admin-daemon-diagnostics-note">
               {diagnostics.evolution
                 ? `Evolution update: run ${diagnostics.evolution.runState}, stage ${diagnostics.evolution.stage}, canary ${diagnostics.evolution.canaryStatus}, rollback ${diagnostics.evolution.rollbackStatus}.`
                 : `Evolution status: ${diagnostics.evolutionStatus}.`}

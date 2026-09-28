@@ -224,7 +224,7 @@ describe('AdminDaemonInterface', () => {
     expect(diagnostics).not.toHaveAttribute('style')
     expect(diagnostics.querySelector('.admin-diagnostics-list')).not.toHaveAttribute('aria-live')
     expect(screen.getByText(/Evolution update: run idle, stage idle, canary not_started, rollback not_needed\./i))
-      .toHaveAttribute('aria-live', 'polite')
+      .not.toHaveAttribute('aria-live')
   })
 
   it('keeps admin identity labeling visible and accessible across sidebar and header', async () => {
