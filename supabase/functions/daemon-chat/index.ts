@@ -698,7 +698,25 @@ async function executePublicWebResearch(
       }
     }
     const minimalTerms = deriveMinimalSearchTerms(request.search_query)
-    const searchUrl = new URL(config.searchEndpoint)
+    let searchUrl: URL
+    try {
+      searchUrl = new URL(config.searchEndpoint)
+    } catch {
+      return {
+        request_type: 'public_web_research',
+        status: 'unavailable',
+        decision: {
+          allowed: false,
+          code: 'blocked_invalid_config',
+          reason: 'Search/discovery provider endpoint is invalid.',
+        },
+        provenance: null,
+        excerpt: null,
+        source_count: 0,
+        blocked_count: 1,
+        blocked_reasons: ['Search/discovery provider endpoint is invalid.'],
+      }
+    }
     searchUrl.searchParams.set('q', minimalTerms)
     targetUrl = searchUrl.toString()
     searchProviderOrigin = searchUrl.origin
@@ -809,12 +827,30 @@ async function executePublicWebResearch(
     ) {
       fetchHeaders['X-Research-Provider-Key'] = config.searchApiKey
     }
-    const response = await fetch(currentUrl, {
-      method: requestMethod,
-      redirect: 'manual',
-      headers: fetchHeaders,
-      signal: AbortSignal.timeout(Math.max(250, remainingRuntimeMs)),
-    })
+    let response: Response
+    try {
+      response = await fetch(currentUrl, {
+        method: requestMethod,
+        redirect: 'manual',
+        headers: fetchHeaders,
+        signal: AbortSignal.timeout(Math.max(250, remainingRuntimeMs)),
+      })
+    } catch {
+      return {
+        request_type: 'public_web_research',
+        status: 'error',
+        decision: {
+          allowed: false,
+          code: 'blocked_network',
+          reason: 'Public-web fetch failed due to network/runtime constraints.',
+        },
+        provenance: null,
+        excerpt: null,
+        source_count: sourceCount,
+        blocked_count: blockedReasons.length + 1,
+        blocked_reasons: [...blockedReasons, 'Public-web fetch failed due to network/runtime constraints.'],
+      }
+    }
 
     if (response.status >= 300 && response.status < 400) {
       const locationHeader = response.headers.get('location')
@@ -1248,7 +1284,25 @@ Deno.serve(async (req: Request) => {
       method: researchRequest.method ?? 'GET',
       store_insight: researchRequest.store_insight === true,
     })
-    const researchResult = await executePublicWebResearch(serviceClient, user.id, researchRequest)
+    let researchResult: PublicWebResearchResponse
+    try {
+      researchResult = await executePublicWebResearch(serviceClient, user.id, researchRequest)
+    } catch {
+      researchResult = {
+        request_type: 'public_web_research',
+        status: 'error',
+        decision: {
+          allowed: false,
+          code: 'blocked_budget_limit',
+          reason: 'Research request failed safely due to internal policy/runtime handling.',
+        },
+        provenance: null,
+        excerpt: null,
+        source_count: 0,
+        blocked_count: 1,
+        blocked_reasons: ['Research request failed safely due to internal policy/runtime handling.'],
+      }
+    }
     await appendResearchAuditEvent(serviceClient, user.id, 'research_result', {
       status: researchResult.status,
       policy_decision: researchResult.decision.code,
