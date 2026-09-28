@@ -114,7 +114,7 @@ $$;
 
 create table if not exists public.evolution_audit_events (
   event_id             uuid primary key default gen_random_uuid(),
-  run_id               uuid references public.evolution_runs(run_id) on delete cascade,
+  run_id               uuid references public.evolution_runs(run_id) on delete set null,
   user_id              uuid not null references auth.users(id) on delete cascade,
   event_type           text not null,
   message              text not null default '',
@@ -509,12 +509,20 @@ create trigger enforce_evolution_run_lifecycle_update
   for each row execute function public.enforce_evolution_run_lifecycle_update();
 
 drop trigger if exists prevent_evolution_run_delete on public.evolution_runs;
+create trigger prevent_evolution_run_delete
+  before delete on public.evolution_runs
+  for each row execute function public.prevent_evolution_run_mutation();
+
 drop trigger if exists prevent_evolution_gate_result_update on public.evolution_gate_results;
 create trigger prevent_evolution_gate_result_update
   before update on public.evolution_gate_results
   for each row execute function public.prevent_evolution_gate_result_mutation();
 
 drop trigger if exists prevent_evolution_gate_result_delete on public.evolution_gate_results;
+create trigger prevent_evolution_gate_result_delete
+  before delete on public.evolution_gate_results
+  for each row execute function public.prevent_evolution_gate_result_mutation();
+
 drop trigger if exists prevent_evolution_audit_owner_change on public.evolution_audit_events;
 
 create or replace function public.prevent_evolution_audit_mutation()
@@ -534,7 +542,9 @@ create trigger prevent_evolution_audit_update
   for each row execute function public.prevent_evolution_audit_mutation();
 
 drop trigger if exists prevent_evolution_audit_delete on public.evolution_audit_events;
-drop function if exists public.prevent_evolution_run_mutation();
+create trigger prevent_evolution_audit_delete
+  before delete on public.evolution_audit_events
+  for each row execute function public.prevent_evolution_audit_mutation();
 
 create or replace function public.redact_evolution_audit_metadata(value jsonb)
 returns jsonb
