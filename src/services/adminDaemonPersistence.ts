@@ -403,7 +403,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
       // any still-unknown diagnostics channel.
       if (!evolutionResolved && evolutionStatus === 'unavailable' && !evolution) evolutionStatus = 'error'
       if (!researchResolved && researchStatus === 'unavailable') researchStatus = 'error'
-    }
+      if (researchStatus === 'unavailable') researchStatus = 'error'
   }
 
   return {
