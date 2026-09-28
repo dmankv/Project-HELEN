@@ -398,7 +398,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
       // Preserve independent statuses where available; fail closed only for
       // any still-unknown diagnostics channel.
       if (evolutionStatus === 'unavailable' && !evolution) evolutionStatus = 'error'
-      if (researchStatus === 'unavailable' && !research) researchStatus = 'error'
+      if (researchStatus === 'unavailable') researchStatus = 'error'
     }
   }
 
