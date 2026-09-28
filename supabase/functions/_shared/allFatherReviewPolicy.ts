@@ -301,7 +301,6 @@ export function evaluateAllFatherReview(input: AllFatherReviewInput): AllFatherR
         lineNumber: addedLine.lineNumber ?? undefined,
         excerpt: pattern.redact ? redactExcerpt(addedLine.content.trim()) : addedLine.content.trim(),
       })
-      break
     }
   }
 

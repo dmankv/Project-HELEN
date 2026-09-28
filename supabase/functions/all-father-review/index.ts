@@ -239,12 +239,17 @@ Deno.serve(async (req: Request) => {
     })
 
   if (insertError) {
-    return jsonResponse({
-      code: 'AUDIT_WRITE_FAILED',
-      error: safeErrorMessage('AUDIT_WRITE_FAILED'),
-      decision: ALL_FATHER_DECISIONS.REQUIRES_HUMAN_REVIEW,
-      findings: [...result.findings, auditFailureFinding()],
-    }, 409, headers)
+    return jsonResponse(
+      {
+        ...result,
+        code: 'AUDIT_WRITE_FAILED',
+        error: safeErrorMessage('AUDIT_WRITE_FAILED'),
+        decision: ALL_FATHER_DECISIONS.REQUIRES_HUMAN_REVIEW,
+        findings: [...result.findings, auditFailureFinding()],
+      },
+      409,
+      headers,
+    )
   }
 
   const status = result.decision === ALL_FATHER_DECISIONS.APPROVED ? 200 : 409

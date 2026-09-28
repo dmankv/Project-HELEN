@@ -113,6 +113,47 @@ diff --git a/supabase/functions/_shared/allFatherReviewPolicy.ts b/supabase/func
     }))
   })
 
+  it('rejects sensitive data literals with redacted excerpts', () => {
+    const result = evaluateAllFatherReview({
+      targetBranch: 'main',
+      changedFiles: ['src/config.ts'],
+      diff: `
+diff --git a/src/config.ts b/src/config.ts
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -1 +1,2 @@
++const PRIVATE_KEY = '-----BEGIN PRIVATE KEY-----'
+`,
+      assurances: assured,
+    })
+
+    expect(result.decision).toBe(ALL_FATHER_DECISIONS.REJECTED)
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: 'sensitive_data_literal_added',
+      excerpt: "const PRIVATE_KEY = '[REDACTED_PRIVATE_KEY]'",
+    }))
+  })
+
+  it('records multiple finding codes for a single added line when patterns overlap', () => {
+    const result = evaluateAllFatherReview({
+      targetBranch: 'main',
+      changedFiles: ['.github/workflows/build.yml'],
+      diff: `
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -1 +1,2 @@
++permissions: write-all # API_KEY = "abcdefgh"
+`,
+      assurances: assured,
+    })
+
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'secret_literal_added' }),
+      expect.objectContaining({ code: 'privileged_control_plane_change_added' }),
+    ]))
+  })
+
   it('rejects added auth bypass markers', () => {
     const bypassMarker = ['allow', 'unauthenticated'].join('_')
     const result = evaluateAllFatherReview({
