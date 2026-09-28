@@ -404,6 +404,7 @@ export async function getAdminDiagnosticsStatus(): Promise<AdminDiagnosticsStatu
       if (!evolutionResolved && evolutionStatus === 'unavailable' && !evolution) evolutionStatus = 'error'
       if (!researchResolved && researchStatus === 'unavailable') researchStatus = 'error'
       if (researchStatus === 'unavailable') researchStatus = 'error'
+    }
   }
 
   return {
