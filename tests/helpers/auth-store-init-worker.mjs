@@ -7,7 +7,6 @@ if (!authDataFile) {
   process.exit(0)
 }
 
-const originalLinkSync = fs.linkSync
 const originalRenameSync = fs.renameSync
 const originalWriteFileSync = fs.writeFileSync
 
