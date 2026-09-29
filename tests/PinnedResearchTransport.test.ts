@@ -29,7 +29,7 @@ function fakeConnection(response: string, handshake: () => Promise<void> = async
   const connect = vi.fn(async () => connection)
   const startTls = vi.fn(async () => connection)
   ;(globalThis as Record<string, unknown>).Deno = { connect, startTls }
-  return { close, connect, startTls, written }
+  return { close, connect, connection, startTls, written }
 }
 
 describe('DNS-pinned research HTTPS transport', () => {
@@ -130,5 +130,20 @@ describe('DNS-pinned research HTTPS transport', () => {
       new URL('https://example.com'), '8.8.8.8', 'GET', 5, Date.now() - 1,
     )).rejects.toThrow('deadline')
     expect(fake.connect).not.toHaveBeenCalled()
+  })
+
+  it('closes the socket when the overall signal aborts', async () => {
+    let resolveRead: ((value: number | null) => void) | undefined
+    const fake = fakeConnection('')
+    fake.connection.read = vi.fn(() => new Promise<number | null>(resolve => { resolveRead = resolve }))
+    const controller = new AbortController()
+    const operation = fetchPinnedResearch(
+      new URL('https://example.com'), '8.8.8.8', 'GET', 5, Date.now() + 10_000, controller.signal,
+    )
+    await vi.waitFor(() => expect(fake.connection.read).toHaveBeenCalled())
+    controller.abort()
+    await expect(operation).rejects.toThrow('deadline')
+    expect(fake.close).toHaveBeenCalled()
+    resolveRead?.(null)
   })
 })
