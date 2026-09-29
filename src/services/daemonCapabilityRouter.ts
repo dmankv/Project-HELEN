@@ -52,6 +52,8 @@ export interface RoutingContext {
   privacyOptOut: boolean
   userPreference?: RoutingMode
   taskKeywords: string[]
+  /** Whether the current user message contains an explicit eligible HTTPS URL. */
+  hasExplicitResearchUrl?: boolean
 }
 
 /**
@@ -143,10 +145,18 @@ export function routeRequest(context: RoutingContext): RoutingDecision {
     return decide('local', 'unauthenticated', 'Answering locally — sign in to use cloud responses.', ['signed-in account'])
   }
 
-  // 3. Explicit user preference, where the capability actually exists.
+  // 3. Explicit local preference remains authoritative over autonomous research.
   if (context.userPreference === 'local') {
     return decide('local', 'user-preference', 'Answering with the local model, as you preferred.')
   }
+
+  // 4. The bounded research path can follow only a URL explicitly present in
+  //    this turn. Search discovery and arbitrary model-selected URLs stay off.
+  if (context.hasExplicitResearchUrl && cloudUsable(context)) {
+    return decide('research', 'current-information', 'Checking the explicit source for this turn.')
+  }
+
+  // 5. Explicit user preference, where the capability actually exists.
   if (context.userPreference === 'cloud') {
     return cloudUsable(context)
       ? decide('cloud', 'user-preference', 'Using cloud responses, as you preferred.')
@@ -156,7 +166,7 @@ export function routeRequest(context: RoutingContext): RoutingDecision {
     return unavailableCapability(context, context.userPreference)
   }
 
-  // 4. Capability-shaped requests. Neither capability is configured, so both
+  // 6. Capability-shaped requests. Search discovery and tools are not
   //    report honestly and fall back instead of pretending to have run.
   if (matchesKeyword(CURRENT_INFO_KEYWORDS, context.taskKeywords)) {
     if (!RESEARCH_CAPABILITY_ENABLED) {
@@ -171,14 +181,14 @@ export function routeRequest(context: RoutingContext): RoutingDecision {
     return decide('tool', 'calculation', 'Running a calculation.')
   }
 
-  // 5. Complex reasoning goes to the cloud when it is genuinely available.
+  // 7. Complex reasoning goes to the cloud when it is genuinely available.
   if (context.complexity === 'complex') {
     return cloudUsable(context)
       ? decide('cloud', 'complex-reasoning', 'Using cloud responses for this one.')
       : decide('local', 'capability-unavailable', 'Cloud responses are unavailable right now — answering locally.', ['cloud chat configured'])
   }
 
-  // 6. Everything else is simple enough to stay local.
+  // 8. Everything else is simple enough to stay local.
   return decide('local', 'simple-chat', 'Answering with the local model.')
 }
 

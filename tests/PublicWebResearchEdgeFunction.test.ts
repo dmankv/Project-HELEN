@@ -22,8 +22,8 @@ describe('public web research edge gateway source', () => {
   })
 
   it('uses a selected-IP pinned transport and fails closed for disabled mode or search discovery', () => {
-    expect(src).toContain('fetchPinnedResearch(url, address, fetchMethod')
-    expect(src).toContain('resolvePublicResearchAddress(url,')
+    expect(src).toContain('fetchPinnedResearch(')
+    expect(src).toContain('resolvePublicResearchAddress(url, deadline)')
     expect(src).toContain('fetchRobotsDecision(target, retrieve)')
     expect(src).toContain("evaluation_state: 'quarantined'")
     expect(src).toContain("promotion_state: 'blocked_pending_validation'")
@@ -86,6 +86,24 @@ describe('public web research edge gateway source', () => {
       )
       expect(result).toMatchObject({ decision: { code: 'blocked_publisher_restriction' } })
       expect(retrieve).not.toHaveBeenCalled()
+  })
+
+  it('uses one abortable deadline without a minimum DNS wait across retrieval and persistence', () => {
+    expect(src).toContain('const deadline = new ResearchDeadline(RESEARCH_REQUEST_TIMEOUT_MS)')
+    expect(src).not.toContain('Math.max(250')
+    expect(src).toContain('AbortSignal.any([deadline.signal, dnsTimeout])')
+    expect(src).toContain('deadline.run(crypto.subtle.digest')
+    expect(src).toContain('.abortSignal(deadline.signal)')
+    expect(src).toContain('executePublicWebResearch(serviceClient, user.id, researchRequest, deadline)')
+  })
+
+  it('fails research rate-limit storage errors closed before retrieval while chat remains intentional', () => {
+    expect(src).toContain('checkRateLimit(serviceClient, user.id, { failClosed: true, deadline })')
+    expect(src).toContain("jsonErrorResponse('RATE_LIMIT_UNAVAILABLE', 503")
+    expect(src.indexOf("jsonErrorResponse('RATE_LIMIT_UNAVAILABLE', 503"))
+      .toBeLessThan(src.indexOf('executePublicWebResearch(serviceClient, user.id, researchRequest, deadline)'))
+    expect(src).toContain('const { allowed, remaining } = await checkRateLimit(serviceClient, user.id)')
+    expect(src).toContain('options.failClosed')
   })
 
   it('maps research failure catch paths to fixed safe reasons', () => {

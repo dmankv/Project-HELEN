@@ -27,6 +27,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchPinnedResearch } from '../_shared/pinnedResearchTransport.ts'
+import { ResearchDeadline } from '../_shared/researchDeadline.ts'
 import {
   DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE,
   DEFAULT_EXTERNAL_INSIGHT_TTL_MS,
@@ -133,6 +134,7 @@ type SafeErrorCode =
   | 'AUTH_REQUIRED'
   | 'INVALID_TOKEN'
   | 'RATE_LIMITED'
+  | 'RATE_LIMIT_UNAVAILABLE'
   | 'FUNCTION_CONFIG_ERROR'
   | 'PROVIDER_UNAVAILABLE'
   | 'BAD_REQUEST'
@@ -268,6 +270,8 @@ function safeErrorMessage(code: SafeErrorCode): string {
       return 'Invalid or expired token.'
     case 'RATE_LIMITED':
       return 'Rate limit exceeded.'
+    case 'RATE_LIMIT_UNAVAILABLE':
+      return 'Request capacity check is temporarily unavailable.'
     case 'FUNCTION_CONFIG_ERROR':
       return 'Cloud chat is temporarily unavailable.'
     case 'PROVIDER_UNAVAILABLE':
@@ -307,23 +311,40 @@ function logDiagnostic(event: string, metadata: Record<string, string | number |
 async function checkRateLimit(
   serviceClient: ReturnType<typeof createClient>,
   userId: string,
-): Promise<{ allowed: boolean; remaining: number }> {
-  const { data, error } = await serviceClient.rpc('increment_rate_limit', {
+  options: { failClosed?: boolean; deadline?: ResearchDeadline } = {},
+): Promise<{ allowed: boolean; remaining: number; unavailable: boolean }> {
+  let request = serviceClient.rpc('increment_rate_limit', {
     p_user_id: userId,
     p_window_ms: RATE_LIMIT_WINDOW_MS,
     p_max_count: RATE_LIMIT_MAX,
   })
+  if (options.deadline) request = request.abortSignal(options.deadline.signal)
 
-  if (error) {
+  try {
+    const { data, error } = options.deadline
+      ? await options.deadline.run(request)
+      : await request
+    if (!error) {
+      const row = Array.isArray(data) ? data[0] : data
+      if (
+        row &&
+        typeof row === 'object' &&
+        typeof row.allowed === 'boolean' &&
+        typeof row.remaining === 'number' &&
+        Number.isFinite(row.remaining)
+      ) {
+        return { allowed: row.allowed, remaining: row.remaining, unavailable: false }
+      }
+      logDiagnostic('rate_limit_rpc_invalid_response', { userId })
+    }
     logDiagnostic('rate_limit_rpc_failed', { userId })
-    // Fail open on RPC errors to avoid blocking all users on DB hiccup
-    return { allowed: true, remaining: RATE_LIMIT_MAX }
+  } catch {
+    logDiagnostic('rate_limit_rpc_failed', { userId })
   }
 
-  const row = Array.isArray(data) ? data[0] : data
-  const allowed = Boolean(row?.allowed ?? true)
-  const remaining = Number(row?.remaining ?? RATE_LIMIT_MAX)
-  return { allowed, remaining }
+  return options.failClosed
+    ? { allowed: false, remaining: 0, unavailable: true }
+    : { allowed: true, remaining: RATE_LIMIT_MAX, unavailable: true }
 }
 
 // ---------------------------------------------------------------------------
@@ -497,25 +518,28 @@ function normalizeResolvedIps(data: unknown): string[] {
     .filter(Boolean)
 }
 
-async function resolveDnsRecords(hostname: string, timeoutMs: number): Promise<string[]> {
-  const boundedTimeout = Math.max(250, Math.min(timeoutMs, 3_000))
+async function resolveDnsRecords(hostname: string, deadline: ResearchDeadline): Promise<string[]> {
+  const boundedTimeout = deadline.remaining(3_000)
+  const dnsTimeout = AbortSignal.timeout(boundedTimeout)
+  const signal = AbortSignal.any([deadline.signal, dnsTimeout])
   const [aResp, aaaaResp] = await Promise.all([
     fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`, {
       method: 'GET',
-      signal: AbortSignal.timeout(boundedTimeout),
+      signal,
     }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
     fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=AAAA`, {
       method: 'GET',
-      signal: AbortSignal.timeout(boundedTimeout),
+      signal,
     }).then(async res => (res.ok ? normalizeResolvedIps(await res.json()) : [])).catch(() => []),
   ])
+  deadline.remaining()
   return [...aResp, ...aaaaResp]
 }
 
-async function resolvePublicResearchAddress(target: URL, timeoutMs: number): Promise<string> {
+async function resolvePublicResearchAddress(target: URL, deadline: ResearchDeadline): Promise<string> {
   const hostname = target.hostname.toLowerCase()
   if (isIpLiteralHost(hostname)) throw new Error('Research IP literal refused')
-  const resolvedIps = await resolveDnsRecords(hostname, timeoutMs)
+  const resolvedIps = await resolveDnsRecords(hostname, deadline)
   if (resolvedIps.length === 0) throw new Error('Research DNS resolution unavailable')
   for (const ip of resolvedIps) {
     const decision = classifyIpLiteral(ip)
@@ -577,12 +601,15 @@ async function appendResearchAuditEvent(
   userId: string,
   eventType: 'research_policy' | 'research_request' | 'research_result' | 'research_insight',
   metadata: Record<string, string | number | boolean | null>,
+  deadline?: ResearchDeadline,
 ): Promise<void> {
-  const { error } = await serviceClient.from('research_audit_events').insert({
+  let request = serviceClient.from('research_audit_events').insert({
     user_id: userId,
     event_type: eventType,
     metadata: redactResearchAuditMetadata(metadata),
   })
+  if (deadline) request = request.abortSignal(deadline.signal)
+  const { error } = deadline ? await deadline.run(request) : await request
   if (error) throw new ResearchPersistenceError(`Research audit persistence failed for ${eventType}.`)
 }
 
@@ -590,6 +617,7 @@ async function executePublicWebResearch(
   serviceClient: ReturnType<typeof createClient>,
   userId: string,
   request: ResearchRequest,
+  deadline: ResearchDeadline,
 ): Promise<PublicWebResearchResponse> {
   const config = parseResearchConfig()
   if (config.mode !== 'configured') {
@@ -619,18 +647,25 @@ async function executePublicWebResearch(
   })
   if (!category.allowed) return blocked(category)
   const budgets = IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS
-  const deadline = Date.now() + RESEARCH_REQUEST_TIMEOUT_MS
   let requests = 0
   let bytes = 0
   const initialTarget = new URL(request.url)
   const retrieve = async (url: URL, fetchMethod: 'GET' | 'HEAD') => {
     const policy = validatePublicWebUrl(url.toString(), fetchMethod)
     if (!policy.allowed) throw new Error('Research target refused')
-    if (++requests > budgets.maxRequestsPerRun || Date.now() >= deadline) {
+    if (++requests > budgets.maxRequestsPerRun) {
       throw new Error('Research request budget exceeded')
     }
-    const address = await resolvePublicResearchAddress(url, Math.min(3_000, deadline - Date.now()))
-    const result = await fetchPinnedResearch(url, address, fetchMethod, Math.min(budgets.maxResponseBytes, budgets.maxBytesPerRun - bytes), deadline)
+    deadline.remaining()
+    const address = await resolvePublicResearchAddress(url, deadline)
+    const result = await fetchPinnedResearch(
+      url,
+      address,
+      fetchMethod,
+      Math.min(budgets.maxResponseBytes, budgets.maxBytesPerRun - bytes),
+      deadline.deadline,
+      deadline.signal,
+    )
     bytes += result.body.length
     return result
   }
@@ -656,27 +691,27 @@ async function executePublicWebResearch(
       httpStatus: result.status,
       contentType: contentType.split(';')[0],
       byteSize: result.body.length,
-      contentHash: toHexDigest(await crypto.subtle.digest('SHA-256', result.body)),
+      contentHash: toHexDigest(await deadline.run(crypto.subtle.digest('SHA-256', result.body))),
       policyDecision: 'allowed_public_source',
       sanitizedExcerpt: excerpt,
     }
-    const { error: provenanceError } = await serviceClient.from('research_fetch_provenance').insert({
+    const { error: provenanceError } = await deadline.run(serviceClient.from('research_fetch_provenance').insert({
       user_id: userId, normalized_url: provenance.normalizedUrl, host: provenance.host,
       fetched_at: provenance.fetchedAt, http_status: provenance.httpStatus,
       content_type: provenance.contentType, content_size_bytes: provenance.byteSize,
       content_hash: provenance.contentHash, policy_decision: provenance.policyDecision,
       sanitized_excerpt: excerpt,
-    })
+    }).abortSignal(deadline.signal))
     if (provenanceError) throw new ResearchPersistenceError('Research provenance persistence failed.')
     if (request.store_insight && method === 'GET' && excerpt) {
-      const { error: insightError } = await serviceClient.from('unverified_external_insights').insert({
+      const { error: insightError } = await deadline.run(serviceClient.from('unverified_external_insights').insert({
         user_id: userId, normalized_url: provenance.normalizedUrl, host: provenance.host,
         source_timestamp: provenance.fetchedAt, source_hash: provenance.contentHash,
         excerpt, confidence: DEFAULT_EXTERNAL_INSIGHT_CONFIDENCE,
         expires_at: new Date(Date.now() + DEFAULT_EXTERNAL_INSIGHT_TTL_MS).toISOString(),
         policy_decision: 'allowed_public_source', evaluation_state: 'quarantined',
         promotion_state: 'blocked_pending_validation',
-      })
+      }).abortSignal(deadline.signal))
       if (insightError) throw new ResearchPersistenceError('Research insight persistence failed.')
     }
     return {
@@ -832,15 +867,8 @@ Deno.serve(async (req: Request) => {
     return jsonErrorResponse('INVALID_TOKEN', 401, headers)
   }
 
-  // ── Rate limit ───────────────────────────────────────────────────────────
+  // ── Schema and request type ──────────────────────────────────────────────
   const serviceClient = createClient(supabaseUrl, serviceRoleKey)
-  const { allowed, remaining } = await checkRateLimit(serviceClient, user.id)
-  if (!allowed) {
-    logDiagnostic('rate_limited', { userId: user.id })
-    return jsonErrorResponse('RATE_LIMITED', 429, headers, { 'X-RateLimit-Remaining': '0' })
-  }
-
-  // ── Schema validation ────────────────────────────────────────────────────
   let body: unknown
   try {
     body = await req.json()
@@ -849,61 +877,83 @@ Deno.serve(async (req: Request) => {
   }
 
   if (isPublicWebResearchRequest(body)) {
-    const validatedResearch = validateResearchRequest(body)
-    if (!validatedResearch.valid || !validatedResearch.request) {
-      return jsonErrorResponse('BAD_REQUEST', 400, headers)
-    }
-    const researchRequest = validatedResearch.request
-    let researchResult: PublicWebResearchResponse
+    const deadline = new ResearchDeadline(RESEARCH_REQUEST_TIMEOUT_MS)
     try {
-      await appendResearchAuditEvent(serviceClient, user.id, 'research_policy', {
-        request_type: 'public_web_research',
-        has_url: typeof researchRequest.url === 'string',
-        has_search_query: typeof researchRequest.search_query === 'string',
-        method: researchRequest.method ?? 'GET',
-        store_insight: researchRequest.store_insight === true,
-      })
-      researchResult = await executePublicWebResearch(serviceClient, user.id, researchRequest)
-      await appendResearchAuditEvent(serviceClient, user.id, 'research_result', {
-        status: researchResult.status,
-        policy_decision: researchResult.decision.code,
-        reason: researchResult.decision.reason,
-        source_count: researchResult.source_count,
-        blocked_count: researchResult.blocked_count,
-        url: researchResult.provenance?.normalizedUrl ?? null,
-        host: researchResult.provenance?.host ?? null,
-        http_status: researchResult.provenance?.httpStatus ?? null,
-        content_type: researchResult.provenance?.contentType ?? null,
-        content_size_bytes: researchResult.provenance?.byteSize ?? null,
-      })
-    } catch (error) {
-      researchResult = {
-        request_type: 'public_web_research',
-        status: 'error',
-        decision: {
-          allowed: false,
-          code: error instanceof ResearchPersistenceError
-            ? 'blocked_persistence_failure'
-            : 'blocked_invalid_config',
-          reason: error instanceof ResearchPersistenceError
-            ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
-            : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
-        },
-        provenance: null,
-        excerpt: null,
-        source_count: 0,
-        blocked_count: 1,
-        blocked_reasons: [
-          error instanceof ResearchPersistenceError
-            ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
-            : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
-        ],
+      const rateLimit = await checkRateLimit(serviceClient, user.id, { failClosed: true, deadline })
+      if (rateLimit.unavailable) {
+        return jsonErrorResponse('RATE_LIMIT_UNAVAILABLE', 503, headers, { 'X-RateLimit-Remaining': '0' })
       }
+      if (!rateLimit.allowed) {
+        logDiagnostic('rate_limited', { userId: user.id })
+        return jsonErrorResponse('RATE_LIMITED', 429, headers, { 'X-RateLimit-Remaining': '0' })
+      }
+
+      const validatedResearch = validateResearchRequest(body)
+      if (!validatedResearch.valid || !validatedResearch.request) {
+        return jsonErrorResponse('BAD_REQUEST', 400, headers)
+      }
+      const researchRequest = validatedResearch.request
+      let researchResult: PublicWebResearchResponse
+      try {
+        await appendResearchAuditEvent(serviceClient, user.id, 'research_policy', {
+          request_type: 'public_web_research',
+          has_url: typeof researchRequest.url === 'string',
+          has_search_query: typeof researchRequest.search_query === 'string',
+          method: researchRequest.method ?? 'GET',
+          store_insight: researchRequest.store_insight === true,
+        }, deadline)
+        researchResult = await executePublicWebResearch(serviceClient, user.id, researchRequest, deadline)
+        await appendResearchAuditEvent(serviceClient, user.id, 'research_result', {
+          status: researchResult.status,
+          policy_decision: researchResult.decision.code,
+          reason: researchResult.decision.reason,
+          source_count: researchResult.source_count,
+          blocked_count: researchResult.blocked_count,
+          url: researchResult.provenance?.normalizedUrl ?? null,
+          host: researchResult.provenance?.host ?? null,
+          http_status: researchResult.provenance?.httpStatus ?? null,
+          content_type: researchResult.provenance?.contentType ?? null,
+          content_size_bytes: researchResult.provenance?.byteSize ?? null,
+        }, deadline)
+      } catch (error) {
+        researchResult = {
+          request_type: 'public_web_research',
+          status: 'error',
+          decision: {
+            allowed: false,
+            code: error instanceof ResearchPersistenceError
+              ? 'blocked_persistence_failure'
+              : 'blocked_invalid_config',
+            reason: error instanceof ResearchPersistenceError
+              ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
+              : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
+          },
+          provenance: null,
+          excerpt: null,
+          source_count: 0,
+          blocked_count: 1,
+          blocked_reasons: [
+            error instanceof ResearchPersistenceError
+              ? SAFE_RESEARCH_PERSISTENCE_FAILURE_REASON
+              : SAFE_RESEARCH_RUNTIME_FAILURE_REASON,
+          ],
+        }
+      }
+      return new Response(
+        JSON.stringify(researchResult),
+        { status: 200, headers: { ...headers, 'X-RateLimit-Remaining': String(rateLimit.remaining) } },
+      )
+    } finally {
+      deadline.dispose()
     }
-    return new Response(
-      JSON.stringify(researchResult),
-      { status: 200, headers: { ...headers, 'X-RateLimit-Remaining': String(remaining) } },
-    )
+  }
+
+  // Normal chat intentionally remains fail-open if durable rate-limit storage
+  // is temporarily unavailable.
+  const { allowed, remaining } = await checkRateLimit(serviceClient, user.id)
+  if (!allowed) {
+    logDiagnostic('rate_limited', { userId: user.id })
+    return jsonErrorResponse('RATE_LIMITED', 429, headers, { 'X-RateLimit-Remaining': '0' })
   }
 
   const validation = validateMessages(body)

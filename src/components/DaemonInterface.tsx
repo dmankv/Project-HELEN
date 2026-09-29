@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   detectMood,
   detectIntent,
+  formatExternalResearchNotice,
   generateHumanLikeResponse,
 } from '../services/daemonResponseBrain'
 import type { MemorySnippet, ResponseIntent } from '../services/daemonResponseBrain'
@@ -9,6 +10,7 @@ import { selectStrategy, attributeFeedback } from '../services/daemonResponsePol
 import type { ResponseStrategy } from '../services/daemonResponsePolicy'
 import { retrieveRelevantMemories } from '../services/daemonMemoryRetrieval'
 import { routeRequest, classifyComplexity, extractTaskKeywords } from '../services/daemonCapabilityRouter'
+import { buildResearchIntent, findExplicitResearchUrl } from '../services/daemonCognitiveLoop'
 import { getAdaptiveProfile } from '../services/daemonAdaptiveProfile'
 import learningSystem from '../services/daemon_learning_integration'
 import {
@@ -558,6 +560,18 @@ export default function DaemonInterface({
 
       const researchCommand = parseResearchCommand(text)
       if (researchCommand) {
+        if (researchCommand.searchQuery) {
+          const aiMsg: Message = {
+            id: nextId(),
+            role: 'assistant',
+            content: 'Search-query discovery is not available. No browsing was performed; provide an explicit public HTTPS URL instead.',
+            timestamp: new Date().toISOString(),
+          }
+          persistConversationMessages(convId, [...nextMessages, aiMsg])
+          abortRef.current = null
+          setIsThinking(false)
+          return
+        }
         if (!hasEdgeFunction()) {
           const aiMsg: Message = {
             id: nextId(),
@@ -646,17 +660,44 @@ export default function DaemonInterface({
       const mood = detectMood(text)
       const intent = detectIntent(text, lastIntent)
       const complexity = classifyComplexity(text, intent)
+      const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false
+      const explicitResearchUrl = findExplicitResearchUrl(text)
       const routing = routeRequest({
         intent,
         mood,
         complexity,
         isAuthenticated: Boolean(currentUser),
-        isOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
+        isOnline,
         cloudAvailable: hasEdgeFunction() || hasBackend(),
         privacyOptOut: false,
         taskKeywords: extractTaskKeywords(text),
+        hasExplicitResearchUrl: explicitResearchUrl !== null,
       })
+      const researchIntent = buildResearchIntent(text, routing.mode)
       const selection = selectStrategy(intent, mood, adaptiveProfile, personalityPrefs)
+      let autonomousResearchNotice: string | null = null
+
+      if (routing.mode === 'research') {
+        if (!researchIntent.shouldRequest || !researchIntent.eligibleExplicitUrl) {
+          autonomousResearchNotice = 'No browsing occurred because this turn did not include an eligible explicit public HTTPS URL.'
+        } else if (!currentUser || !isOnline || !hasEdgeFunction()) {
+          autonomousResearchNotice = 'No browsing occurred because authenticated online public-web research is unavailable.'
+        } else {
+          const result = await requestPublicWebResearch({
+            url: researchIntent.eligibleExplicitUrl,
+            method: 'GET',
+            storeInsight: false,
+          }, controller.signal)
+          if (controller.signal.aborted) {
+            setIsThinking(false)
+            abortRef.current = null
+            return
+          }
+          autonomousResearchNotice = isEdgeChatFailure(result)
+            ? 'No browsing result is available because public-web research was unavailable.'
+            : formatExternalResearchNotice(result)
+        }
+      }
 
       // 1. Supabase Edge Function (authenticated, rate-limited, no browser API keys)
       // Project logs can only be attached once after an explicit user selection.
@@ -689,7 +730,7 @@ export default function DaemonInterface({
           const aiMsg: Message = {
             id: nextId(),
             role: 'assistant',
-            content: edgeResult,
+            content: autonomousResearchNotice ? `${edgeResult}\n\n${autonomousResearchNotice}` : edgeResult,
             timestamp: new Date().toISOString(),
           }
           msgToStrategyRef.current.set(aiMsg.id, { strategy: selection.strategy, contextKey: selection.contextKey })
@@ -743,7 +784,7 @@ export default function DaemonInterface({
           const aiMsg: Message = {
             id: nextId(),
             role: 'assistant',
-            content: backendResult,
+            content: autonomousResearchNotice ? `${backendResult}\n\n${autonomousResearchNotice}` : backendResult,
             timestamp: new Date().toISOString(),
           }
           const updated = [...nextMessages, aiMsg]
@@ -807,7 +848,7 @@ export default function DaemonInterface({
       const aiMsg: Message = {
         id: nextId(),
         role: 'assistant',
-        content: response,
+        content: autonomousResearchNotice ? `${response}\n\n${autonomousResearchNotice}` : response,
         timestamp: new Date().toISOString(),
       }
       const fallbackText = cloudFailureForFallback

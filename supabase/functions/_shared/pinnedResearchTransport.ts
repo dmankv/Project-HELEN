@@ -21,12 +21,20 @@ export async function fetchPinnedResearch(
   method: 'GET' | 'HEAD',
   maxBytes: number,
   deadline: number,
+  signal?: AbortSignal,
 ): Promise<PinnedResearchResult> {
   let connection: Connection | undefined
+  const closeConnection = () => {
+    const current = connection
+    connection = undefined
+    current?.close()
+  }
+  signal?.addEventListener('abort', closeConnection)
   const timed = async <T>(work: Promise<T>): Promise<T> => {
     const remaining = deadline - Date.now()
-    if (remaining <= 0) throw new Error('Research deadline exceeded')
+    if (remaining <= 0 || signal?.aborted) throw new Error('Research deadline exceeded')
     let timer: ReturnType<typeof setTimeout> | undefined
+    let removeAbortListener = () => {}
     try {
       return await Promise.race([
         work,
@@ -36,23 +44,29 @@ export async function fetchPinnedResearch(
             reject(new Error('Research deadline exceeded'))
           }, remaining)
         }),
+        new Promise<never>((_, reject) => {
+          const onAbort = () => reject(new Error('Research deadline exceeded'))
+          signal?.addEventListener('abort', onAbort, { once: true })
+          removeAbortListener = () => signal?.removeEventListener('abort', onAbort)
+        }),
       ])
     } finally {
       if (timer) clearTimeout(timer)
+      removeAbortListener()
     }
   }
 
   try {
-    if (Date.now() >= deadline) throw new Error('Research deadline exceeded')
+    if (Date.now() >= deadline || signal?.aborted) throw new Error('Research deadline exceeded')
     connection = await timed(Deno.connect({ hostname: address, port: 443 }).then(conn => {
-      if (Date.now() >= deadline) {
+      if (Date.now() >= deadline || signal?.aborted) {
         conn.close()
         throw new Error('Research deadline exceeded')
       }
       return conn
     }))
     const tls = await timed(Deno.startTls(connection, { hostname: url.hostname }).then(conn => {
-      if (Date.now() >= deadline) {
+      if (Date.now() >= deadline || signal?.aborted) {
         conn.close()
         throw new Error('Research deadline exceeded')
       }
@@ -190,6 +204,7 @@ export async function fetchPinnedResearch(
     }
     return { status, headers, body }
   } finally {
-    connection?.close()
+    signal?.removeEventListener('abort', closeConnection)
+    closeConnection()
   }
 }

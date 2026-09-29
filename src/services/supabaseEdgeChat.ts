@@ -38,6 +38,7 @@ export type SafeEdgeFunctionErrorCode =
   | 'AUTH_REQUIRED'
   | 'INVALID_TOKEN'
   | 'RATE_LIMITED'
+  | 'RATE_LIMIT_UNAVAILABLE'
   | 'FUNCTION_CONFIG_ERROR'
   | 'PROVIDER_UNAVAILABLE'
   | 'BAD_REQUEST'
@@ -54,6 +55,7 @@ const SAFE_EDGE_FUNCTION_ERROR_CODES = new Set<SafeEdgeFunctionErrorCode>([
   'AUTH_REQUIRED',
   'INVALID_TOKEN',
   'RATE_LIMITED',
+  'RATE_LIMIT_UNAVAILABLE',
   'FUNCTION_CONFIG_ERROR',
   'PROVIDER_UNAVAILABLE',
   'BAD_REQUEST',
@@ -317,7 +319,7 @@ export async function requestPublicWebResearch(
           ...(request.url ? { url: request.url } : {}),
           ...(request.searchQuery ? { search_query: request.searchQuery } : {}),
           ...(request.method ? { method: request.method } : {}),
-          ...(request.storeInsight ? { store_insight: true } : {}),
+          store_insight: request.storeInsight === true,
         },
       }),
       signal: controller.signal,
