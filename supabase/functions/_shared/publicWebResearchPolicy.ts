@@ -25,6 +25,60 @@ export interface ResearchPolicyDecision {
   reason: string
 }
 
+export interface ResearchGatewayResponse {
+  status: number
+  headers: Map<string, string>
+  body: Uint8Array
+}
+
+export async function runPublicWebResearchGateway(
+  initialUrl: URL,
+  method: 'GET' | 'HEAD',
+  maxRedirects: number,
+  retrieve: (url: URL, method: 'GET' | 'HEAD') => Promise<ResearchGatewayResponse>,
+  checkRobots: (url: URL) => Promise<{ decision: ResearchPolicyDecision; bytes: number }>,
+): Promise<{ target: URL; response: ResearchGatewayResponse } | { decision: ResearchPolicyDecision }> {
+  let target = initialUrl
+  for (let redirects = 0; redirects <= maxRedirects; redirects++) {
+    const decision = validatePublicWebUrl(target.toString(), method)
+    if (!decision.allowed) return { decision }
+    const robots = await checkRobots(target)
+    if (!robots.decision.allowed) return { decision: robots.decision }
+    const response = await retrieve(target, method)
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location')
+      if (!location || redirects === maxRedirects) {
+        return {
+          decision: {
+            allowed: false,
+            code: 'blocked_budget_limit',
+            reason: 'Research redirect budget exceeded.',
+          },
+        }
+      }
+      target = new URL(location, target)
+      continue
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return {
+        decision: {
+          allowed: false,
+          code: 'blocked_network',
+          reason: 'Research source did not return a successful response.',
+        },
+      }
+    }
+    return { target, response }
+  }
+  return {
+    decision: {
+      allowed: false,
+      code: 'blocked_budget_limit',
+      reason: 'Research redirect budget exceeded.',
+    },
+  }
+}
+
 export interface PublicWebResearchBudgets {
   maxRequestsPerRun: number
   maxBytesPerRun: number
@@ -37,7 +91,7 @@ export interface PublicWebResearchBudgets {
 }
 
 export const IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS: Readonly<PublicWebResearchBudgets> = Object.freeze({
-  maxRequestsPerRun: 4,
+  maxRequestsPerRun: 8,
   maxBytesPerRun: 1_500_000,
   maxResponseBytes: 350_000,
   maxRuntimeMs: 12_000,
@@ -268,6 +322,7 @@ export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
       || (ipv6Segments[0] & 0xffc0) === 0xfe80
       || (ipv6Segments[0] & 0xff00) === 0xff00
       || (ipv6Segments[0] & 0xe000) !== 0x2000
+      || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] < 0x0200)
       || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] === 0x0db8)
       || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] === 0x0002 && ipv6Segments[2] === 0)
     ) {
@@ -322,6 +377,13 @@ export function validatePublicWebUrl(
       reason: 'Only HTTPS URLs are permitted.',
     }
   }
+  if (parsed.username || parsed.password) {
+    return {
+      allowed: false,
+      code: 'blocked_host',
+      reason: 'Research URLs must not contain credentials.',
+    }
+  }
 
   const port = parsed.port || '443'
   if (!ALLOWED_PORTS.has(port)) {
@@ -333,6 +395,13 @@ export function validatePublicWebUrl(
   }
 
   const hostname = parsed.hostname.toLowerCase()
+  if (hostname.endsWith('.')) {
+    return {
+      allowed: false,
+      code: 'blocked_host',
+      reason: 'Trailing-dot hostnames are not allowed.',
+    }
+  }
   if (BLOCKED_LITERAL_HOSTS.has(hostname)) {
     return {
       allowed: false,
@@ -424,9 +493,14 @@ function normalizeRobotsUserAgent(userAgent: string): string {
 }
 
 export function robotsAllowsPath(robotsTxt: string, targetPath: string, userAgent = '*'): boolean {
+  const normalizePath = (value: string) => value.replace(/%([0-9a-f]{2})/gi, (encoded, hex: string) => {
+    const character = String.fromCharCode(Number.parseInt(hex, 16))
+    return /[a-z0-9\-._~]/i.test(character) ? character : encoded
+  }).replace(/%([0-9a-f]{2})/gi, (_, hex: string) => `%${hex.toUpperCase()}`)
+  const normalizedPath = normalizePath(targetPath)
   const lines = robotsTxt
     .split(/\r?\n/)
-    .map(line => line.trim())
+    .map(line => line.split('#', 1)[0].trim())
     .filter(line => line.length > 0 && !line.startsWith('#'))
   const groups: Array<{
     userAgents: string[]
@@ -481,7 +555,19 @@ export function robotsAllowsPath(robotsTxt: string, targetPath: string, userAgen
     }))
     .flatMap(group => group.rules)
 
-  const matchingRules = applicableRules.filter(rule => targetPath.startsWith(rule.path))
+  const matchingRules = applicableRules.filter(rule => {
+    const anchored = rule.path.endsWith('$')
+    const pattern = normalizePath(anchored ? rule.path.slice(0, -1) : rule.path)
+    const segments = pattern.split('*')
+    if (!normalizedPath.startsWith(segments[0])) return false
+    let cursor = segments[0].length
+    for (const segment of segments.slice(1)) {
+      const index = normalizedPath.indexOf(segment, cursor)
+      if (index < 0) return false
+      cursor = index + segment.length
+    }
+    return !anchored || pattern.endsWith('*') || normalizedPath.endsWith(segments[segments.length - 1])
+  })
   if (matchingRules.length === 0) return true
   matchingRules.sort((a, b) => {
     if (b.path.length !== a.path.length) return b.path.length - a.path.length

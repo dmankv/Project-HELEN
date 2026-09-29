@@ -1,7 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { buildResearchUnavailableResponse } from '../supabase/functions/_shared/publicWebResearchPolicy'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  buildResearchUnavailableResponse,
+  runPublicWebResearchGateway,
+} from '../supabase/functions/_shared/publicWebResearchPolicy'
 
 const daemonChatPath = path.resolve(process.cwd(), 'supabase/functions/daemon-chat/index.ts')
 const migrationPath = path.resolve(
@@ -18,10 +21,15 @@ describe('public web research edge gateway source', () => {
     expect(src).toContain('executePublicWebResearch(')
   })
 
-  it('reuses the shared fail-closed unavailable response helper for the current transport gate', () => {
+  it('uses a selected-IP pinned transport and fails closed for disabled mode or search discovery', () => {
+    expect(src).toContain('fetchPinnedResearch(url, address, fetchMethod')
+    expect(src).toContain('resolvePublicResearchAddress(url,')
+    expect(src).toContain('fetchRobotsDecision(target, retrieve)')
+    expect(src).toContain("evaluation_state: 'quarantined'")
+    expect(src).toContain("promotion_state: 'blocked_pending_validation'")
     const response = buildResearchUnavailableResponse(
-      'Research DNS-pinned transport is not implemented; gateway remains fail-closed.',
-      'Research DNS-pinned transport is not implemented.',
+      'Research search discovery is not configured with a vetted pinned adapter.',
+      'Research search discovery is unavailable.',
     )
     expect(response).toMatchObject({
       request_type: 'public_web_research',
@@ -34,8 +42,50 @@ describe('public web research edge gateway source', () => {
       excerpt: null,
       source_count: 0,
       blocked_count: 1,
-      blocked_reasons: ['Research DNS-pinned transport is not implemented.'],
+      blocked_reasons: ['Research search discovery is unavailable.'],
     })
+
+  })
+
+  it('revalidates robots and redirects before allowing retrieval', async () => {
+      const calls: string[] = []
+      const result = await runPublicWebResearchGateway(
+        new URL('https://example.com/start'),
+        'GET',
+        2,
+        async url => {
+          calls.push(url.toString())
+          return {
+            status: 302,
+            headers: new Map([['location', 'https://other.example/final']]),
+            body: new Uint8Array(),
+          }
+        },
+        async url => ({
+          decision: url.hostname === 'other.example'
+            ? { allowed: false, code: 'blocked_publisher_restriction', reason: 'robots denied' }
+            : { allowed: true, code: 'allowed_public_source', reason: 'robots allowed' },
+          bytes: 0,
+        }),
+      )
+      expect(result).toMatchObject({ decision: { code: 'blocked_publisher_restriction' } })
+      expect(calls).toEqual(['https://example.com/start'])
+    })
+
+  it('blocks a robots verification failure without calling the source', async () => {
+      const retrieve = vi.fn()
+      const result = await runPublicWebResearchGateway(
+        new URL('https://example.com/private'),
+        'GET',
+        2,
+        retrieve,
+        async () => ({
+          decision: { allowed: false, code: 'blocked_publisher_restriction', reason: 'robots unavailable' },
+          bytes: 0,
+        }),
+      )
+      expect(result).toMatchObject({ decision: { code: 'blocked_publisher_restriction' } })
+      expect(retrieve).not.toHaveBeenCalled()
   })
 
   it('maps research failure catch paths to fixed safe reasons', () => {

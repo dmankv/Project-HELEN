@@ -28,6 +28,8 @@ describe('public web research policy', () => {
     expect(validatePublicWebUrl('https://127.0.0.1', 'GET').code).toBe('blocked_ip_literal')
     expect(validatePublicWebUrl('https://192.168.1.2', 'GET').code).toBe('blocked_ip_literal')
     expect(validatePublicWebUrl('https://example.com:8443', 'GET').code).toBe('blocked_port')
+    expect(validatePublicWebUrl('https://user@example.com', 'GET').allowed).toBe(false)
+    expect(validatePublicWebUrl('https://example.local./', 'GET').allowed).toBe(false)
   })
 
   it('allows public https hostnames with standard port', () => {
@@ -121,6 +123,29 @@ describe('public web research policy', () => {
     expect(robotsAllowsPath(robots, '/anything', 'OtherBot/1.0')).toBe(true)
   })
 
+  it('respects wildcard and end-anchored robots rules with inline comments', () => {
+    const robots = `
+      User-agent: *
+      Disallow: /*.pdf$ # PDFs are excluded
+      Allow: /public/*.pdf$
+    `
+    expect(robotsAllowsPath(robots, '/private/report.pdf')).toBe(false)
+    expect(robotsAllowsPath(robots, '/public/report.pdf')).toBe(true)
+    expect(robotsAllowsPath(robots, '/private/report.pdf/preview')).toBe(true)
+  })
+
+  it('normalizes percent-encoded unreserved path characters for robots matching', () => {
+    const robots = 'User-agent: *\nDisallow: /admin\nDisallow: /%70rivate'
+    expect(robotsAllowsPath(robots, '/%61dmin')).toBe(false)
+    expect(robotsAllowsPath(robots, '/private')).toBe(false)
+    expect(robotsAllowsPath(robots, '/public')).toBe(true)
+  })
+
+  it('canonicalizes retained percent-encoded octets for robots matching', () => {
+    const robots = 'User-agent: *\nDisallow: /private%2Ffile'
+    expect(robotsAllowsPath(robots, '/private%2ffile')).toBe(false)
+  })
+
   it('supports only bounded text-like content types', () => {
     expect(isSupportedResearchContentType('text/html; charset=utf-8')).toBe(true)
     expect(isSupportedResearchContentType('application/json')).toBe(true)
@@ -152,6 +177,8 @@ describe('public web research policy', () => {
   it('keeps immutable research budgets bounded and positive', () => {
     expect(IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRequestsPerRun).toBeGreaterThan(0)
     expect(IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRedirects).toBeLessThanOrEqual(5)
+    expect(IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRequestsPerRun)
+      .toBeGreaterThanOrEqual(2 * (IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxRedirects + 1))
     expect(IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS.maxResponseBytes).toBeLessThanOrEqual(500_000)
   })
 })
