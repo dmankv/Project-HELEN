@@ -326,9 +326,16 @@ async function checkRateLimit(
       : await request
     if (!error) {
       const row = Array.isArray(data) ? data[0] : data
-      const allowed = Boolean(row?.allowed ?? true)
-      const remaining = Number(row?.remaining ?? RATE_LIMIT_MAX)
-      return { allowed, remaining, unavailable: false }
+      if (
+        row &&
+        typeof row === 'object' &&
+        typeof row.allowed === 'boolean' &&
+        typeof row.remaining === 'number' &&
+        Number.isFinite(row.remaining)
+      ) {
+        return { allowed: row.allowed, remaining: row.remaining, unavailable: false }
+      }
+      logDiagnostic('rate_limit_rpc_invalid_response', { userId })
     }
     logDiagnostic('rate_limit_rpc_failed', { userId })
   } catch {

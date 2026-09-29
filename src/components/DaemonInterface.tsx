@@ -694,7 +694,7 @@ export default function DaemonInterface({
             return
           }
           autonomousResearchNotice = isEdgeChatFailure(result)
-            ? 'No browsing occurred because public-web research was unavailable.'
+            ? 'No browsing result is available because public-web research was unavailable.'
             : formatExternalResearchNotice(result)
         }
       }

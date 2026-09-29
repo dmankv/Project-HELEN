@@ -9,18 +9,19 @@ export interface ResearchIntentMetadata {
 }
 
 export function findExplicitResearchUrl(currentUserMessage: string): string | null {
-  const match = currentUserMessage.match(/https:\/\/[^\s<>"'`]+/i)
-  if (!match) return null
-  const candidate = match[0].replace(/[),.;!?]+$/, '')
-  if (candidate.length > 2_048) return null
-  try {
-    const url = new URL(candidate)
-    if (url.protocol !== 'https:' || url.username || url.password || !url.hostname) return null
-    if (url.port && url.port !== '443') return null
-    return url.toString()
-  } catch {
-    return null
+  for (const match of currentUserMessage.matchAll(/https:\/\/[^\s<>"'`]+/gi)) {
+    const candidate = match[0].replace(/[),.;!?]+$/, '')
+    if (candidate.length > 2_048) continue
+    try {
+      const url = new URL(candidate)
+      if (url.protocol !== 'https:' || url.username || url.password || !url.hostname) continue
+      if (url.port && url.port !== '443') continue
+      return url.toString()
+    } catch {
+      continue
+    }
   }
+  return null
 }
 
 export function buildResearchIntent(
