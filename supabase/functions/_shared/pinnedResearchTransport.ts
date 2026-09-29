@@ -43,6 +43,7 @@ export async function fetchPinnedResearch(
   }
 
   try {
+    if (Date.now() >= deadline) throw new Error('Research deadline exceeded')
     connection = await timed(Deno.connect({ hostname: address, port: 443 }).then(conn => {
       if (Date.now() >= deadline) {
         conn.close()
@@ -61,7 +62,7 @@ export async function fetchPinnedResearch(
     await timed(tls.handshake())
     const path = `${url.pathname || '/'}${url.search}`
     const request = new TextEncoder().encode(
-      `${method} ${path} HTTP/1.1\r\nHost: ${url.hostname}\r\nUser-Agent: DaemonResearchBot/1.0\r\nAccept: text/plain, text/html, application/json, application/xml\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n`,
+      `${method} ${path} HTTP/1.1\r\nHost: ${url.hostname}\r\nUser-Agent: DaemonResearchBot/1.0 (+https://dmankv.github.io/Project-HELEN)\r\nAccept: text/plain, text/html, application/json, application/xml\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n`,
     )
     for (let offset = 0; offset < request.length;) {
       const written = await timed(tls.write(request.subarray(offset)))
@@ -117,6 +118,7 @@ export async function fetchPinnedResearch(
       const match = /^([!#$%&'*+.^_`|~\w-]+):[ \t]*([^\r\n]*)$/.exec(entry)
       if (!match) throw new Error('Invalid research HTTP header')
       const key = match[1].toLowerCase()
+      if (key === 'set-cookie') continue
       if (headers.has(key)) throw new Error('Duplicate research HTTP header')
       headers.set(key, match[2].trim())
     }

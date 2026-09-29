@@ -18,10 +18,15 @@ describe('public web research edge gateway source', () => {
     expect(src).toContain('executePublicWebResearch(')
   })
 
-  it('reuses the shared fail-closed unavailable response helper for the current transport gate', () => {
+  it('uses a selected-IP pinned transport and fails closed for disabled mode or search discovery', () => {
+    expect(src).toContain('fetchPinnedResearch(url, address, fetchMethod')
+    expect(src).toContain('resolvePublicResearchAddress(url,')
+    expect(src).toContain('fetchRobotsDecision(target, retrieve)')
+    expect(src).toContain("evaluation_state: 'quarantined'")
+    expect(src).toContain("promotion_state: 'blocked_pending_validation'")
     const response = buildResearchUnavailableResponse(
-      'Research DNS-pinned transport is not implemented; gateway remains fail-closed.',
-      'Research DNS-pinned transport is not implemented.',
+      'Research search discovery is not configured with a vetted pinned adapter.',
+      'Research search discovery is unavailable.',
     )
     expect(response).toMatchObject({
       request_type: 'public_web_research',
@@ -34,7 +39,7 @@ describe('public web research edge gateway source', () => {
       excerpt: null,
       source_count: 0,
       blocked_count: 1,
-      blocked_reasons: ['Research DNS-pinned transport is not implemented.'],
+      blocked_reasons: ['Research search discovery is unavailable.'],
     })
   })
 

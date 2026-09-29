@@ -37,7 +37,7 @@ export interface PublicWebResearchBudgets {
 }
 
 export const IMMUTABLE_PUBLIC_WEB_RESEARCH_BUDGETS: Readonly<PublicWebResearchBudgets> = Object.freeze({
-  maxRequestsPerRun: 4,
+  maxRequestsPerRun: 8,
   maxBytesPerRun: 1_500_000,
   maxResponseBytes: 350_000,
   maxRuntimeMs: 12_000,
@@ -439,9 +439,14 @@ function normalizeRobotsUserAgent(userAgent: string): string {
 }
 
 export function robotsAllowsPath(robotsTxt: string, targetPath: string, userAgent = '*'): boolean {
+  const normalizePath = (value: string) => value.replace(/%([0-9a-f]{2})/gi, (encoded, hex: string) => {
+    const character = String.fromCharCode(Number.parseInt(hex, 16))
+    return /[a-z0-9\-._~]/i.test(character) ? character : encoded
+  })
+  const normalizedPath = normalizePath(targetPath)
   const lines = robotsTxt
     .split(/\r?\n/)
-    .map(line => line.trim())
+    .map(line => line.split('#', 1)[0].trim())
     .filter(line => line.length > 0 && !line.startsWith('#'))
   const groups: Array<{
     userAgents: string[]
@@ -496,7 +501,19 @@ export function robotsAllowsPath(robotsTxt: string, targetPath: string, userAgen
     }))
     .flatMap(group => group.rules)
 
-  const matchingRules = applicableRules.filter(rule => targetPath.startsWith(rule.path))
+  const matchingRules = applicableRules.filter(rule => {
+    const anchored = rule.path.endsWith('$')
+    const pattern = normalizePath(anchored ? rule.path.slice(0, -1) : rule.path)
+    const segments = pattern.split('*')
+    if (!normalizedPath.startsWith(segments[0])) return false
+    let cursor = segments[0].length
+    for (const segment of segments.slice(1)) {
+      const index = normalizedPath.indexOf(segment, cursor)
+      if (index < 0) return false
+      cursor = index + segment.length
+    }
+    return !anchored || pattern.endsWith('*') || normalizedPath.endsWith(segments[segments.length - 1])
+  })
   if (matchingRules.length === 0) return true
   matchingRules.sort((a, b) => {
     if (b.path.length !== a.path.length) return b.path.length - a.path.length
