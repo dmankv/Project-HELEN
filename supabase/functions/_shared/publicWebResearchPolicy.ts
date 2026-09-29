@@ -268,6 +268,7 @@ export function classifyIpLiteral(hostname: string): ResearchPolicyDecision {
       || (ipv6Segments[0] & 0xffc0) === 0xfe80
       || (ipv6Segments[0] & 0xff00) === 0xff00
       || (ipv6Segments[0] & 0xe000) !== 0x2000
+      || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] < 0x0200)
       || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] === 0x0db8)
       || (ipv6Segments[0] === 0x2001 && ipv6Segments[1] === 0x0002 && ipv6Segments[2] === 0)
     ) {
@@ -322,6 +323,13 @@ export function validatePublicWebUrl(
       reason: 'Only HTTPS URLs are permitted.',
     }
   }
+  if (parsed.username || parsed.password) {
+    return {
+      allowed: false,
+      code: 'blocked_host',
+      reason: 'Research URLs must not contain credentials.',
+    }
+  }
 
   const port = parsed.port || '443'
   if (!ALLOWED_PORTS.has(port)) {
@@ -333,6 +341,13 @@ export function validatePublicWebUrl(
   }
 
   const hostname = parsed.hostname.toLowerCase()
+  if (hostname.endsWith('.')) {
+    return {
+      allowed: false,
+      code: 'blocked_host',
+      reason: 'Trailing-dot hostnames are not allowed.',
+    }
+  }
   if (BLOCKED_LITERAL_HOSTS.has(hostname)) {
     return {
       allowed: false,

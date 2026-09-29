@@ -43,8 +43,20 @@ export async function fetchPinnedResearch(
   }
 
   try {
-    connection = await timed(Deno.connect({ hostname: address, port: 443 }))
-    const tls = await timed(Deno.startTls(connection, { hostname: url.hostname }))
+    connection = await timed(Deno.connect({ hostname: address, port: 443 }).then(conn => {
+      if (Date.now() >= deadline) {
+        conn.close()
+        throw new Error('Research deadline exceeded')
+      }
+      return conn
+    }))
+    const tls = await timed(Deno.startTls(connection, { hostname: url.hostname }).then(conn => {
+      if (Date.now() >= deadline) {
+        conn.close()
+        throw new Error('Research deadline exceeded')
+      }
+      return conn
+    }))
     connection = tls
     await timed(tls.handshake())
     const path = `${url.pathname || '/'}${url.search}`
@@ -70,7 +82,7 @@ export async function fetchPinnedResearch(
       pending = next
     }
     const take = async (size: number, countBody = true): Promise<Uint8Array> => {
-      if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes - total) {
+      if (!Number.isSafeInteger(size) || size < 0 || (countBody && size > maxBytes - total)) {
         throw new Error('Research response exceeds budget')
       }
       while (pending.length < size) await readMore()
