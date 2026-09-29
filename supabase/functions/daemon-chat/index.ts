@@ -39,6 +39,7 @@ import {
   isIpLiteralHost,
   redactResearchAuditMetadata,
   robotsAllowsPath,
+  runPublicWebResearchGateway,
   sanitizeBoundedText,
   type ResearchPolicyDecision,
   type ResearchPolicyDecisionCode,
@@ -621,7 +622,7 @@ async function executePublicWebResearch(
   const deadline = Date.now() + RESEARCH_REQUEST_TIMEOUT_MS
   let requests = 0
   let bytes = 0
-  let target = new URL(request.url)
+  const initialTarget = new URL(request.url)
   const retrieve = async (url: URL, fetchMethod: 'GET' | 'HEAD') => {
     const policy = validatePublicWebUrl(url.toString(), fetchMethod)
     if (!policy.allowed) throw new Error('Research target refused')
@@ -633,23 +634,15 @@ async function executePublicWebResearch(
     bytes += result.body.length
     return result
   }
-  for (let redirects = 0; redirects <= budgets.maxRedirects; redirects++) {
-    const decision = validatePublicWebUrl(target.toString(), method)
-    if (!decision.allowed) return blocked(decision)
-    const robots = await fetchRobotsDecision(target, retrieve)
-    if (!robots.decision.allowed) return blocked(robots.decision)
-    const result = await retrieve(target, method)
-    if (result.status >= 300 && result.status < 400) {
-      const location = result.headers.get('location')
-      if (!location || redirects === budgets.maxRedirects) {
-        return blocked({ allowed: false, code: 'blocked_budget_limit', reason: 'Research redirect budget exceeded.' })
-      }
-      target = new URL(location, target)
-      continue
-    }
-    if (result.status < 200 || result.status >= 300) {
-      return blocked({ allowed: false, code: 'blocked_network', reason: 'Research source did not return a successful response.' })
-    }
+  const gateway = await runPublicWebResearchGateway(
+    initialTarget,
+    method,
+    budgets.maxRedirects,
+    retrieve,
+    target => fetchRobotsDecision(target, retrieve),
+  )
+  if ('decision' in gateway) return blocked(gateway.decision)
+  const { target, response: result } = gateway
     const contentType = result.headers.get('content-type') ?? ''
     if (!isSupportedResearchContentType(contentType)) {
       return blocked({ allowed: false, code: 'blocked_unsupported_content_type', reason: 'Unsupported research content type.' })

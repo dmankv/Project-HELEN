@@ -141,6 +141,11 @@ describe('public web research policy', () => {
     expect(robotsAllowsPath(robots, '/public')).toBe(true)
   })
 
+  it('canonicalizes retained percent-encoded octets for robots matching', () => {
+    const robots = 'User-agent: *\nDisallow: /private%2Ffile'
+    expect(robotsAllowsPath(robots, '/private%2ffile')).toBe(false)
+  })
+
   it('supports only bounded text-like content types', () => {
     expect(isSupportedResearchContentType('text/html; charset=utf-8')).toBe(true)
     expect(isSupportedResearchContentType('application/json')).toBe(true)

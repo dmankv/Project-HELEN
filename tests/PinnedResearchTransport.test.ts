@@ -54,6 +54,27 @@ describe('DNS-pinned research HTTPS transport', () => {
     expect(result.body.length).toBe(5)
   })
 
+  it('consumes informational responses before the final response', async () => {
+    fakeConnection(
+      'HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n'
+      + 'HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello',
+    )
+    const result = await fetchPinnedResearch(
+      new URL('https://example.com'), '8.8.8.8', 'GET', 5, Date.now() + 1000,
+    )
+    expect(result.status).toBe(200)
+    expect(new TextDecoder().decode(result.body)).toBe('hello')
+  })
+
+  it('bounds chunk framing independently from decoded body bytes', async () => {
+    const extensions = 'x'.repeat(14_000)
+    const chunks = Array.from({ length: 5 }, () => `1;${extensions}\r\na\r\n`).join('')
+    fakeConnection(`HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n${chunks}0\r\n\r\n`)
+    await expect(fetchPinnedResearch(
+      new URL('https://example.com'), '8.8.8.8', 'GET', 5, Date.now() + 1000,
+    )).rejects.toThrow('framing')
+  })
+
   it('rejects oversized and ambiguous responses', async () => {
     fakeConnection('HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nexcess')
     await expect(fetchPinnedResearch(

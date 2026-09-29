@@ -104,23 +104,29 @@ export async function fetchPinnedResearch(
         await readMore()
       }
     }
-    const statusLine = await line()
-    const statusMatch = /^HTTP\/1\.[01] ([1-5]\d\d)(?: |$)/.exec(statusLine)
-    if (!statusMatch || Number(statusMatch[1]) === 101) throw new Error('Invalid research HTTP status')
-    const status = Number(statusMatch[1])
-    const headers = new Map<string, string>()
-    let headerBytes = statusLine.length
+    let status: number
+    let headers: Map<string, string>
     while (true) {
-      const entry = await line()
-      headerBytes += entry.length + 2
-      if (headerBytes > 16_384) throw new Error('Research response headers too large')
-      if (!entry) break
-      const match = /^([!#$%&'*+.^_`|~\w-]+):[ \t]*([^\r\n]*)$/.exec(entry)
-      if (!match) throw new Error('Invalid research HTTP header')
-      const key = match[1].toLowerCase()
-      if (key === 'set-cookie') continue
-      if (headers.has(key)) throw new Error('Duplicate research HTTP header')
-      headers.set(key, match[2].trim())
+      const statusLine = await line()
+      const statusMatch = /^HTTP\/1\.[01] ([1-5]\d\d)(?: |$)/.exec(statusLine)
+      if (!statusMatch) throw new Error('Invalid research HTTP status')
+      status = Number(statusMatch[1])
+      if (status === 101) throw new Error('Invalid research HTTP status')
+      headers = new Map<string, string>()
+      let headerBytes = statusLine.length
+      while (true) {
+        const entry = await line()
+        headerBytes += entry.length + 2
+        if (headerBytes > 16_384) throw new Error('Research response headers too large')
+        if (!entry) break
+        const match = /^([!#$%&'*+.^_`|~\w-]+):[ \t]*([^\r\n]*)$/.exec(entry)
+        if (!match) throw new Error('Invalid research HTTP header')
+        const key = match[1].toLowerCase()
+        if (key === 'set-cookie') continue
+        if (headers.has(key)) throw new Error('Duplicate research HTTP header')
+        headers.set(key, match[2].trim())
+      }
+      if (status >= 200) break
     }
     if (headers.has('content-encoding') && headers.get('content-encoding') !== 'identity') {
       throw new Error('Encoded research response refused')
@@ -135,8 +141,14 @@ export async function fetchPinnedResearch(
     }
     const chunks: Uint8Array[] = []
     if (transferEncoding) {
+      let framingBytes = 0
+      let chunkCount = 0
       while (true) {
         const sizeLine = await line()
+        framingBytes += sizeLine.length + 2
+        if (framingBytes > 65_536 || ++chunkCount > 1_024) {
+          throw new Error('Research chunk framing exceeds budget')
+        }
         const match = /^([0-9a-fA-F]+)(?:;[^\r\n]*)?$/.exec(sizeLine)
         if (!match) throw new Error('Invalid research chunk')
         const size = Number.parseInt(match[1], 16)
@@ -145,12 +157,15 @@ export async function fetchPinnedResearch(
           let trailer: string
           while ((trailer = await line())) {
             trailers += trailer.length + 2
-            if (trailers > 16_384) throw new Error('Research trailers too large')
+            framingBytes += trailer.length + 2
+            if (trailers > 16_384 || framingBytes > 65_536) throw new Error('Research trailers too large')
           }
           break
         }
         chunks.push(await take(size))
         const end = await take(2, false)
+        framingBytes += 2
+        if (framingBytes > 65_536) throw new Error('Research chunk framing exceeds budget')
         if (end[0] !== 13 || end[1] !== 10) throw new Error('Invalid research chunk terminator')
       }
     } else if (contentLength !== undefined) {

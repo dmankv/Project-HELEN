@@ -1,7 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { buildResearchUnavailableResponse } from '../supabase/functions/_shared/publicWebResearchPolicy'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  buildResearchUnavailableResponse,
+  runPublicWebResearchGateway,
+} from '../supabase/functions/_shared/publicWebResearchPolicy'
 
 const daemonChatPath = path.resolve(process.cwd(), 'supabase/functions/daemon-chat/index.ts')
 const migrationPath = path.resolve(
@@ -41,6 +44,48 @@ describe('public web research edge gateway source', () => {
       blocked_count: 1,
       blocked_reasons: ['Research search discovery is unavailable.'],
     })
+
+  })
+
+  it('revalidates robots and redirects before allowing retrieval', async () => {
+      const calls: string[] = []
+      const result = await runPublicWebResearchGateway(
+        new URL('https://example.com/start'),
+        'GET',
+        2,
+        async url => {
+          calls.push(url.toString())
+          return {
+            status: 302,
+            headers: new Map([['location', 'https://other.example/final']]),
+            body: new Uint8Array(),
+          }
+        },
+        async url => ({
+          decision: url.hostname === 'other.example'
+            ? { allowed: false, code: 'blocked_publisher_restriction', reason: 'robots denied' }
+            : { allowed: true, code: 'allowed_public_source', reason: 'robots allowed' },
+          bytes: 0,
+        }),
+      )
+      expect(result).toMatchObject({ decision: { code: 'blocked_publisher_restriction' } })
+      expect(calls).toEqual(['https://example.com/start'])
+    })
+
+  it('blocks a robots verification failure without calling the source', async () => {
+      const retrieve = vi.fn()
+      const result = await runPublicWebResearchGateway(
+        new URL('https://example.com/private'),
+        'GET',
+        2,
+        retrieve,
+        async () => ({
+          decision: { allowed: false, code: 'blocked_publisher_restriction', reason: 'robots unavailable' },
+          bytes: 0,
+        }),
+      )
+      expect(result).toMatchObject({ decision: { code: 'blocked_publisher_restriction' } })
+      expect(retrieve).not.toHaveBeenCalled()
   })
 
   it('maps research failure catch paths to fixed safe reasons', () => {

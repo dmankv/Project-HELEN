@@ -25,6 +25,60 @@ export interface ResearchPolicyDecision {
   reason: string
 }
 
+export interface ResearchGatewayResponse {
+  status: number
+  headers: Map<string, string>
+  body: Uint8Array
+}
+
+export async function runPublicWebResearchGateway(
+  initialUrl: URL,
+  method: 'GET' | 'HEAD',
+  maxRedirects: number,
+  retrieve: (url: URL, method: 'GET' | 'HEAD') => Promise<ResearchGatewayResponse>,
+  checkRobots: (url: URL) => Promise<{ decision: ResearchPolicyDecision; bytes: number }>,
+): Promise<{ target: URL; response: ResearchGatewayResponse } | { decision: ResearchPolicyDecision }> {
+  let target = initialUrl
+  for (let redirects = 0; redirects <= maxRedirects; redirects++) {
+    const decision = validatePublicWebUrl(target.toString(), method)
+    if (!decision.allowed) return { decision }
+    const robots = await checkRobots(target)
+    if (!robots.decision.allowed) return { decision: robots.decision }
+    const response = await retrieve(target, method)
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location')
+      if (!location || redirects === maxRedirects) {
+        return {
+          decision: {
+            allowed: false,
+            code: 'blocked_budget_limit',
+            reason: 'Research redirect budget exceeded.',
+          },
+        }
+      }
+      target = new URL(location, target)
+      continue
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return {
+        decision: {
+          allowed: false,
+          code: 'blocked_network',
+          reason: 'Research source did not return a successful response.',
+        },
+      }
+    }
+    return { target, response }
+  }
+  return {
+    decision: {
+      allowed: false,
+      code: 'blocked_budget_limit',
+      reason: 'Research redirect budget exceeded.',
+    },
+  }
+}
+
 export interface PublicWebResearchBudgets {
   maxRequestsPerRun: number
   maxBytesPerRun: number
@@ -442,7 +496,7 @@ export function robotsAllowsPath(robotsTxt: string, targetPath: string, userAgen
   const normalizePath = (value: string) => value.replace(/%([0-9a-f]{2})/gi, (encoded, hex: string) => {
     const character = String.fromCharCode(Number.parseInt(hex, 16))
     return /[a-z0-9\-._~]/i.test(character) ? character : encoded
-  })
+  }).replace(/%([0-9a-f]{2})/gi, (_, hex: string) => `%${hex.toUpperCase()}`)
   const normalizedPath = normalizePath(targetPath)
   const lines = robotsTxt
     .split(/\r?\n/)
