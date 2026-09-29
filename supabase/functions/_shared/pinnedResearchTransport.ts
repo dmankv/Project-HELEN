@@ -24,7 +24,11 @@ export async function fetchPinnedResearch(
   signal?: AbortSignal,
 ): Promise<PinnedResearchResult> {
   let connection: Connection | undefined
-  const closeConnection = () => connection?.close()
+  const closeConnection = () => {
+    const current = connection
+    connection = undefined
+    current?.close()
+  }
   signal?.addEventListener('abort', closeConnection)
   const timed = async <T>(work: Promise<T>): Promise<T> => {
     const remaining = deadline - Date.now()
@@ -201,6 +205,6 @@ export async function fetchPinnedResearch(
     return { status, headers, body }
   } finally {
     signal?.removeEventListener('abort', closeConnection)
-    connection?.close()
+    closeConnection()
   }
 }
